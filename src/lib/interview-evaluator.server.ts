@@ -322,12 +322,27 @@ function missingFacts(input: EvaluateInput, text: string): MissingFact[] {
   return missingFactsFor(input, text, latest, firstMissingBeforeThisAnswer);
 }
 
+function firstMissingBeforeCurrentReply(input: EvaluateInput): string | undefined {
+  const priorText = (input.priorAnswer ?? "").trim();
+  return priorText ? missingFactsFor(input, priorText)[0]?.id : undefined;
+}
+
+function withCapturedFactMarker(value: string, input: EvaluateInput, missing: MissingFact[]): string {
+  const target = firstMissingBeforeCurrentReply(input);
+  const latest = input.transcript.trim();
+  if (!target || !latest || missing.some((fact) => fact.id === target) || hasCapturedFact(value, target)) {
+    return value;
+  }
+  return [value.trim(), `Captured ${target}: ${latest}`].filter(Boolean).join("\n");
+}
+
 export async function evaluateAnswer(input: EvaluateInput): Promise<EvaluateResult> {
   const combinedText = [input.priorAnswer, input.transcript].filter(Boolean).join(" ").trim();
   const hardMissing = missingFacts(input, combinedText);
+  const fallbackCleanedValue = withCapturedFactMarker(combinedText, input, hardMissing);
   const fallback: EvaluateResult = {
     complete: hardMissing.length === 0,
-    cleanedValue: combinedText,
+    cleanedValue: fallbackCleanedValue,
     followup: hardMissing[0]?.followup(input.firstName),
   };
 
@@ -378,9 +393,10 @@ Remember: if a fact is still missing, ask only the first specific missing fact. 
     const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const content = json.choices?.[0]?.message?.content ?? "{}";
     const parsed = JSON.parse(content) as Partial<EvaluateResult>;
-    const cleanedValue = (parsed.cleanedValue ?? fallback.cleanedValue).trim();
-    const missingAfterAi = missingFacts(input, [combinedText, cleanedValue].filter(Boolean).join(" "));
+    const aiCleanedValue = (parsed.cleanedValue ?? fallback.cleanedValue).trim();
+    const missingAfterAi = missingFacts(input, [fallback.cleanedValue, aiCleanedValue].filter(Boolean).join(" "));
     const complete = missingAfterAi.length === 0;
+    const cleanedValue = withCapturedFactMarker([fallback.cleanedValue, aiCleanedValue].filter(Boolean).join("\n"), input, missingAfterAi);
     return {
       complete,
       cleanedValue,
