@@ -92,6 +92,9 @@ export const Route = createFileRoute("/api/interview-step")({
         // Save customer transcript (first call sends empty transcript to get first question)
         let cleanedValue: string | null = null;
         let acknowledgement = "";
+        let followupPrompt = "";
+        let stayOnSameQuestion = false;
+        let nextFollowupCount = 0;
 
         if (body.transcript.trim() && currentQ) {
           await supabase.from("interview_messages").insert({
@@ -101,11 +104,10 @@ export const Route = createFileRoute("/api/interview-step")({
             section,
           });
 
-          // Deterministic, fast path: store the transcript directly and pick a quick ack.
-          // Skipping the per-answer LLM cleanup removes ~1-2s of latency between answers.
           const rawValue = body.transcript.trim().replace(/\s+/g, " ");
-          let value = rawValue;
+
           if (currentQ.key === "dependants_details") {
+            // Deterministic loop for children: accumulate until expected count or "that's it".
             const { data: existingDetail } = await supabase
               .from("interview_answers")
               .select("value")
@@ -117,17 +119,47 @@ export const Route = createFileRoute("/api/interview-step")({
               .replace(/\b(that'?s\s+(it|all|everyone)|all\s+done|no\s+more|finished)\b/gi, "")
               .replace(/^[\s,.;-]+|[\s,.;-]+$/g, "")
               .trim();
-            value = [existingDetail?.value ?? "", newDetail].filter(Boolean).join("; ") || existingDetail?.value || rawValue;
+            cleanedValue = [existingDetail?.value ?? "", newDetail].filter(Boolean).join("; ") || existingDetail?.value || rawValue;
+            acknowledgement = pickAck();
+          } else if (currentQ.expects) {
+            // AI-driven evaluation: ask follow-ups when the answer is incomplete.
+            const { evaluateAnswer, MAX_FOLLOWUPS } = await import("@/lib/interview-evaluator.server");
+            const { data: existing } = await supabase
+              .from("interview_answers")
+              .select("value")
+              .eq("session_id", body.sessionId)
+              .eq("section", section)
+              .eq("field_key", currentQ.key)
+              .maybeSingle();
+            const priorAnswer = existing?.value ?? "";
+            const currentFollowupCount = session.followup_count ?? 0;
+            const result = await evaluateAnswer({
+              fieldLabel: currentQ.label,
+              expects: currentQ.expects,
+              prompt: currentQ.prompt,
+              transcript: rawValue,
+              priorAnswer,
+              followupCount: currentFollowupCount,
+            });
+            cleanedValue = result.cleanedValue || rawValue;
+            acknowledgement = result.acknowledgement || pickAck();
+            if (!result.complete && result.followup && currentFollowupCount < MAX_FOLLOWUPS) {
+              stayOnSameQuestion = true;
+              followupPrompt = result.followup;
+              nextFollowupCount = currentFollowupCount + 1;
+            }
+          } else {
+            cleanedValue = rawValue;
+            acknowledgement = pickAck();
           }
-          acknowledgement = pickAck();
-          cleanedValue = value;
+
           const { error: answerErr } = await supabase.from("interview_answers").upsert(
             {
               session_id: body.sessionId,
               section,
               field_key: currentQ.key,
               field_label: currentQ.label,
-              value,
+              value: cleanedValue,
               updated_at: new Date().toISOString(),
             },
             { onConflict: "session_id,section,field_key" },
@@ -137,9 +169,6 @@ export const Route = createFileRoute("/api/interview-step")({
             return new Response("Could not save answer", { status: 500 });
           }
         }
-
-
-
 
         // Build current answers map (including the value we just saved) so skip logic is up-to-date
         const { data: answerRows } = await supabase
@@ -154,10 +183,15 @@ export const Route = createFileRoute("/api/interview-step")({
           answersMap[`${section}:${currentQ.key}`] = cleanedValue;
         }
 
-        // Determine next question (advance)
+        // Determine next question (advance), or stay for AI follow-up / dependants loop
         const isFirst = !body.transcript.trim() && index === 0 && section === "personal";
         let step = isFirst ? { section, index } : nextStep(section, index, answersMap);
-        let followupPrompt = "";
+
+        if (stayOnSameQuestion) {
+          step = { section, index };
+          acknowledgement = "";
+        }
+
         if (body.transcript.trim() && currentQ?.key === "dependants_details" && !isFinishedChildren(body.transcript)) {
           const expectedChildren = parseSmallNumber(answersMap["personal:dependants_count"]);
           const detailsSoFar = answersMap["personal:dependants_details"] ?? cleanedValue ?? "";
@@ -170,6 +204,7 @@ export const Route = createFileRoute("/api/interview-step")({
               : "Thank you — please tell me the next child's name and age, or say \"that's it\" if there aren't any more.";
           }
         }
+
 
         if (!step) {
           // Interview complete — generate a written summary for the advisor
