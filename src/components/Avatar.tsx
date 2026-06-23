@@ -27,13 +27,38 @@ export function Avatar({ speaking, listening, size = 220 }: { speaking?: boolean
 
 export function useAudioPlayback() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const unlockedRef = useRef(false);
   const [playing, setPlaying] = useState(false);
 
-  const play = async (text: string) => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
+  const ensureAudio = () => {
+    if (!audioRef.current) {
+      const audio = new Audio();
+      audio.preload = "auto";
+      audio.playsInline = true;
+      audioRef.current = audio;
     }
+    return audioRef.current;
+  };
+
+  const unlock = async () => {
+    if (unlockedRef.current) return;
+    const audio = ensureAudio();
+    const previousMuted = audio.muted;
+    audio.muted = true;
+    audio.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQQAAAAAAA==";
+    try {
+      await audio.play();
+      audio.pause();
+      audio.currentTime = 0;
+      unlockedRef.current = true;
+    } finally {
+      audio.muted = previousMuted;
+    }
+  };
+
+  const play = async (text: string) => {
+    const audio = ensureAudio();
+    audio.pause();
     const res = await fetch("/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -42,9 +67,8 @@ export function useAudioPlayback() {
     if (!res.ok) throw new Error("TTS failed");
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    audioRef.current = audio;
-    setPlaying(true);
+    audio.src = url;
+    audio.load();
     await new Promise<void>((resolve, reject) => {
       audio.onended = () => {
         setPlaying(false);
@@ -56,7 +80,13 @@ export function useAudioPlayback() {
         URL.revokeObjectURL(url);
         reject(new Error("Audio playback error"));
       };
-      audio.play().catch(reject);
+      audio.play()
+        .then(() => setPlaying(true))
+        .catch((error) => {
+          setPlaying(false);
+          URL.revokeObjectURL(url);
+          reject(error);
+        });
     });
   };
 
@@ -66,5 +96,5 @@ export function useAudioPlayback() {
   };
 
   useEffect(() => () => audioRef.current?.pause(), []);
-  return { play, stop, playing };
+  return { play, stop, playing, unlock };
 }
