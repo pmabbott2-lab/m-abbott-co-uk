@@ -3,14 +3,14 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
-import { getSession, submitSession } from "@/lib/sessions.functions";
+import { getSession, submitSession, setSessionPosition } from "@/lib/sessions.functions";
 import { AppShell } from "@/components/AppShell";
 import { Avatar, useAudioPlayback } from "@/components/Avatar";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Pause, Play, ArrowLeft } from "lucide-react";
+import { Pause, Play, ArrowLeft, Undo2 } from "lucide-react";
 import { toast } from "sonner";
-import { totalQuestions, questionIndexGlobal, getQuestion, findSection, type Section } from "@/lib/interview-script";
+import { totalQuestions, questionIndexGlobal, getQuestion, findSection, prevStep, type Section } from "@/lib/interview-script";
 
 export const Route = createFileRoute("/_authenticated/interview/$sessionId")({
   component: InterviewPage,
