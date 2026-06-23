@@ -396,7 +396,7 @@ Remember: if a fact is still missing, ask only the first specific missing fact. 
     const aiCleanedValue = (parsed.cleanedValue ?? fallback.cleanedValue).trim();
     const missingAfterAi = missingFacts(input, [fallback.cleanedValue, aiCleanedValue].filter(Boolean).join(" "));
     const complete = missingAfterAi.length === 0;
-    const cleanedValue = withCapturedFactMarker(aiCleanedValue || fallback.cleanedValue, input, missingAfterAi);
+    const cleanedValue = withCapturedFactMarker([fallback.cleanedValue, aiCleanedValue].filter(Boolean).join("\n"), input, missingAfterAi);
     return {
       complete,
       cleanedValue,
