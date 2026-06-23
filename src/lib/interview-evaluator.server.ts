@@ -85,6 +85,14 @@ function hasCapturedFact(text: string, id: string): boolean {
   return new RegExp(`\\bCaptured\\s+${id.replace(/_/g, "[_\\s-]")}\\s*:`, "i").test(text);
 }
 
+function hasCapturedNo(text: string, id: string): boolean {
+  return new RegExp(`\\bCaptured\\s+${id.replace(/_/g, "[_\\s-]")}\\s*:\\s*(?:no|none|zero|0)\\b`, "i").test(text);
+}
+
+function hasCapturedYes(text: string, id: string): boolean {
+  return new RegExp(`\\bCaptured\\s+${id.replace(/_/g, "[_\\s-]")}\\s*:\\s*(?:yes|true|has|one|two|three|four|five|\\d)\\b`, "i").test(text);
+}
+
 function hasFullName(text: string): boolean {
   const words = text
     .replace(/[^\p{L}'\s-]/gu, " ")
@@ -261,8 +269,8 @@ function missingFactsFor(input: EvaluateInput, text: string, latest = "", target
     case "family": {
       const missing: MissingFact[] = [];
       const relationshipKnown = captured("relationship") || hasRelationshipStatus(text) || targetAnsweredShortly("relationship") || (targetDeclined && target === "relationship");
-      const noDependantsKnown = captured("dependants") || hasNoDependants(text) || targetNo("dependants") || (targetDeclined && target === "dependants");
-      const hasDependantsKnown = hasDependants(text) || targetYes("dependants") || targetNumber("dependants");
+      const noDependantsKnown = hasCapturedNo(text, "dependants") || hasNoDependants(text) || targetNo("dependants") || (targetDeclined && target === "dependants");
+      const hasDependantsKnown = hasCapturedYes(text, "dependants") || hasDependants(text) || targetYes("dependants") || targetNumber("dependants");
       if (!relationshipKnown) missing.push({ id: "relationship", followup: () => "Are you single, married, cohabiting, divorced, separated or widowed?" });
       if (!noDependantsKnown && !hasDependantsKnown) missing.push({ id: "dependants", followup: (name) => `Do you have any children or other dependants${name ? `, ${name}` : ""}?` });
       if (hasDependantsKnown && !noDependantsKnown) {
