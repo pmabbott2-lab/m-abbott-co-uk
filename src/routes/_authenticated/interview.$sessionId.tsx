@@ -539,6 +539,20 @@ function InterviewPage() {
               <p className="text-sm text-muted-foreground">
                 {transcribing ? "Transcribing…" : thinking ? "Thinking…" : status}
               </p>
+              {(() => {
+                const q = current?.section != null && current.questionIndex != null
+                  ? getQuestion(current.section, current.questionIndex)
+                  : undefined;
+                if (!q?.input || q.input.kind === "voice") return null;
+                return (
+                  <QuestionInput
+                    key={`${current?.section}:${current?.questionIndex}`}
+                    question={q}
+                    disabled={thinking || transcribing || playing || paused || needsGesture}
+                    onSubmit={(assembled) => callStep(assembled, { skipEvaluation: true })}
+                  />
+                );
+              })()}
               <div className="flex flex-wrap justify-center gap-2">
                 {needsGesture ? (
                   <Button
