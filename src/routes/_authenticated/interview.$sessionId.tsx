@@ -40,7 +40,7 @@ function InterviewPage() {
   const navigate = useNavigate();
   const getSessionFn = useServerFn(getSession);
   const submitFn = useServerFn(submitSession);
-  const { play, playing, stop: stopPlayback } = useAudioPlayback();
+  const { play, playing, stop: stopPlayback, unlock } = useAudioPlayback();
 
   const sessionQ = useQuery({
     queryKey: ["session", sessionId],
@@ -233,8 +233,9 @@ function InterviewPage() {
     setStatus("Paused");
   };
 
-  const handleResume = () => {
+  const handleResume = async () => {
     setPaused(false);
+    await unlock().catch(() => {});
     if (current?.sayText) {
       setStatus("Speaking…");
       play(current.sayText)
@@ -248,10 +249,20 @@ function InterviewPage() {
   };
 
   // Boot must be triggered by a user gesture (mobile autoplay policy).
-  const handleStart = () => {
+  const handleStart = async () => {
     if (bootedRef.current || !sessionQ.data) return;
     bootedRef.current = true;
     setStarted(true);
+    try {
+      await unlock();
+    } catch (e) {
+      console.error("Audio unlock failed", e);
+      toast.error("Audio blocked — tap start again");
+      bootedRef.current = false;
+      setStarted(false);
+      setStatus("Tap start to begin");
+      return;
+    }
     const messages = sessionQ.data.messages;
     const lastAvatar = [...messages].reverse().find((m) => m.role === "avatar");
     const lastCustomer = [...messages].reverse().find((m) => m.role === "customer");

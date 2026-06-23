@@ -34,7 +34,6 @@ export function useAudioPlayback() {
     if (!audioRef.current) {
       const audio = new Audio();
       audio.preload = "auto";
-      audio.playsInline = true;
       audioRef.current = audio;
     }
     return audioRef.current;
