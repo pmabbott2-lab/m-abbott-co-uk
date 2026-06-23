@@ -8,6 +8,8 @@ export interface Question {
   prompt: string;
   /** Optional predicate; when it returns true, this question is skipped. */
   skipWhen?: (answers: AnswersMap) => boolean;
+  /** Optional per-question sustained-silence threshold (ms) used by the client VAD. */
+  silenceMs?: number;
 }
 
 export interface SectionDef {
