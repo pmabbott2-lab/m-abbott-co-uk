@@ -59,6 +59,28 @@ export const submitSession = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const setSessionPosition = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      sessionId: z.string().uuid(),
+      section: z.enum(["personal", "employment", "outgoings", "property"]),
+      index: z.number().int().min(0),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("interview_sessions")
+      .update({
+        current_section: data.section,
+        current_question_index: data.index,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", data.sessionId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
 export const updateAnswer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
