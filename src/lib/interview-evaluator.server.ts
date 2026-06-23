@@ -117,12 +117,13 @@ function hasPlausibleHouseNameAnswer(text: string): boolean {
   if (hasPostcode(text) && !hasStreetAddress(text)) return false;
   if (hasStreetAddress(text)) return true;
   if (/\b(?:house\s+name|property\s+name|house|property|home|called|named)\b/i.test(text)) return true;
+  if (hasAnyNumber(text)) return true;
   const words = text
     .replace(/[^\p{L}'\s-]/gu, " ")
     .trim()
     .split(/\s+/)
     .filter(Boolean);
-  if (words.length < 1 || words.length > 4) return false;
+  if (words.length < 2 || words.length > 4) return false;
   // Do not treat a broad location as the house/property name.
   return !/\b(nottingham|london|birmingham|manchester|leeds|sheffield|derby|leicester|bristol|liverpool|york|cardiff|edinburgh|glasgow)\b/i.test(words.join(" "));
 }
