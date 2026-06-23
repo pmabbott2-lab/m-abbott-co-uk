@@ -139,12 +139,11 @@ export const updateAnswer = createServerFn({ method: "POST" })
 export const getMyRole = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const roles = (data ?? []).map((r) => r.role);
-    return { isAdvisor: roles.includes("advisor"), roles };
+    const { data: isAdvisor } = await context.supabase.rpc("has_role", {
+      _user_id: context.userId,
+      _role: "advisor",
+    });
+    return { isAdvisor: Boolean(isAdvisor), roles: isAdvisor ? ["advisor"] : [] };
   });
 
 export const listAllSessionsForAdvisor = createServerFn({ method: "GET" })
