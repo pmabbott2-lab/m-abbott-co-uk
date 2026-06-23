@@ -292,7 +292,7 @@ export const Route = createFileRoute("/api/interview-step")({
           questionsInSection: sec.questions.length,
           fieldKey: nextQ.key,
           fieldLabel: nextQ.label,
-          prompt: nextQ.prompt,
+          prompt: personalise(nextQ.prompt),
           sayText,
         });
       },
