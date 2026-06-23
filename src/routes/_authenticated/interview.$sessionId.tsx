@@ -377,8 +377,9 @@ function InterviewPage() {
   };
 
   useEffect(() => {
-    if (!sessionQ.data || started || done || bootedRef.current) return;
-    void handleStart();
+    if (!sessionQ.data || started || done) return;
+    setNeedsGesture(true);
+    setStatus("Tap Start to begin");
   }, [sessionQ.data, started, done]);
 
   useEffect(() => () => cleanupAudio(), []);
