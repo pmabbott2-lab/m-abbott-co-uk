@@ -81,19 +81,7 @@ export const Route = createFileRoute("/api/interview-step")({
         }
 
 
-          const sec = findSection(section)!;
-          return Response.json({
-            done: false,
-            section,
-            sectionTitle: sec.title,
-            questionIndex: index,
-            questionsInSection: sec.questions.length,
-            fieldKey: currentQ.key,
-            fieldLabel: currentQ.label,
-            prompt: followupQuestion,
-            sayText,
-          });
-        }
+
 
         // Build current answers map (including the value we just saved) so skip logic is up-to-date
         const { data: answerRows } = await supabase
