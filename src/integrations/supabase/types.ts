@@ -14,16 +14,199 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      advisor_notes: {
+        Row: {
+          advisor_id: string
+          created_at: string
+          id: string
+          note: string
+          session_id: string
+        }
+        Insert: {
+          advisor_id: string
+          created_at?: string
+          id?: string
+          note: string
+          session_id: string
+        }
+        Update: {
+          advisor_id?: string
+          created_at?: string
+          id?: string
+          note?: string
+          session_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "advisor_notes_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "interview_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      interview_answers: {
+        Row: {
+          field_key: string
+          field_label: string
+          id: string
+          section: string
+          session_id: string
+          updated_at: string
+          value: string | null
+        }
+        Insert: {
+          field_key: string
+          field_label: string
+          id?: string
+          section: string
+          session_id: string
+          updated_at?: string
+          value?: string | null
+        }
+        Update: {
+          field_key?: string
+          field_label?: string
+          id?: string
+          section?: string
+          session_id?: string
+          updated_at?: string
+          value?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "interview_answers_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "interview_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      interview_messages: {
+        Row: {
+          created_at: string
+          id: string
+          role: string
+          section: string | null
+          session_id: string
+          text: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: string
+          section?: string | null
+          session_id: string
+          text: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: string
+          section?: string | null
+          session_id?: string
+          text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "interview_messages_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "interview_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      interview_sessions: {
+        Row: {
+          current_question_index: number
+          current_section: string
+          customer_id: string
+          id: string
+          started_at: string
+          status: Database["public"]["Enums"]["session_status"]
+          submitted_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          current_question_index?: number
+          current_section?: string
+          customer_id: string
+          id?: string
+          started_at?: string
+          status?: Database["public"]["Enums"]["session_status"]
+          submitted_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          current_question_index?: number
+          current_section?: string
+          customer_id?: string
+          id?: string
+          started_at?: string
+          status?: Database["public"]["Enums"]["session_status"]
+          submitted_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          email: string | null
+          full_name: string | null
+          id: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "customer" | "advisor"
+      session_status: "in_progress" | "submitted"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +333,9 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["customer", "advisor"],
+      session_status: ["in_progress", "submitted"],
+    },
   },
 } as const
