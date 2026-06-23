@@ -88,6 +88,17 @@ function SessionDetail() {
           )}
         </div>
 
+        {(session as { summary?: string | null }).summary && (
+          <div className="rounded-2xl border bg-card p-5">
+            <h3 className="font-semibold mb-2">AI summary for the advisor</h3>
+            <div className="text-sm whitespace-pre-wrap leading-relaxed">
+              {(session as { summary?: string | null }).summary}
+            </div>
+          </div>
+        )}
+
+
+
         {SECTIONS.map((sec) => (
           <div key={sec.id} className="rounded-2xl border bg-card p-5">
             <h3 className="font-semibold mb-4">{sec.title}</h3>
