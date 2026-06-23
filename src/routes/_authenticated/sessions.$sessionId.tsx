@@ -185,3 +185,70 @@ function EditableValue({ value, onSave }: { value: string; onSave: (v: string) =
     </div>
   );
 }
+
+function formatGBP(n: number): string {
+  return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 }).format(n);
+}
+
+function LenderExampleCard({ sessionId }: { sessionId: string }) {
+  const genFn = useServerFn(generateLenderExample);
+  const mut = useMutation({
+    mutationFn: () => genFn({ data: { sessionId } }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not generate example"),
+  });
+  const result = mut.data;
+
+  return (
+    <div className="rounded-2xl border bg-card p-5 space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="font-semibold">Illustrative lender example</h3>
+          <p className="text-sm text-muted-foreground">
+            AI-generated illustration using the captured fact-find. Not a quote.
+          </p>
+        </div>
+        <Button size="sm" onClick={() => mut.mutate()} disabled={mut.isPending}>
+          {mut.isPending ? "Calculating…" : result ? "Recalculate" : "Generate example"}
+        </Button>
+      </div>
+
+      {result && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Stat label="Property" value={formatGBP(result.inputs.price)} />
+            <Stat label="Deposit" value={formatGBP(result.inputs.deposit)} />
+            <Stat label="Loan" value={formatGBP(result.inputs.loan)} />
+            <Stat label="LTV" value={`${result.inputs.ltv.toFixed(1)}%`} />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Stat label="Product" value={result.illustration.product} />
+            <Stat label="Rate" value={`${result.illustration.rate.toFixed(2)}%`} />
+            <Stat label="Term" value={`${result.inputs.term} yrs`} />
+            <Stat label="Monthly" value={formatGBP(result.illustration.monthly)} highlight />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Stat label="Total payable" value={formatGBP(result.illustration.totalPayable)} />
+            {result.illustration.incomeMultiple != null && (
+              <Stat label="Income multiple" value={`${result.illustration.incomeMultiple.toFixed(1)}×`} />
+            )}
+          </div>
+          {result.illustration.note && (
+            <div className="text-sm bg-muted/40 rounded-lg p-3 leading-relaxed">
+              {result.illustration.note}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className={`rounded-lg border p-3 ${highlight ? "bg-primary/10 border-primary/30" : "bg-background"}`}>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className={`text-sm font-semibold ${highlight ? "text-primary" : ""}`}>{value}</div>
+    </div>
+  );
+}
+
