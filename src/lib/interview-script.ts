@@ -6,6 +6,8 @@ export interface Question {
   key: string;
   label: string;
   prompt: string;
+  /** Plain-English description of the fact we need to establish. Used by the AI evaluator. */
+  expects?: string;
   /** Optional predicate; when it returns true, this question is skipped. */
   skipWhen?: (answers: AnswersMap) => boolean;
   /** Optional per-question sustained-silence threshold (ms) used by the client VAD. */
@@ -44,13 +46,13 @@ export const SECTIONS: SectionDef[] = [
     title: "About you",
     intro: "Let's start with a few details about you.",
     questions: [
-      { key: "full_name", label: "Full name", prompt: "Could you tell me your full legal name?" },
-      { key: "date_of_birth", label: "Date of birth", prompt: "What's your date of birth?" },
-      { key: "address_line", label: "House number or name & street", prompt: "What's the house number or name, and street, of your current home?", silenceMs: 2000 },
-      { key: "postcode", label: "Postcode", prompt: "And what's the postcode?", silenceMs: 2000 },
-      { key: "marital_status", label: "Marital status", prompt: "Are you single, married, in a civil partnership, or living with a partner?" },
-      { key: "dependants", label: "Dependants", prompt: "Do you have any dependants?" },
-      { key: "dependants_count", label: "Number of children", prompt: "Thanks — how many children do you have?", skipWhen: (a) => !hasDependants(a) },
+      { key: "full_name", label: "Full name", prompt: "Could you tell me your full legal name?", expects: "The customer's full legal name (first and last name, plus any middle name). Reject if only a first name or nickname is given." },
+      { key: "date_of_birth", label: "Date of birth", prompt: "What's your date of birth?", expects: "A complete date of birth including day, month, and year. Reject if any part is missing." },
+      { key: "address_line", label: "House number or name & street", prompt: "What's the house number or name, and street, of your current home?", expects: "Both the house number or name AND the street name.", silenceMs: 2000 },
+      { key: "postcode", label: "Postcode", prompt: "And what's the postcode?", expects: "A full UK postcode (outward and inward parts, e.g. SW1A 1AA).", silenceMs: 2000 },
+      { key: "marital_status", label: "Marital status", prompt: "Are you single, married, in a civil partnership, or living with a partner?", expects: "One of: single, married, civil partnership, cohabiting/living with partner, divorced, separated, widowed." },
+      { key: "dependants", label: "Dependants", prompt: "Do you have any dependants?", expects: "A clear yes or no about whether they have dependants." },
+      { key: "dependants_count", label: "Number of children", prompt: "Thanks — how many children do you have?", expects: "A specific number of children.", skipWhen: (a) => !hasDependants(a) },
       { key: "dependants_details", label: "Children's names & ages", prompt: "Thank you — please tell me each child's name and age. I'll keep asking until I've got them all, or you say \"that's it\".", skipWhen: (a) => !hasDependants(a), silenceMs: 2000 },
     ],
   },
@@ -59,12 +61,12 @@ export const SECTIONS: SectionDef[] = [
     title: "Employment & income",
     intro: "Now a few questions about your work and income.",
     questions: [
-      { key: "employment_status", label: "Employment status", prompt: "Are you employed, self-employed, a contractor, retired, or something else?" },
-      { key: "employer", label: "Employer / business name", prompt: "Who do you work for, or what's the name of your business?", skipWhen: isRetired },
-      { key: "job_title", label: "Job title", prompt: "What's your job title or role?", skipWhen: isRetired },
-      { key: "annual_income", label: "Annual gross income", prompt: "Roughly what's your annual gross income, including any regular bonus?", skipWhen: isRetired },
-      { key: "years_in_role", label: "Time in current role", prompt: "How long have you been in your current role?", skipWhen: isRetired },
-      { key: "pension_income", label: "Annual pension income", prompt: "Roughly what's your total annual pension income, including state and private pensions?", skipWhen: isNotRetired },
+      { key: "employment_status", label: "Employment status", prompt: "Are you employed, self-employed, a contractor, retired, or something else?", expects: "Employment status: employed, self-employed, contractor, retired, unemployed, student, etc." },
+      { key: "employer", label: "Employer / business name", prompt: "Who do you work for, or what's the name of your business?", expects: "Name of the employer or business.", skipWhen: isRetired },
+      { key: "job_title", label: "Job title", prompt: "What's your job title or role?", expects: "Job title or role.", skipWhen: isRetired },
+      { key: "annual_income", label: "Annual gross income", prompt: "Roughly what's your annual gross income, including any regular bonus?", expects: "An annual gross income figure in GBP (a number).", skipWhen: isRetired },
+      { key: "years_in_role", label: "Time in current role", prompt: "How long have you been in your current role?", expects: "A duration (years and/or months) in the current role.", skipWhen: isRetired },
+      { key: "pension_income", label: "Annual pension income", prompt: "Roughly what's your total annual pension income, including state and private pensions?", expects: "Total annual pension income figure in GBP.", skipWhen: isNotRetired },
     ],
   },
   {
@@ -72,9 +74,9 @@ export const SECTIONS: SectionDef[] = [
     title: "Outgoings & credit",
     intro: "Let's cover your regular outgoings and any existing credit.",
     questions: [
-      { key: "monthly_essentials", label: "Monthly essentials", prompt: "Roughly how much do you spend each month on essentials like bills, food, and travel?" },
-      { key: "existing_debts", label: "Existing debts", prompt: "Do you have any existing loans, credit cards, or finance agreements? If so, what's the total monthly payment?" },
-      { key: "credit_history", label: "Credit history", prompt: "Have you had any missed payments, defaults, CCJs, or bankruptcies in the last six years?" },
+      { key: "monthly_essentials", label: "Monthly essentials", prompt: "Roughly how much do you spend each month on essentials like bills, food, and travel?", expects: "A monthly essentials spend figure in GBP." },
+      { key: "existing_debts", label: "Existing debts", prompt: "Do you have any existing loans, credit cards, or finance agreements? If so, what's the total monthly payment?", expects: "Either a clear 'none', or a total monthly credit payment figure in GBP." },
+      { key: "credit_history", label: "Credit history", prompt: "Have you had any missed payments, defaults, CCJs, or bankruptcies in the last six years?", expects: "A clear yes/no, with details if yes." },
     ],
   },
   {
@@ -82,11 +84,11 @@ export const SECTIONS: SectionDef[] = [
     title: "The mortgage you need",
     intro: "Finally, let's talk about the property and mortgage you're after.",
     questions: [
-      { key: "purpose", label: "Purpose", prompt: "Is this for a first purchase, a next home, a remortgage, or a buy-to-let?" },
-      { key: "property_value", label: "Property price / value", prompt: "What's the price of the property, or its current value?" },
-      { key: "deposit", label: "Deposit available", prompt: "How much deposit do you have available?" },
-      { key: "term_years", label: "Mortgage term", prompt: "Over how many years would you like to repay the mortgage?" },
-      { key: "property_type", label: "Property type", prompt: "What type of property is it — for example, a flat, terraced, semi-detached, or detached house?" },
+      { key: "purpose", label: "Purpose", prompt: "Is this for a first purchase, a next home, a remortgage, or a buy-to-let?", expects: "Purpose: first-time purchase, next home / home mover, remortgage, or buy-to-let." },
+      { key: "property_value", label: "Property price / value", prompt: "What's the price of the property, or its current value?", expects: "A property price or value figure in GBP." },
+      { key: "deposit", label: "Deposit available", prompt: "How much deposit do you have available?", expects: "A deposit figure in GBP." },
+      { key: "term_years", label: "Mortgage term", prompt: "Over how many years would you like to repay the mortgage?", expects: "A mortgage term in years." },
+      { key: "property_type", label: "Property type", prompt: "What type of property is it — for example, a flat, terraced, semi-detached, or detached house?", expects: "Property type (flat, terraced, semi-detached, detached, bungalow, etc.)." },
     ],
   },
 ];
