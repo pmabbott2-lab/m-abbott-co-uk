@@ -50,7 +50,7 @@ export const SECTIONS: SectionDef[] = [
       { key: "postcode", label: "Postcode", prompt: "And what's the postcode?", silenceMs: 2000 },
       { key: "marital_status", label: "Marital status", prompt: "Are you single, married, in a civil partnership, or living with a partner?" },
       { key: "dependants", label: "Dependants", prompt: "Do you have any dependants?" },
-      { key: "dependants_count", label: "Number of children", prompt: "Lovely — how many children do you have?", skipWhen: (a) => !hasDependants(a) },
+      { key: "dependants_count", label: "Number of children", prompt: "Thanks — how many children do you have?", skipWhen: (a) => !hasDependants(a) },
       { key: "dependants_details", label: "Children's names & ages", prompt: "Thank you — please tell me each child's name and age. I'll keep asking until I've got them all, or you say \"that's it\".", skipWhen: (a) => !hasDependants(a), silenceMs: 2000 },
     ],
   },
