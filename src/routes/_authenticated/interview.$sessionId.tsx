@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Pause, Play, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
-import { totalQuestions, questionIndexGlobal, type Section } from "@/lib/interview-script";
+import { totalQuestions, questionIndexGlobal, getQuestion, findSection, type Section } from "@/lib/interview-script";
 
 export const Route = createFileRoute("/_authenticated/interview/$sessionId")({
   component: InterviewPage,
@@ -37,6 +37,16 @@ const SPEECH_OFF_MULT = 1.6; // below noiseFloor * this counts as silence (hyste
 const MIN_SPEECH_RMS = 0.015; // absolute floor for speech-on
 const MIN_SILENCE_RMS = 0.009; // absolute ceiling for silence
 const MIN_SPEECH_MS = 350; // require this much cumulative speech before allowing end
+
+function buildPromptText(section: Section, index: number) {
+  const sectionDef = findSection(section);
+  const question = getQuestion(section, index);
+  if (!sectionDef || !question) return "";
+  if (section === "personal" && index === 0) {
+    return `Hi, I'm Susan. I'll guide you through a quick fact-find for your mortgage application. ${sectionDef.intro} ${question.prompt}`;
+  }
+  return `${sectionDef.intro} ${question.prompt}`;
+}
 
 function InterviewPage() {
   const { sessionId } = Route.useParams();
