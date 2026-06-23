@@ -147,12 +147,9 @@ function InterviewPage() {
           .then(() => true)
           .catch((e) => {
             console.error("TTS play failed", e);
-            bootedRef.current = false;
-            setNeedsGesture(true);
-            setPaused(true);
-            setStatus("Audio blocked — tap Start");
-            toast.error("Audio blocked — tap Start");
-            return false;
+            setStatus("Voice playback is unavailable — listening now");
+            toast.error("Voice playback is unavailable, but you can answer now");
+            return true;
           });
         // play() resolves when speech ends → start listening
         if (spoke && !pausedRef.current && !doneRef.current) startListening();
@@ -334,11 +331,8 @@ function InterviewPage() {
       play(current.sayText)
         .catch((e) => {
           console.error("TTS play failed", e);
-          setPaused(true);
-          setNeedsGesture(true);
-          setStatus("Audio blocked — tap Start");
-          toast.error("Audio blocked — tap Start");
-          throw e;
+          setStatus("Voice playback is unavailable — listening now");
+          toast.error("Voice playback is unavailable, but you can answer now");
         })
         .then(() => {
           if (!pausedRef.current && !doneRef.current) startListening();
@@ -374,11 +368,9 @@ function InterviewPage() {
       })
       .catch((e) => {
         console.error("TTS play failed", e);
-        bootedRef.current = false;
-        setStarted(false);
-        setNeedsGesture(true);
-        setPaused(true);
-        setStatus("Audio blocked — tap Start");
+        setStatus("Voice playback is unavailable — listening now");
+        toast.error("Voice playback is unavailable, but you can answer now");
+        if (!pausedRef.current && !doneRef.current) startListening();
       });
   };
 
