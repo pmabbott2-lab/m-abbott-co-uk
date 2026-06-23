@@ -6,6 +6,8 @@ export interface Question {
   key: string;
   label: string;
   prompt: string;
+  /** Plain-English description of the fact we need to establish. Used by the AI evaluator. */
+  expects?: string;
   /** Optional predicate; when it returns true, this question is skipped. */
   skipWhen?: (answers: AnswersMap) => boolean;
   /** Optional per-question sustained-silence threshold (ms) used by the client VAD. */
