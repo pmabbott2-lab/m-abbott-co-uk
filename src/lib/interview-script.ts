@@ -45,10 +45,12 @@ export const SECTIONS: SectionDef[] = [
     questions: [
       { key: "full_name", label: "Full name", prompt: "Could you tell me your full legal name?" },
       { key: "date_of_birth", label: "Date of birth", prompt: "What's your date of birth?" },
-      { key: "address", label: "Current address", prompt: "What's your current home address, including postcode?" },
+      { key: "address_line", label: "House number or name & street", prompt: "What's the house number or name, and street, of your current home?", silenceMs: 1800 },
+      { key: "postcode", label: "Postcode", prompt: "And what's the postcode?", silenceMs: 1500 },
       { key: "marital_status", label: "Marital status", prompt: "Are you single, married, in a civil partnership, or living with a partner?" },
       { key: "dependants", label: "Dependants", prompt: "Do you have any dependants?" },
-      { key: "dependants_details", label: "Children's names & ages", prompt: "Thank you — could you tell me their names and ages?", skipWhen: (a) => !hasDependants(a) },
+      { key: "dependants_count", label: "Number of children", prompt: "Lovely — how many children do you have?", skipWhen: (a) => !hasDependants(a) },
+      { key: "dependants_details", label: "Children's names & ages", prompt: "Thank you — could you tell me each of their names and ages, one by one?", skipWhen: (a) => !hasDependants(a), silenceMs: 2500 },
     ],
   },
   {
