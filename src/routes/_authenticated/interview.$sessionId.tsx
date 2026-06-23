@@ -224,8 +224,10 @@ function InterviewPage() {
       let lastSpeechAt = Date.now();
       let noiseFloor = 0.005;
       let calibrated = false;
+      let smoothed = 0;
       const noiseSamples: number[] = [];
       const TICK_MS = 80;
+      const EMA_ALPHA = 0.18;
 
       const intervalId = window.setInterval(() => {
         const mr2 = mediaRef.current;
@@ -237,6 +239,7 @@ function InterviewPage() {
         let sum = 0;
         for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
         const rms = Math.sqrt(sum / buf.length);
+        smoothed = smoothed === 0 ? rms : smoothed + EMA_ALPHA * (rms - smoothed);
         const now = Date.now();
         const elapsed = now - startedAt;
 
@@ -251,29 +254,36 @@ function InterviewPage() {
           calibrated = true;
         }
 
+        // Use smoothed RMS to defeat brief background spikes (TV, traffic, breath)
         const onThreshold = Math.max(MIN_SPEECH_RMS, noiseFloor * SPEECH_ON_MULT);
-        const offThreshold = Math.min(MIN_SILENCE_RMS, Math.max(noiseFloor * SPEECH_OFF_MULT, noiseFloor + 0.002));
+        const offThreshold = Math.max(MIN_SILENCE_RMS, noiseFloor * SPEECH_OFF_MULT);
 
-        if (rms > onThreshold) {
+        if (smoothed > onThreshold) {
           speechDetected = true;
           speechMs += TICK_MS;
           lastSpeechAt = now;
-        } else if (rms < offThreshold) {
-          // count as silence — do not bump lastSpeechAt
-        } else {
-          // in-between band — treat as quiet enough not to extend speech
         }
+        // anything below onThreshold counts as not-speech; lastSpeechAt is the
+        // last time we heard real speech, so silence accumulates naturally.
 
         const activeStep = currentRef.current;
         const silenceThreshold = (activeStep?.fieldKey && activeStep?.section)
           ? (getQuestion(activeStep.section, activeStep.questionIndex ?? 0)?.silenceMs ?? SILENCE_MS)
           : SILENCE_MS;
-        if (speechDetected && speechMs >= MIN_SPEECH_MS && now - lastSpeechAt > silenceThreshold) {
+        // Auto-submit ~2s after speech ceases (per question override allowed)
+        if (speechDetected && speechMs >= MIN_SPEECH_MS && now - lastSpeechAt > silenceThreshold && smoothed < onThreshold) {
           window.clearInterval(intervalId);
           try { mr2.stop(); } catch {}
           return;
         }
         if (!speechDetected && elapsed > NO_SPEECH_TIMEOUT_MS) {
+          window.clearInterval(intervalId);
+          try { mr2.stop(); } catch {}
+          return;
+        }
+        // Hard cap — even if background noise keeps tickling onThreshold,
+        // submit what we have so the interview cannot get stuck.
+        if (speechDetected && elapsed > 18000) {
           window.clearInterval(intervalId);
           try { mr2.stop(); } catch {}
           return;
@@ -284,6 +294,7 @@ function InterviewPage() {
           return;
         }
       }, TICK_MS);
+
       rafRef.current = intervalId as unknown as number;
     } catch {
       setNeedsGesture(true);

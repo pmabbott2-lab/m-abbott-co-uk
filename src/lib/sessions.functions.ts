@@ -80,17 +80,29 @@ function extractMoneyCandidates(text: string): Array<{ value: number; index: num
 function parseContextMoney(text: string, labels: string[], excludeLabels: string[] = []): number | null {
   const candidates = extractMoneyCandidates(text);
   const lower = text.toLowerCase();
+  const labelHits = labels.flatMap((label) => {
+    const re = new RegExp(`\\b${label}\\b`, "gi");
+    return Array.from(text.matchAll(re)).map((m) => m.index ?? -1).filter((i) => i >= 0);
+  });
+  const excludeHits = excludeLabels.flatMap((label) => {
+    const re = new RegExp(`\\b${label}\\b`, "gi");
+    return Array.from(text.matchAll(re)).map((m) => m.index ?? -1).filter((i) => i >= 0);
+  });
   const scored = candidates
     .map((candidate) => {
+      const center = candidate.index + candidate.raw.length / 2;
+      const labelDist = labelHits.length ? Math.min(...labelHits.map((i) => Math.abs(i - center))) : Infinity;
+      const excludeDist = excludeHits.length ? Math.min(...excludeHits.map((i) => Math.abs(i - center))) : Infinity;
       const context = lower.slice(Math.max(0, candidate.index - 45), candidate.index + candidate.raw.length + 45);
-      const hasLabel = labels.some((label) => new RegExp(`\\b${label}\\b`, "i").test(context));
-      const hasExcluded = excludeLabels.some((label) => new RegExp(`\\b${label}\\b`, "i").test(context));
-      return { ...candidate, score: (hasLabel ? 2 : 0) - (hasExcluded ? 3 : 0) };
+      const hasExcludedInWindow = excludeLabels.some((label) => new RegExp(`\\b${label}\\b`, "i").test(context));
+      return { ...candidate, labelDist, excludeDist, hasExcludedInWindow };
     })
-    .filter((candidate) => candidate.score > 0)
-    .sort((a, b) => b.score - a.score || a.index - b.index);
+    // The closest label word wins; ties broken by document order.
+    .filter((c) => c.labelDist < Infinity && c.labelDist < c.excludeDist)
+    .sort((a, b) => a.labelDist - b.labelDist || a.index - b.index);
   return scored[0]?.value ?? null;
 }
+
 
 function parsePercentage(text: string, label?: string): number | null {
   const lower = text.toLowerCase();
@@ -148,11 +160,19 @@ export const generateLenderExample = createServerFn({ method: "POST" })
       moneyCandidates[0]?.value ??
       null;
     const depositPercent = parsePercentage(mortgageNeed, "deposit");
-    const deposit =
+    let deposit =
       parseMoney(map.get("property:deposit")) ??
-      parseContextMoney(mortgageNeed, ["deposit"], []) ??
-      moneyCandidates.find((candidate) => candidate.value !== price)?.value ??
-      (price != null && depositPercent != null ? (price * depositPercent) / 100 : null);
+      parseContextMoney(mortgageNeed, ["deposit", "putting down", "put down", "saved"], ["price", "value", "worth", "purchase", "buying", "property"]) ??
+      (price != null && depositPercent != null ? (price * depositPercent) / 100 : null) ??
+      moneyCandidates.find((candidate) => price == null || candidate.value !== price)?.value ??
+      null;
+    // Sanity: a deposit must be smaller than the price. If they match, prefer
+    // the next distinct candidate (e.g. "£200k property, £20k deposit").
+    if (price != null && deposit != null && deposit >= price) {
+      const alt = moneyCandidates.find((c) => c.value < price && c.value !== deposit);
+      if (alt) deposit = alt.value;
+    }
+
     const term = parseYears(map.get("property:term_years")) ?? parseYears(map.get("property:mortgage_term")) ?? parseYears(mortgageNeed) ?? 25;
     const work = map.get("employment:work") ?? "";
     const income = parseMoney(map.get("employment:annual_income")) ?? parseContextMoney(work, ["income", "salary", "earn", "annual", "year", "gross"], []);
