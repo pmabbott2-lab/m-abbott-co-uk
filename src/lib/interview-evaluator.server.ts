@@ -1,6 +1,6 @@
 // Server-only OpenAI-driven evaluator for interview answers.
-// It uses OpenAI for tidying/natural wording, but a deterministic fact gate
-// decides whether the interview is allowed to move on.
+// OpenAI tidies the notes, but this deterministic fact gate decides whether
+// the interview is allowed to move on.
 import { openAIFetch } from "./openai.server";
 
 export interface EvaluateInput {
@@ -32,9 +32,65 @@ type MissingFact = {
 const MODEL = "gpt-4o-mini";
 const MAX_FOLLOWUPS = 20;
 const NUMBER_WORDS = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty";
+const NUMBER_WORD_TO_DIGIT: Record<string, string> = {
+  zero: "0",
+  oh: "0",
+  o: "0",
+  one: "1",
+  two: "2",
+  three: "3",
+  four: "4",
+  five: "5",
+  six: "6",
+  seven: "7",
+  eight: "8",
+  nine: "9",
+};
 
 function hasExplicitDecline(text: string): boolean {
   return /\b(i'?d\s+rather\s+not\s+say|prefer\s+not\s+to\s+say|skip\s+that|skip\s+it|no\s+comment|don'?t\s+want\s+to\s+answer)\b/i.test(text);
+}
+
+function isMetaReply(text: string): boolean {
+  return /\b(what\s+do\s+you\s+(?:want|need)\s+to\s+know|what\s+do\s+you\s+need|like\s+what|what\s+do\s+you\s+mean|can\s+you\s+(?:explain|clarify)|which\s+details|what\s+sort\s+of)\b/i.test(text);
+}
+
+function isUnsureOnly(text: string): boolean {
+  return /^(?:\s*)(?:i\s+)?(?:don'?t\s+know|do\s+not\s+know|not\s+sure|unsure|can'?t\s+remember|no\s+idea)(?:\s*)$/i.test(text.trim());
+}
+
+function hasStandaloneNo(text: string): boolean {
+  return /^(?:\s*)(?:no|none|nope|zero|0|not\s+any|nothing)(?:\s*)$/i.test(text.trim());
+}
+
+function hasStandaloneYes(text: string): boolean {
+  return /^(?:\s*)(?:yes|yeah|yep|i\s+do|we\s+do)(?:\s*)$/i.test(text.trim());
+}
+
+function hasAnyNumber(text: string): boolean {
+  return new RegExp(`\\b(?:\\d+|${NUMBER_WORDS})\\b`, "i").test(text);
+}
+
+function isShortMeaningfulAnswer(text: string): boolean {
+  if (!text.trim() || isMetaReply(text) || hasExplicitDecline(text) || isUnsureOnly(text)) return false;
+  const words = text
+    .replace(/[^\p{L}\d&.'\s-]/gu, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return words.length >= 1 && words.length <= 8;
+}
+
+function hasCapturedFact(text: string, id: string): boolean {
+  return new RegExp(`\\bCaptured\\s+${id.replace(/_/g, "[_\\s-]")}\\s*:`, "i").test(text);
+}
+
+function hasCapturedNo(text: string, id: string): boolean {
+  return new RegExp(`\\bCaptured\\s+${id.replace(/_/g, "[_\\s-]")}\\s*:\\s*(?:no|none|zero|0)\\b`, "i").test(text);
+}
+
+function hasCapturedYes(text: string, id: string): boolean {
+  return new RegExp(`\\bCaptured\\s+${id.replace(/_/g, "[_\\s-]")}\\s*:\\s*(?:yes|true|has|one|two|three|four|five|\\d)\\b`, "i").test(text);
 }
 
 function hasFullName(text: string): boolean {
@@ -55,21 +111,42 @@ function hasDob(text: string): boolean {
 
 function hasStreetAddress(text: string): boolean {
   // Flat/apartment number
-  if (/\b(?:flat|apartment|apt)\s*[\w-]+\b/i.test(text)) return true;
+  if (/\b(?:flat|apartment|apt|unit)\s*[\w-]+\b/i.test(text)) return true;
   // House number + street
   if (/\b\d+[a-z]?\s+[\p{L}'-]+(?:\s+[\p{L}'-]+){0,5}\s+(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|close|cl|crescent|cres|court|ct|way|place|pl|terrace|gardens|grove|view|mews|park|rise|walk|row|square|sq|hill)\b/iu.test(text)) return true;
-  // Named property suffix (cottage, house, bungalow, farm, manor, lodge, barn, mill, hall, villa)
-  if (/\b[\p{L}'-]+(?:\s+[\p{L}'-]+){0,3}\s+(?:cottage|house|bungalow|farm|manor|lodge|barn|mill|hall|villa|farmhouse)\b/iu.test(text)) return true;
+  // Named property suffix (Rose Cottage, The Old Rectory, Oak Lodge, etc.)
+  if (/\b[\p{L}'-]+(?:\s+[\p{L}'-]+){0,3}\s+(?:cottage|house|bungalow|farm|manor|lodge|barn|mill|hall|villa|farmhouse|rectory|grange|orchard|willows|beeches|oaks)\b/iu.test(text)) return true;
   // Explicit house/property name phrasing
-  if (/\b(?:house|property|home)\s+(?:is\s+)?(?:called|named)\s+[\p{L}'-]+/iu.test(text)) return true;
+  if (/\b(?:house|property|home|house\s+name|property\s+name)\s+(?:is\s+)?(?:called|named|is)\s+[\p{L}'-]+/iu.test(text)) return true;
   if (/\b(?:it'?s\s+called|called)\s+[\p{L}'-]+(?:\s+[\p{L}'-]+){0,3}\b/iu.test(text)) return true;
   // "The Willows", "The Old Rectory" - definite article + capitalised name(s)
   if (/\bThe\s+[A-Z][\p{L}'-]+(?:\s+[A-Z][\p{L}'-]+){0,3}\b/u.test(text)) return true;
   return false;
 }
 
+function hasPlausibleHouseNameAnswer(text: string): boolean {
+  if (!isShortMeaningfulAnswer(text)) return false;
+  if (hasPostcode(text) && !hasStreetAddress(text)) return false;
+  if (hasStreetAddress(text)) return true;
+  if (/\b(?:house\s+name|property\s+name|house|property|home|called|named)\b/i.test(text)) return true;
+  const words = text
+    .replace(/[^\p{L}'\s-]/gu, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length < 2 || words.length > 4) return false;
+  // Do not treat a broad location as the house/property name.
+  return !/\b(nottingham|london|birmingham|manchester|leeds|sheffield|derby|leicester|bristol|liverpool|york|cardiff|edinburgh|glasgow)\b/i.test(words.join(" "));
+}
+
 function hasPostcode(text: string): boolean {
-  return /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i.test(text);
+  if (/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i.test(text)) return true;
+  const spokenNormalised = text
+    .toLowerCase()
+    .replace(new RegExp(`\\b(${Object.keys(NUMBER_WORD_TO_DIGIT).join("|")})\\b`, "gi"), (m) => NUMBER_WORD_TO_DIGIT[m.toLowerCase()] ?? m)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+  return /[A-Z]{1,2}\d[A-Z\d]?\d[A-Z]{2}/.test(spokenNormalised);
 }
 
 function hasDuration(text: string): boolean {
@@ -77,7 +154,7 @@ function hasDuration(text: string): boolean {
 }
 
 function hasRelationshipStatus(text: string): boolean {
-  return /\b(single|married|wife|husband|spouse|partner|civil\s+partner(?:ship)?|cohabiting|living\s+with\s+(?:my\s+)?partner|divorced|separated|widowed)\b/i.test(text);
+  return /\b(single|married|wife|husband|spouse|partner|civil\s+partner(?:ship)?|cohabiting|living\s+with\s+(?:my\s+)?(?:partner|girlfriend|boyfriend|fianc[eé]e?)|girlfriend|boyfriend|fianc[eé]e?|engaged|divorced|separated|widowed)\b/i.test(text);
 }
 
 function hasNoDependants(text: string): boolean {
@@ -97,16 +174,21 @@ function hasDependantAges(text: string): boolean {
   return new RegExp(`\\b(?:aged?|ages?)\\s*(?:\\d+|${NUMBER_WORDS})\\b|\\b(?:\\d+|${NUMBER_WORDS})\\s*(?:years?|yrs?)\\s+old\\b|\\bkids?\\s+(?:are\\s+)?(?:\\d+|${NUMBER_WORDS})\\b`, "i").test(text);
 }
 
+function hasStandaloneAgeAnswer(text: string): boolean {
+  if (!isShortMeaningfulAnswer(text)) return false;
+  return hasAnyNumber(text) || /\b(baby|newborn|toddler|teen(?:ager)?)\b/i.test(text);
+}
+
 function isRetiredOrUnemployed(text: string): boolean {
   return /\b(retired|pension|unemployed|not\s+working|out\s+of\s+work)\b/i.test(text);
 }
 
 function hasEmploymentStatus(text: string): boolean {
-  return /\b(employed|self[-\s]?employed|contractor|retired|unemployed|not\s+working|part[-\s]?time|full[-\s]?time|director)\b/i.test(text) || /\bi\s+work\s+(?:as|for|at)\b/i.test(text);
+  return /\b(employed|self[-\s]?employed|contractor|retired|unemployed|not\s+working|out\s+of\s+work|part[-\s]?time|full[-\s]?time|director|permanent|temporary|zero[-\s]?hours)\b/i.test(text) || /\bi\s+work\s+(?:as|for|at)\b/i.test(text);
 }
 
 function hasEmployerOrBusiness(text: string): boolean {
-  return /\b(?:work\s+(?:for|at)|employed\s+by|business\s+(?:is|name)|company\s+(?:is|name)|trade\s+as)\s+[\p{L}\d&.' -]{2,}/iu.test(text) || /\b(?:ltd|limited|plc|llp|nhs)\b/i.test(text);
+  return /\b(?:work\s+(?:for|at)|employed\s+by|employer\s+(?:is|name|called)|business\s+(?:is|name|called)|company\s+(?:is|name|called)|trade\s+as)\s+[\p{L}\d&.' -]{2,}/iu.test(text) || /\b(?:ltd|limited|plc|llp|nhs)\b/i.test(text);
 }
 
 function hasJobTitle(text: string): boolean {
@@ -117,17 +199,24 @@ function hasMoneyAmount(text: string): boolean {
   return /£\s?\d[\d,]*(?:\.\d+)?|\b\d{2,3}\s?k\b/i.test(text);
 }
 
+function hasMoneyLike(text: string): boolean {
+  return hasMoneyAmount(text) ||
+    /\b\d[\d,]{2,}(?:\.\d+)?\b/.test(text) ||
+    /\b\d+(?:\.\d+)?\s*(?:pounds?|quid|grand|thousand|k)\b/i.test(text) ||
+    new RegExp(`\\b(?:${NUMBER_WORDS}|thirty|forty|fifty|sixty|seventy|eighty|ninety)\\s+(?:thousand|grand|k|pounds?)\\b`, "i").test(text);
+}
+
 function hasIncome(text: string): boolean {
-  return hasMoneyAmount(text) && /\b(salary|income|earn|earning|wage|gross|annual|year|pa|per\s+annum|month)\b/i.test(text);
+  return hasMoneyLike(text) && /\b(salary|income|earn|earning|wage|gross|annual|year|pa|per\s+annum|month)\b/i.test(text);
 }
 
 function hasMonthlyEssentials(text: string): boolean {
-  return hasMoneyAmount(text) && /\b(month|monthly|bills|food|travel|essentials|outgoings|spend|costs?)\b/i.test(text);
+  return hasMoneyLike(text) && /\b(month|monthly|bills|food|travel|essentials|outgoings|spend|costs?)\b/i.test(text);
 }
 
 function hasCreditPayments(text: string): boolean {
   return /\b(no|none|nope|zero|0)\s+(?:credit|loans?|debts?|cards?|finance)\b/i.test(text) ||
-    (/\b(credit\s*card|loan|debt|finance|car\s+payment|hire\s+purchase)\b/i.test(text) && (/\b(no|none|zero|0)\b/i.test(text) || hasMoneyAmount(text)));
+    (/\b(credit\s*card|loan|debt|finance|car\s+payment|hire\s+purchase)\b/i.test(text) && (/\b(no|none|zero|0)\b/i.test(text) || hasMoneyLike(text)));
 }
 
 function hasAdverseCredit(text: string): boolean {
@@ -140,11 +229,11 @@ function hasMortgagePurpose(text: string): boolean {
 }
 
 function hasPropertyPrice(text: string): boolean {
-  return hasMoneyAmount(text) && /\b(price|value|worth|property|house|flat|purchase)\b/i.test(text);
+  return hasMoneyLike(text) && /\b(price|value|worth|property|house|flat|purchase)\b/i.test(text);
 }
 
 function hasDeposit(text: string): boolean {
-  return /\b(deposit)\b/i.test(text) && (hasMoneyAmount(text) || /\b\d{1,2}\s?%\b/.test(text));
+  return /\b(deposit)\b/i.test(text) && (hasMoneyLike(text) || /\b\d{1,2}\s?%\b/.test(text));
 }
 
 function hasMortgageTerm(text: string): boolean {
@@ -155,7 +244,14 @@ function hasPropertyType(text: string): boolean {
   return /\b(flat|apartment|terraced|terrace|semi[-\s]?detached|detached|bungalow|maisonette|house)\b/i.test(text);
 }
 
-function missingFacts(input: EvaluateInput, text: string): MissingFact[] {
+function missingFactsFor(input: EvaluateInput, text: string, latest = "", target?: string): MissingFact[] {
+  const targetDeclined = Boolean(target) && hasExplicitDecline(latest);
+  const targetAnsweredShortly = (id: string) => target === id && isShortMeaningfulAnswer(latest);
+  const targetNo = (id: string) => target === id && hasStandaloneNo(latest);
+  const targetYes = (id: string) => target === id && hasStandaloneYes(latest);
+  const targetNumber = (id: string) => target === id && hasAnyNumber(latest);
+  const captured = (id: string) => hasCapturedFact(text, id);
+
   switch (input.fieldKey) {
     case "full_name":
       return hasFullName(text) ? [] : [{ id: "surname", followup: () => "Could you tell me your surname too?" }];
@@ -163,50 +259,55 @@ function missingFacts(input: EvaluateInput, text: string): MissingFact[] {
       return hasDob(text) ? [] : [{ id: "dob", followup: () => "What is your full date of birth, including the year?" }];
     case "home": {
       const missing: MissingFact[] = [];
-      if (!hasStreetAddress(text)) missing.push({ id: "address", followup: () => "What’s your full address, including house number and street?" });
-      if (!hasPostcode(text)) missing.push({ id: "postcode", followup: () => "What’s the postcode for that address?" });
-      if (!hasDuration(text)) missing.push({ id: "duration", followup: () => "How long have you lived there?" });
+      const addressKnown = captured("address") || hasStreetAddress(text) || (target === "address" && hasPlausibleHouseNameAnswer(latest));
+      if (!addressKnown && !(targetDeclined && target === "address")) missing.push({ id: "address", followup: () => "What’s the house name or number and street?" });
+      if (!captured("postcode") && !hasPostcode(text) && !(targetDeclined && target === "postcode")) missing.push({ id: "postcode", followup: () => "What’s the postcode for that address?" });
+      if (!captured("duration") && !hasDuration(text) && !(targetDeclined && target === "duration")) missing.push({ id: "duration", followup: () => "How long have you lived there?" });
       return missing;
     }
     case "family": {
       const missing: MissingFact[] = [];
-      if (!hasRelationshipStatus(text)) missing.push({ id: "relationship", followup: () => "Are you single, married, cohabiting, divorced, separated or widowed?" });
-      if (!hasNoDependants(text) && !hasDependants(text)) missing.push({ id: "dependants", followup: (name) => `Do you have any children or other dependants${name ? `, ${name}` : ""}?` });
-      if (hasDependants(text)) {
-        if (!hasDependantCount(text)) missing.push({ id: "dependant_count", followup: () => "How many children or dependants do you have?" });
-        if (!hasDependantAges(text)) missing.push({ id: "dependant_ages", followup: () => "What ages are your children or dependants?" });
+      const relationshipKnown = captured("relationship") || hasRelationshipStatus(text) || targetAnsweredShortly("relationship") || (targetDeclined && target === "relationship");
+      const noDependantsKnown = hasCapturedNo(text, "dependants") || hasNoDependants(text) || targetNo("dependants") || (targetDeclined && target === "dependants");
+      const hasDependantsKnown = hasCapturedYes(text, "dependants") || hasDependants(text) || targetYes("dependants") || targetNumber("dependants");
+      if (!relationshipKnown) missing.push({ id: "relationship", followup: () => "Are you single, married, cohabiting, divorced, separated or widowed?" });
+      if (!noDependantsKnown && !hasDependantsKnown) missing.push({ id: "dependants", followup: (name) => `Do you have any children or other dependants${name ? `, ${name}` : ""}?` });
+      if (hasDependantsKnown && !noDependantsKnown) {
+        if (!captured("dependant_count") && !hasDependantCount(text) && !targetNumber("dependants") && !targetNumber("dependant_count") && !(targetDeclined && target === "dependant_count")) missing.push({ id: "dependant_count", followup: () => "How many children or dependants do you have?" });
+        if (!captured("dependant_ages") && !hasDependantAges(text) && !(target === "dependant_ages" && hasStandaloneAgeAnswer(latest)) && !(targetDeclined && target === "dependant_ages")) missing.push({ id: "dependant_ages", followup: () => "What ages are your children or dependants?" });
       }
       return missing;
     }
     case "work": {
       const missing: MissingFact[] = [];
-      if (!hasEmploymentStatus(text)) missing.push({ id: "status", followup: () => "Are you employed, self-employed, retired, unemployed, or something else?" });
+      const statusKnown = captured("status") || hasEmploymentStatus(text) || targetAnsweredShortly("status") || (targetDeclined && target === "status");
+      if (!statusKnown) missing.push({ id: "status", followup: () => "Are you employed, self-employed, retired, unemployed, or something else?" });
       if (isRetiredOrUnemployed(text)) {
-        if (!hasIncome(text) && !/\b(no|none|zero|0)\s+(?:income|earnings?)\b/i.test(text)) missing.push({ id: "income", followup: () => "Do you currently have any regular income, and how much per year?" });
+        if (!captured("income") && !hasIncome(text) && !(target === "income" && (hasMoneyLike(latest) || hasStandaloneNo(latest))) && !/\b(no|none|zero|0)\s+(?:income|earnings?)\b/i.test(text) && !(targetDeclined && target === "income")) missing.push({ id: "income", followup: () => "Do you currently have any regular income, and how much per year?" });
         return missing;
       }
-      if (!hasEmployerOrBusiness(text)) missing.push({ id: "employer", followup: () => "Who is your employer, or what is your business called?" });
-      if (!hasJobTitle(text)) missing.push({ id: "role", followup: () => "What is your job title or role?" });
-      if (!hasDuration(text)) missing.push({ id: "time", followup: () => "How long have you been in that role?" });
-      if (!hasIncome(text)) missing.push({ id: "income", followup: () => "What is your annual gross income before tax?" });
+      if (!captured("employer") && !hasEmployerOrBusiness(text) && !targetAnsweredShortly("employer") && !(targetDeclined && target === "employer")) missing.push({ id: "employer", followup: () => "Who is your employer, or what is your business called?" });
+      if (!captured("role") && !hasJobTitle(text) && !targetAnsweredShortly("role") && !(targetDeclined && target === "role")) missing.push({ id: "role", followup: () => "What is your job title or role?" });
+      if (!captured("time") && !hasDuration(text) && !(targetDeclined && target === "time")) missing.push({ id: "time", followup: () => "How long have you been in that role?" });
+      if (!captured("income") && !hasIncome(text) && !(target === "income" && hasMoneyLike(latest)) && !(targetDeclined && target === "income")) missing.push({ id: "income", followup: () => "What is your annual gross income before tax?" });
       return missing;
     }
     case "retirement_income":
-      return hasIncome(text) ? [] : [{ id: "pension_income", followup: () => "What is your total annual pension income before tax?" }];
+      return captured("pension_income") || hasIncome(text) || (target === "pension_income" && hasMoneyLike(latest)) || (targetDeclined && target === "pension_income") ? [] : [{ id: "pension_income", followup: () => "What is your total annual pension income before tax?" }];
     case "outgoings_credit": {
       const missing: MissingFact[] = [];
-      if (!hasMonthlyEssentials(text)) missing.push({ id: "essentials", followup: () => "Roughly how much are your essential monthly outgoings?" });
-      if (!hasCreditPayments(text)) missing.push({ id: "credit", followup: () => "Do you have any credit, loans or card payments each month?" });
-      if (!hasAdverseCredit(text)) missing.push({ id: "adverse", followup: () => "Any missed payments, defaults, CCJs or bankruptcy in the last six years?" });
+      if (!captured("essentials") && !hasMonthlyEssentials(text) && !(target === "essentials" && hasMoneyLike(latest)) && !(targetDeclined && target === "essentials")) missing.push({ id: "essentials", followup: () => "Roughly how much are your essential monthly outgoings?" });
+      if (!captured("credit") && !hasCreditPayments(text) && !(target === "credit" && (hasStandaloneNo(latest) || hasMoneyLike(latest) || targetYes("credit"))) && !(targetDeclined && target === "credit")) missing.push({ id: "credit", followup: () => "Do you have any credit, loans or card payments each month?" });
+      if (!captured("adverse") && !hasAdverseCredit(text) && !(target === "adverse" && (hasStandaloneNo(latest) || targetYes("adverse"))) && !(targetDeclined && target === "adverse")) missing.push({ id: "adverse", followup: () => "Any missed payments, defaults, CCJs or bankruptcy in the last six years?" });
       return missing;
     }
     case "mortgage_need": {
       const missing: MissingFact[] = [];
-      if (!hasMortgagePurpose(text)) missing.push({ id: "purpose", followup: () => "Is this a purchase, remortgage, next home, or buy-to-let?" });
-      if (!hasPropertyPrice(text)) missing.push({ id: "price", followup: () => "What is the property price or current value?" });
-      if (!hasDeposit(text)) missing.push({ id: "deposit", followup: () => "How much deposit do you have?" });
-      if (!hasMortgageTerm(text)) missing.push({ id: "term", followup: () => "What mortgage term would you like, in years?" });
-      if (!hasPropertyType(text)) missing.push({ id: "type", followup: () => "What type of property is it — flat, terraced, semi or detached?" });
+      if (!captured("purpose") && !hasMortgagePurpose(text) && !targetAnsweredShortly("purpose") && !(targetDeclined && target === "purpose")) missing.push({ id: "purpose", followup: () => "Is this a purchase, remortgage, next home, or buy-to-let?" });
+      if (!captured("price") && !hasPropertyPrice(text) && !(target === "price" && hasMoneyLike(latest)) && !(targetDeclined && target === "price")) missing.push({ id: "price", followup: () => "What is the property price or current value?" });
+      if (!captured("deposit") && !hasDeposit(text) && !(target === "deposit" && (hasMoneyLike(latest) || /\b\d{1,2}\s?%\b/.test(latest))) && !(targetDeclined && target === "deposit")) missing.push({ id: "deposit", followup: () => "How much deposit do you have?" });
+      if (!captured("term") && !hasMortgageTerm(text) && !(target === "term" && hasAnyNumber(latest)) && !(targetDeclined && target === "term")) missing.push({ id: "term", followup: () => "What mortgage term would you like, in years?" });
+      if (!captured("type") && !hasPropertyType(text) && !targetAnsweredShortly("type") && !(targetDeclined && target === "type")) missing.push({ id: "type", followup: () => "What type of property is it — flat, terraced, semi or detached?" });
       return missing;
     }
     default:
@@ -214,12 +315,18 @@ function missingFacts(input: EvaluateInput, text: string): MissingFact[] {
   }
 }
 
+function missingFacts(input: EvaluateInput, text: string): MissingFact[] {
+  const latest = input.transcript.trim();
+  const priorText = (input.priorAnswer ?? "").trim();
+  const firstMissingBeforeThisAnswer = priorText ? missingFactsFor(input, priorText)[0]?.id : undefined;
+  return missingFactsFor(input, text, latest, firstMissingBeforeThisAnswer);
+}
+
 export async function evaluateAnswer(input: EvaluateInput): Promise<EvaluateResult> {
   const combinedText = [input.priorAnswer, input.transcript].filter(Boolean).join(" ").trim();
-  const explicitlyDeclined = hasExplicitDecline(input.transcript);
   const hardMissing = missingFacts(input, combinedText);
   const fallback: EvaluateResult = {
-    complete: hardMissing.length === 0 || explicitlyDeclined,
+    complete: hardMissing.length === 0,
     cleanedValue: combinedText,
     followup: hardMissing[0]?.followup(input.firstName),
   };
@@ -231,8 +338,8 @@ RULE: You MUST NOT move on until every required fact has been captured, OR the c
 
 Each turn:
 1) Extract every required fact present so far (prior partial + new transcript). Produce a tidy "cleanedValue" in plain sentences for the advisor's file.
-2) Set complete=true ONLY if every required fact is captured, or any remaining fact has been explicitly declined ("I'd rather not say", "skip", "no comment"). If the customer asks a meta question back ("what do you want to know?", "like what?", "can you give me an example?"), that is NOT a refusal — complete=false and ask the next specific missing fact.
-3) Otherwise → complete=false and write ONE short, warm, British-English follow-up that asks for the SINGLE next missing fact. Max 15 words. Conversational, specific, not a checklist. Never re-ask anything already answered. Never list multiple things. Use the customer's first name occasionally, not every turn. If the customer seems unsure, give a small example.
+2) If the deterministic gate says something is still missing, keep complete=false.
+3) Otherwise → complete=true. If incomplete, write ONE short, warm, British-English follow-up that asks for the SINGLE next missing fact. Max 15 words. Conversational, specific, not a checklist. Never re-ask anything already answered. If the customer seems unsure or asks what you need, ask the specific missing fact with a small example.
 
 Respond ONLY with strict JSON:
 {"complete": boolean, "cleanedValue": string, "followup": string, "acknowledgement": string}
@@ -249,7 +356,7 @@ Customer just said: "${input.transcript}"
 Follow-ups already asked for this field: ${input.followupCount}.
 
 Missing facts the deterministic gate still requires: ${hardMissing.map((f) => f.id).join(", ") || "none"}.
-Remember: do not set complete=true unless every required fact is captured or explicitly declined. A meta reply like "what do you need to know?" is NOT a refusal — ask the next specific missing fact.`;
+Remember: if a fact is still missing, ask only the first specific missing fact. A meta reply like "what do you need to know?" is not an answer.`;
 
   try {
     const res = await openAIFetch("/chat/completions", {
@@ -273,7 +380,7 @@ Remember: do not set complete=true unless every required fact is captured or exp
     const parsed = JSON.parse(content) as Partial<EvaluateResult>;
     const cleanedValue = (parsed.cleanedValue ?? fallback.cleanedValue).trim();
     const missingAfterAi = missingFacts(input, [combinedText, cleanedValue].filter(Boolean).join(" "));
-    const complete = explicitlyDeclined || missingAfterAi.length === 0;
+    const complete = missingAfterAi.length === 0;
     return {
       complete,
       cleanedValue,

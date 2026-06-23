@@ -66,7 +66,7 @@ export const SECTIONS: SectionDef[] = [
         key: "home",
         label: "Current home",
         prompt: "Thanks, {firstName}. Where do you currently live?",
-        expects: "House number/name and street, town/city, full UK postcode, and how long they've lived there.",
+        expects: "House name or house number, street, town/city, full UK postcode, and how long they've lived there.",
         silenceMs: 2200,
       },
       {
