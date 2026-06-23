@@ -87,11 +87,13 @@ function InterviewPage() {
   pausedRef.current = paused;
   doneRef.current = done;
 
-  const cleanupAudio = () => {
+  const cleanupAudio = (stopTracks = true) => {
     if (rafRef.current) window.clearInterval(rafRef.current);
     rafRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+    if (stopTracks) {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
     audioCtxRef.current?.close().catch(() => {});
     audioCtxRef.current = null;
   };
@@ -141,9 +143,11 @@ function InterviewPage() {
           .then(() => true)
           .catch((e) => {
             console.error("TTS play failed", e);
+            bootedRef.current = false;
+            setNeedsGesture(true);
             setPaused(true);
-            setStatus("Audio blocked — tap resume");
-            toast.error("Audio blocked — tap resume");
+            setStatus("Audio blocked — tap Start");
+            toast.error("Audio blocked — tap Start");
             return false;
           });
         // play() resolves when speech ends → start listening
@@ -151,7 +155,9 @@ function InterviewPage() {
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Something went wrong");
-      setStatus("Error — tap resume to retry");
+      bootedRef.current = false;
+      setNeedsGesture(true);
+      setStatus("Error — tap Start to retry");
     } finally {
       setThinking(false);
     }
@@ -160,14 +166,15 @@ function InterviewPage() {
   const startListening = async () => {
     if (pausedRef.current || doneRef.current) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const existingStream = streamRef.current;
+      const stream = existingStream?.active ? existingStream : await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       const mimeType = ["audio/webm", "audio/mp4"].find((t) => MediaRecorder.isTypeSupported(t)) || "audio/webm";
       const mr = new MediaRecorder(stream, { mimeType });
       chunksRef.current = [];
       mr.ondataavailable = (e) => e.data.size > 0 && chunksRef.current.push(e.data);
       mr.onstop = async () => {
-        cleanupAudio();
+        cleanupAudio(false);
         setListening(false);
         const blob = new Blob(chunksRef.current, { type: mr.mimeType });
         if (blob.size < 1024) {
@@ -276,11 +283,12 @@ function InterviewPage() {
     } catch {
       setNeedsGesture(true);
       setListening(false);
-      setStatus("Tap to enable microphone");
+      setStatus("Allow microphone, then tap Start");
     }
   };
 
   const handlePause = () => {
+    pausedRef.current = true;
     setPaused(true);
     stopPlayback();
     if (mediaRef.current?.state === "recording") mediaRef.current.stop();
@@ -289,17 +297,39 @@ function InterviewPage() {
     setStatus("Paused");
   };
 
+  const prepareMediaFromGesture = async () => {
+    const unlockPromise = unlock();
+    const streamPromise = streamRef.current?.active
+      ? Promise.resolve(streamRef.current)
+      : navigator.mediaDevices.getUserMedia({ audio: true });
+    const [, stream] = await Promise.all([unlockPromise, streamPromise]);
+    streamRef.current = stream;
+  };
+
   const handleResume = async () => {
+    pausedRef.current = false;
+    setNeedsGesture(false);
     setPaused(false);
-    await unlock().catch(() => {});
+    try {
+      await prepareMediaFromGesture();
+    } catch (e) {
+      console.error("Resume media unlock failed", e);
+      pausedRef.current = true;
+      setNeedsGesture(true);
+      setPaused(true);
+      setStatus("Allow microphone, then tap Start");
+      toast.error("Please allow microphone access, then tap Start");
+      return;
+    }
     if (current?.sayText) {
       setStatus("Speaking…");
       play(current.sayText)
         .catch((e) => {
           console.error("TTS play failed", e);
           setPaused(true);
-          setStatus("Audio blocked — tap resume");
-          toast.error("Audio blocked — tap resume");
+          setNeedsGesture(true);
+          setStatus("Audio blocked — tap Start");
+          toast.error("Audio blocked — tap Start");
           throw e;
         })
         .then(() => {
@@ -313,12 +343,26 @@ function InterviewPage() {
     }
   };
 
-  // Try to boot automatically; if the browser blocks audio, Resume provides the required user gesture.
   const handleStart = async () => {
     if (bootedRef.current || !sessionQ.data) return;
-    bootedRef.current = true;
+    pausedRef.current = false;
+    setNeedsGesture(false);
+    setPaused(false);
     setStarted(true);
-    await unlock().catch((e) => console.warn("Audio unlock skipped", e));
+    setStatus("Starting…");
+    try {
+      await prepareMediaFromGesture();
+    } catch (e) {
+      console.error("Start media unlock failed", e);
+      pausedRef.current = true;
+      setNeedsGesture(true);
+      setStarted(false);
+      setPaused(true);
+      setStatus("Allow microphone, then tap Start");
+      toast.error("Please allow microphone access, then tap Start");
+      return;
+    }
+    bootedRef.current = true;
     const messages = sessionQ.data.messages;
     const lastAvatar = [...messages].reverse().find((m) => m.role === "avatar");
     const lastCustomer = [...messages].reverse().find((m) => m.role === "customer");
@@ -354,7 +398,7 @@ function InterviewPage() {
           bootedRef.current = false;
           setStarted(false);
           setNeedsGesture(true);
-          setStatus("Tap to begin");
+          setStatus("Tap Start to begin");
         });
     } else if (firstPrompt) {
       const secDef = findSection(fallbackSection);
@@ -439,6 +483,7 @@ function InterviewPage() {
                 {needsGesture ? (
                   <Button
                     onClick={() => {
+                      pausedRef.current = false;
                       setNeedsGesture(false);
                       setPaused(false);
                       void handleStart();
