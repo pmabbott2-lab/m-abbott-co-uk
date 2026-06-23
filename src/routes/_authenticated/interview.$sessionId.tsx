@@ -295,6 +295,7 @@ function InterviewPage() {
   };
 
   const handleResume = async () => {
+    pausedRef.current = false;
     setPaused(false);
     await unlock().catch(() => {});
     if (current?.sayText) {
@@ -321,17 +322,21 @@ function InterviewPage() {
 
   const handleStart = async () => {
     if (bootedRef.current || !sessionQ.data) return;
+    pausedRef.current = false;
     setNeedsGesture(false);
     setPaused(false);
     setStarted(true);
     setStatus("Starting…");
     try {
-      if (!streamRef.current?.active) {
-        streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-      }
-      await unlock();
+      const unlockPromise = unlock();
+      const streamPromise = streamRef.current?.active
+        ? Promise.resolve(streamRef.current)
+        : navigator.mediaDevices.getUserMedia({ audio: true });
+      const [, stream] = await Promise.all([unlockPromise, streamPromise]);
+      streamRef.current = stream;
     } catch (e) {
       console.error("Start media unlock failed", e);
+      pausedRef.current = true;
       setNeedsGesture(true);
       setStarted(false);
       setPaused(true);
@@ -460,6 +465,7 @@ function InterviewPage() {
                 {needsGesture ? (
                   <Button
                     onClick={() => {
+                      pausedRef.current = false;
                       setNeedsGesture(false);
                       setPaused(false);
                       void handleStart();
