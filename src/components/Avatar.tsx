@@ -42,8 +42,8 @@ export function useAudioPlayback() {
   };
 
   const unlock = async () => {
-    if (unlockedRef.current) return;
     const audio = ensureAudio();
+    if (unlockedRef.current && !audio.paused) return;
     audio.onended = null;
     audio.onerror = null;
     audio.loop = true;
