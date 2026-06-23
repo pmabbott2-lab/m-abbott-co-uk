@@ -435,7 +435,19 @@ function InterviewPage() {
                 {transcribing ? "Transcribing…" : thinking ? "Thinking…" : status}
               </p>
               <div className="flex gap-2">
-                {paused ? (
+                {needsGesture ? (
+                  <Button
+                    onClick={() => {
+                      setNeedsGesture(false);
+                      setPaused(false);
+                      void handleStart();
+                    }}
+                    size="lg"
+                    className="rounded-full"
+                  >
+                    <Play className="w-4 h-4 mr-2" /> Tap to begin
+                  </Button>
+                ) : paused ? (
                   <Button onClick={handleResume} size="lg" className="rounded-full">
                     <Play className="w-4 h-4 mr-2" /> Resume
                   </Button>
