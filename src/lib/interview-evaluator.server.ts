@@ -356,7 +356,7 @@ function missingFactsFor(input: EvaluateInput, text: string, latest = "", target
       const noAdverseKnown = hasCapturedNo(text, "adverse") || hasNoAdverseCredit(text) || (target === "adverse" && hasStandaloneNo(latest)) || (targetDeclined && target === "adverse");
       const adverseKnown = hasCapturedYes(text, "adverse") || hasAdverseCredit(text) || hasAdverseSubject(text) || (target === "adverse" && hasStandaloneYes(latest)) || noAdverseKnown;
       if (!adverseKnown) missing.push({ id: "adverse", followup: () => "Any missed payments, defaults, CCJs or bankruptcy in the last six years?" });
-      if (adverseKnown && !noAdverseKnown && !captured("adverse_details") && !(target === "adverse_details" && isShortMeaningfulAnswer(latest)) && !(targetDeclined && target === "adverse_details")) {
+      if (adverseKnown && !noAdverseKnown && !captured("adverse_details") && !(target === "adverse_details" && hasUsableDetailAnswer(latest)) && !(targetDeclined && target === "adverse_details")) {
         missing.push({ id: "adverse_details", followup: () => "Could you briefly tell me what happened and when?" });
       }
       return missing;
