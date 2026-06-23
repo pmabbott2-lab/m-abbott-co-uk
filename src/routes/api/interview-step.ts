@@ -9,7 +9,12 @@ interface Body {
   transcript: string;
 }
 
-const MAX_FOLLOWUPS = 1;
+const ACKS = ["Thanks", "Got it", "Lovely", "Great", "Okay, noted", "Brilliant", "Perfect"];
+function pickAck(seed: string): string {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+  return ACKS[Math.abs(h) % ACKS.length];
+}
 
 export const Route = createFileRoute("/api/interview-step")({
   server: {
