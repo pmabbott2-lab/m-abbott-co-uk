@@ -46,7 +46,7 @@ export const SECTIONS: SectionDef[] = [
       { key: "address", label: "Current address", prompt: "What's your current home address, including postcode?" },
       { key: "marital_status", label: "Marital status", prompt: "Are you single, married, in a civil partnership, or living with a partner?" },
       { key: "dependants", label: "Dependants", prompt: "Do you have any dependants?" },
-      { key: "dependants_details", label: "Children's names & ages", prompt: "Lovely — could you tell me their names and ages?", skipWhen: (a) => !hasDependants(a) },
+      { key: "dependants_details", label: "Children's names & ages", prompt: "Thank you — could you tell me their names and ages?", skipWhen: (a) => !hasDependants(a) },
     ],
   },
   {
