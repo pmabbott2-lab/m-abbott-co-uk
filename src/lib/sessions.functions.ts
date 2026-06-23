@@ -3,12 +3,55 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { chatCompletion } from "@/lib/ai-gateway.server";
 
+const WORD_NUMS: Record<string, number> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+  ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
+  sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+};
+
+function wordsToNumber(s: string): number | null {
+  // Handles e.g. "two hundred and fifty thousand", "one million", "three hundred thousand"
+  const tokens = s.toLowerCase().replace(/-/g, " ").replace(/,/g, " ").split(/\s+/).filter(Boolean);
+  if (!tokens.length) return null;
+  let total = 0;
+  let current = 0;
+  let matched = false;
+  for (const t of tokens) {
+    if (t === "and") continue;
+    if (t in WORD_NUMS) { current += WORD_NUMS[t]; matched = true; }
+    else if (t === "hundred") { current = (current || 1) * 100; matched = true; }
+    else if (t === "thousand" || t === "k") { total += (current || 1) * 1000; current = 0; matched = true; }
+    else if (t === "million" || t === "m" || t === "mil") { total += (current || 1) * 1_000_000; current = 0; matched = true; }
+    else return null;
+  }
+  if (!matched) return null;
+  return total + current;
+}
+
 function parseMoney(v: string | undefined | null): number | null {
   if (!v) return null;
-  const cleaned = v.replace(/[^0-9.]/g, "");
-  if (!cleaned) return null;
-  const n = parseFloat(cleaned);
-  return isNaN(n) ? null : n;
+  const s = v.trim().toLowerCase();
+  if (!s) return null;
+  // Shorthand: "250k", "1.5m", "£300k"
+  const short = s.replace(/[£$,\s]/g, "").match(/^([0-9]*\.?[0-9]+)\s*(k|m|mil|million|thousand)?$/);
+  if (short) {
+    const n = parseFloat(short[1]);
+    if (!isNaN(n)) {
+      const suf = short[2];
+      if (suf === "k" || suf === "thousand") return n * 1000;
+      if (suf === "m" || suf === "mil" || suf === "million") return n * 1_000_000;
+      return n;
+    }
+  }
+  // Plain digits anywhere
+  const cleaned = s.replace(/[^0-9.]/g, "");
+  if (cleaned) {
+    const n = parseFloat(cleaned);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  // Spelled out
+  return wordsToNumber(s);
 }
 
 function parseYears(v: string | undefined | null): number | null {
