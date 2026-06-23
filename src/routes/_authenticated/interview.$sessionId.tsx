@@ -424,7 +424,7 @@ function InterviewPage() {
           ) : (
             <>
               <p className="text-lg font-medium leading-snug min-h-[3rem]">
-                {current?.sayText ?? (thinking ? "Preparing your first question…" : "")}
+                {current?.prompt ?? current?.sayText ?? (thinking ? "Preparing your first question…" : "")}
               </p>
               <p className="text-sm text-muted-foreground">
                 {transcribing ? "Transcribing…" : thinking ? "Thinking…" : status}
