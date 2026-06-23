@@ -5,10 +5,12 @@ const POLL_TIMEOUT_MS = 60_000;
 
 function didAuthHeader(key: string) {
   const trimmed = key.trim();
-  if (trimmed.toLowerCase().startsWith("basic ") || trimmed.toLowerCase().startsWith("bearer ")) {
-    return trimmed;
+  if (/^basic\s+/i.test(trimmed) || /^bearer\s+/i.test(trimmed)) return trimmed;
+  // Raw "email:secret" -> base64 encode it ourselves.
+  if (trimmed.includes(":") && !/^[A-Za-z0-9+/=]+$/.test(trimmed)) {
+    return `Basic ${Buffer.from(trimmed).toString("base64")}`;
   }
-  // D-ID API keys are usually base64 of email:secret. Use Basic.
+  // Already-base64 token from D-ID dashboard.
   return `Basic ${trimmed}`;
 }
 
