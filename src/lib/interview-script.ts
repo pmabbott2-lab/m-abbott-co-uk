@@ -1,9 +1,13 @@
 export type Section = "personal" | "employment" | "outgoings" | "property";
 
+export type AnswersMap = Record<string, string>;
+
 export interface Question {
   key: string;
   label: string;
   prompt: string;
+  /** Optional predicate; when it returns true, this question is skipped. */
+  skipWhen?: (answers: AnswersMap) => boolean;
 }
 
 export interface SectionDef {
@@ -11,6 +15,17 @@ export interface SectionDef {
   title: string;
   intro: string;
   questions: Question[];
+}
+
+function isRetired(answers: AnswersMap): boolean {
+  const v = (answers["employment:employment_status"] ?? "").toLowerCase();
+  return /retire/.test(v);
+}
+
+function isNotRetired(answers: AnswersMap): boolean {
+  const v = (answers["employment:employment_status"] ?? "").toLowerCase();
+  if (!v) return true; // before we know, default to hiding the retiree-only field
+  return !/retire/.test(v);
 }
 
 export const SECTIONS: SectionDef[] = [
@@ -31,11 +46,12 @@ export const SECTIONS: SectionDef[] = [
     title: "Employment & income",
     intro: "Now a few questions about your work and income.",
     questions: [
-      { key: "employment_status", label: "Employment status", prompt: "Are you employed, self-employed, a contractor, or something else?" },
-      { key: "employer", label: "Employer / business name", prompt: "Who do you work for, or what's the name of your business?" },
-      { key: "job_title", label: "Job title", prompt: "What's your job title or role?" },
-      { key: "annual_income", label: "Annual gross income", prompt: "Roughly what's your annual gross income, including any regular bonus?" },
-      { key: "years_in_role", label: "Time in current role", prompt: "How long have you been in your current role?" },
+      { key: "employment_status", label: "Employment status", prompt: "Are you employed, self-employed, a contractor, retired, or something else?" },
+      { key: "employer", label: "Employer / business name", prompt: "Who do you work for, or what's the name of your business?", skipWhen: isRetired },
+      { key: "job_title", label: "Job title", prompt: "What's your job title or role?", skipWhen: isRetired },
+      { key: "annual_income", label: "Annual gross income", prompt: "Roughly what's your annual gross income, including any regular bonus?", skipWhen: isRetired },
+      { key: "years_in_role", label: "Time in current role", prompt: "How long have you been in your current role?", skipWhen: isRetired },
+      { key: "pension_income", label: "Annual pension income", prompt: "Roughly what's your total annual pension income, including state and private pensions?", skipWhen: isNotRetired },
     ],
   },
   {
@@ -66,36 +82,75 @@ export function findSection(id: string): SectionDef | undefined {
   return SECTIONS.find((s) => s.id === id);
 }
 
-export function totalQuestions(): number {
-  return SECTIONS.reduce((acc, s) => acc + s.questions.length, 0);
+function isSkipped(q: Question, answers?: AnswersMap): boolean {
+  if (!answers || !q.skipWhen) return false;
+  try { return q.skipWhen(answers); } catch { return false; }
 }
 
-export function questionIndexGlobal(section: Section, index: number): number {
+export function totalQuestions(answers?: AnswersMap): number {
+  return SECTIONS.reduce(
+    (acc, s) => acc + s.questions.filter((q) => !isSkipped(q, answers)).length,
+    0,
+  );
+}
+
+export function questionIndexGlobal(section: Section, index: number, answers?: AnswersMap): number {
   let n = 0;
   for (const s of SECTIONS) {
-    if (s.id === section) return n + index;
-    n += s.questions.length;
+    if (s.id === section) {
+      for (let i = 0; i < index; i++) {
+        if (!isSkipped(s.questions[i], answers)) n += 1;
+      }
+      return n;
+    }
+    n += s.questions.filter((q) => !isSkipped(q, answers)).length;
   }
   return n;
 }
 
-export function nextStep(section: Section, index: number): { section: Section; index: number } | null {
-  const sIdx = SECTIONS.findIndex((s) => s.id === section);
-  if (sIdx < 0) return null;
-  const sec = SECTIONS[sIdx];
-  if (index + 1 < sec.questions.length) return { section, index: index + 1 };
-  const next = SECTIONS[sIdx + 1];
-  if (!next) return null;
-  return { section: next.id, index: 0 };
+export function nextStep(
+  section: Section,
+  index: number,
+  answers?: AnswersMap,
+): { section: Section; index: number } | null {
+  let cur: { section: Section; index: number } | null = { section, index };
+  while (cur) {
+    const sIdx = SECTIONS.findIndex((s) => s.id === cur!.section);
+    if (sIdx < 0) return null;
+    const sec = SECTIONS[sIdx];
+    if (cur.index + 1 < sec.questions.length) {
+      cur = { section: cur.section, index: cur.index + 1 };
+    } else {
+      const next = SECTIONS[sIdx + 1];
+      if (!next) return null;
+      cur = { section: next.id, index: 0 };
+    }
+    const q = getQuestion(cur.section, cur.index);
+    if (q && !isSkipped(q, answers)) return cur;
+  }
+  return null;
 }
 
-export function prevStep(section: Section, index: number): { section: Section; index: number } | null {
-  const sIdx = SECTIONS.findIndex((s) => s.id === section);
-  if (sIdx < 0) return null;
-  if (index > 0) return { section, index: index - 1 };
-  const prev = SECTIONS[sIdx - 1];
-  if (!prev) return null;
-  return { section: prev.id, index: prev.questions.length - 1 };
+export function prevStep(
+  section: Section,
+  index: number,
+  answers?: AnswersMap,
+): { section: Section; index: number } | null {
+  let cur: { section: Section; index: number } | null = { section, index };
+  while (cur) {
+    const sIdx = SECTIONS.findIndex((s) => s.id === cur!.section);
+    if (sIdx < 0) return null;
+    if (cur.index > 0) {
+      cur = { section: cur.section, index: cur.index - 1 };
+    } else {
+      const prev = SECTIONS[sIdx - 1];
+      if (!prev) return null;
+      cur = { section: prev.id, index: prev.questions.length - 1 };
+    }
+    const q = getQuestion(cur.section, cur.index);
+    if (q && !isSkipped(q, answers)) return cur;
+  }
+  return null;
 }
 
 export function getQuestion(section: Section, index: number): Question | undefined {

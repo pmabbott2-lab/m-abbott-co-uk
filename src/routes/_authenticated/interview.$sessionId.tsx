@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Pause, Play, ArrowLeft, Undo2 } from "lucide-react";
 import { toast } from "sonner";
-import { totalQuestions, questionIndexGlobal, getQuestion, findSection, prevStep, type Section } from "@/lib/interview-script";
+import { totalQuestions, questionIndexGlobal, getQuestion, findSection, prevStep, type Section, type AnswersMap } from "@/lib/interview-script";
 
 export const Route = createFileRoute("/_authenticated/interview/$sessionId")({
   component: InterviewPage,
@@ -413,9 +413,17 @@ function InterviewPage() {
     }
   };
 
+  const answersMap: AnswersMap = (() => {
+    const m: AnswersMap = {};
+    (sessionQ.data?.answers ?? []).forEach((a: { section: string; field_key: string; value: string | null }) => {
+      m[`${a.section}:${a.field_key}`] = a.value ?? "";
+    });
+    return m;
+  })();
+
   const handleBack = async () => {
     if (!current?.section || current.questionIndex == null) return;
-    const prev = prevStep(current.section, current.questionIndex);
+    const prev = prevStep(current.section, current.questionIndex, answersMap);
     if (!prev) {
       toast.info("You're at the first question");
       return;
@@ -460,7 +468,7 @@ function InterviewPage() {
 
   const sec = (current?.section ?? "personal") as Section;
   const qi = current?.questionIndex ?? 0;
-  const progress = done ? 100 : Math.round((questionIndexGlobal(sec, qi) / totalQuestions()) * 100);
+  const progress = done ? 100 : Math.round((questionIndexGlobal(sec, qi, answersMap) / Math.max(1, totalQuestions(answersMap))) * 100);
 
   return (
     <AppShell
