@@ -29,7 +29,7 @@ interface StepResp {
 }
 
 // Voice-activity detection thresholds
-const SILENCE_MS = 800; // sustained silence after speech ends the turn
+const SILENCE_MS = 450; // sustained silence after speech ends the turn
 const MAX_TURN_MS = 45000; // hard cap per answer
 const NO_SPEECH_TIMEOUT_MS = 10000; // if nothing detected at all, stop
 const CALIBRATION_MS = 500; // measure ambient noise floor at start
