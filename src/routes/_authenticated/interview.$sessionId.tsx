@@ -293,21 +293,15 @@ function InterviewPage() {
     if (bootedRef.current || !sessionQ.data) return;
     bootedRef.current = true;
     setStarted(true);
-    try {
-      await unlock();
-    } catch (e) {
-      console.error("Audio unlock failed", e);
-      toast.error("Audio blocked — tap start again");
-      bootedRef.current = false;
-      setStarted(false);
-      setStatus("Tap start to begin");
-      return;
-    }
+    await unlock().catch((e) => console.warn("Audio unlock skipped", e));
     const messages = sessionQ.data.messages;
     const lastAvatar = [...messages].reverse().find((m) => m.role === "avatar");
     const lastCustomer = [...messages].reverse().find((m) => m.role === "customer");
     const hasOpenQuestion =
       lastAvatar && (!lastCustomer || new Date(lastAvatar.created_at) > new Date(lastCustomer.created_at));
+    const fallbackSection = (sessionQ.data.session.current_section as Section) || "personal";
+    const fallbackIndex = sessionQ.data.session.current_question_index ?? 0;
+    const firstPrompt = buildPromptText(fallbackSection, fallbackIndex);
     if (hasOpenQuestion) {
       const sec = sessionQ.data.session.current_section as Section;
       const idx = sessionQ.data.session.current_question_index;
@@ -332,6 +326,19 @@ function InterviewPage() {
           setStatus("Audio blocked — tap resume");
           toast.error("Audio blocked — tap resume");
         });
+    } else if (firstPrompt) {
+      const secDef = findSection(fallbackSection);
+      setCurrent({
+        done: false,
+        section: fallbackSection,
+        sectionTitle: secDef?.title ?? fallbackSection,
+        questionIndex: fallbackIndex,
+        questionsInSection: secDef?.questions.length ?? 0,
+        fieldKey: getQuestion(fallbackSection, fallbackIndex)?.key,
+        fieldLabel: getQuestion(fallbackSection, fallbackIndex)?.label,
+        sayText: firstPrompt,
+      });
+      callStep("");
     } else {
       callStep("");
     }
