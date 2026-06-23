@@ -12,6 +12,8 @@ export interface EvaluateInput {
   priorAnswer?: string;
   /** Number of follow-ups already asked for this field. */
   followupCount: number;
+  /** Customer's first name, for personalised follow-ups. */
+  firstName?: string;
 }
 
 export interface EvaluateResult {
@@ -22,7 +24,7 @@ export interface EvaluateResult {
 }
 
 const MODEL = "gpt-4o-mini";
-const MAX_FOLLOWUPS = 2;
+const MAX_FOLLOWUPS = 3;
 
 export async function evaluateAnswer(input: EvaluateInput): Promise<EvaluateResult> {
   const fallback: EvaluateResult = {
@@ -32,23 +34,27 @@ export async function evaluateAnswer(input: EvaluateInput): Promise<EvaluateResu
 
   if (!input.expects) return fallback;
 
-  const sys = `You are Susan, a warm UK mortgage interview assistant. For each customer answer, decide whether the required fact has been captured. If yes, return a tidy cleaned value. If not, write ONE short, friendly British-English follow-up question to fill the gap. Never repeat the original question verbatim. Keep follow-ups under 18 words. If the customer is clearly unwilling to answer or already gave a usable value, accept it.
+  const sys = `You are Susan, a warm, conversational UK mortgage interview assistant. The customer is answering open-ended questions, so their reply may contain several facts at once — or only some of what's needed.
 
-Respond ONLY with strict JSON of shape:
+Your job each turn:
+1) Extract every required fact present in the conversation so far (prior partial + new transcript). Produce a tidy, concise "cleanedValue" that captures all of them in plain sentences, ready for an advisor's file.
+2) Decide if every required fact is now captured. If yes → complete=true, followup="".
+3) If anything is still missing or ambiguous, write ONE short, warm, British-English follow-up that asks ONLY for the missing pieces — never repeat the full original question, never re-ask things already answered, and keep it under 25 words. Use the customer's first name naturally if provided. If a piece of information is sensitive and the customer declines, accept it and move on.
+
+Respond ONLY with strict JSON:
 {"complete": boolean, "cleanedValue": string, "followup": string, "acknowledgement": string}
 
-- cleanedValue: concise canonical form of what was captured so far (combine prior + new). Empty string if nothing usable.
-- followup: empty string when complete=true; otherwise the single clarifying question to ask next.
-- acknowledgement: a brief warm acknowledgement (e.g. "Thank you", "Lovely") — 1-3 words, no punctuation.`;
+- acknowledgement: 1-3 warm words ("Thank you", "Lovely", "Brilliant") — no punctuation. Empty if it would feel repetitive.`;
 
   const user = `Field: ${input.fieldLabel}
-We need: ${input.expects}
+Required facts: ${input.expects}
 Original question asked: "${input.prompt}"
-Prior partial answer (may be empty): "${input.priorAnswer ?? ""}"
+Customer's first name: "${input.firstName ?? ""}"
+Captured so far (prior partial, may be empty): "${input.priorAnswer ?? ""}"
 Customer just said: "${input.transcript}"
 Follow-ups already asked for this field: ${input.followupCount} of ${MAX_FOLLOWUPS} max.
 
-If follow-ups already at the maximum, set complete=true and use whatever we have as cleanedValue.`;
+If follow-ups already at the maximum, set complete=true with whatever has been captured.`;
 
   try {
     const res = await openAIFetch("/chat/completions", {
