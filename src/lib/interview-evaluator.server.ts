@@ -81,6 +81,10 @@ function isShortMeaningfulAnswer(text: string): boolean {
   return words.length >= 1 && words.length <= 8;
 }
 
+function hasCapturedFact(text: string, id: string): boolean {
+  return new RegExp(`\\bCaptured\\s+${id.replace(/_/g, "[_\\s-]")}\\s*:`, "i").test(text);
+}
+
 function hasFullName(text: string): boolean {
   const words = text
     .replace(/[^\p{L}'\s-]/gu, " ")
@@ -239,6 +243,7 @@ function missingFactsFor(input: EvaluateInput, text: string, latest = "", target
   const targetNo = (id: string) => target === id && hasStandaloneNo(latest);
   const targetYes = (id: string) => target === id && hasStandaloneYes(latest);
   const targetNumber = (id: string) => target === id && hasAnyNumber(latest);
+  const captured = (id: string) => hasCapturedFact(text, id);
 
   switch (input.fieldKey) {
     case "full_name":
@@ -247,55 +252,55 @@ function missingFactsFor(input: EvaluateInput, text: string, latest = "", target
       return hasDob(text) ? [] : [{ id: "dob", followup: () => "What is your full date of birth, including the year?" }];
     case "home": {
       const missing: MissingFact[] = [];
-      const addressKnown = hasStreetAddress(text) || (target === "address" && hasPlausibleHouseNameAnswer(latest));
+      const addressKnown = captured("address") || hasStreetAddress(text) || (target === "address" && hasPlausibleHouseNameAnswer(latest));
       if (!addressKnown && !(targetDeclined && target === "address")) missing.push({ id: "address", followup: () => "What’s the house name or number and street?" });
-      if (!hasPostcode(text) && !(targetDeclined && target === "postcode")) missing.push({ id: "postcode", followup: () => "What’s the postcode for that address?" });
-      if (!hasDuration(text) && !(targetDeclined && target === "duration")) missing.push({ id: "duration", followup: () => "How long have you lived there?" });
+      if (!captured("postcode") && !hasPostcode(text) && !(targetDeclined && target === "postcode")) missing.push({ id: "postcode", followup: () => "What’s the postcode for that address?" });
+      if (!captured("duration") && !hasDuration(text) && !(targetDeclined && target === "duration")) missing.push({ id: "duration", followup: () => "How long have you lived there?" });
       return missing;
     }
     case "family": {
       const missing: MissingFact[] = [];
-      const relationshipKnown = hasRelationshipStatus(text) || targetAnsweredShortly("relationship") || (targetDeclined && target === "relationship");
-      const noDependantsKnown = hasNoDependants(text) || targetNo("dependants") || (targetDeclined && target === "dependants");
+      const relationshipKnown = captured("relationship") || hasRelationshipStatus(text) || targetAnsweredShortly("relationship") || (targetDeclined && target === "relationship");
+      const noDependantsKnown = captured("dependants") || hasNoDependants(text) || targetNo("dependants") || (targetDeclined && target === "dependants");
       const hasDependantsKnown = hasDependants(text) || targetYes("dependants") || targetNumber("dependants");
       if (!relationshipKnown) missing.push({ id: "relationship", followup: () => "Are you single, married, cohabiting, divorced, separated or widowed?" });
       if (!noDependantsKnown && !hasDependantsKnown) missing.push({ id: "dependants", followup: (name) => `Do you have any children or other dependants${name ? `, ${name}` : ""}?` });
       if (hasDependantsKnown && !noDependantsKnown) {
-        if (!hasDependantCount(text) && !targetNumber("dependants") && !targetNumber("dependant_count") && !(targetDeclined && target === "dependant_count")) missing.push({ id: "dependant_count", followup: () => "How many children or dependants do you have?" });
-        if (!hasDependantAges(text) && !(target === "dependant_ages" && hasStandaloneAgeAnswer(latest)) && !(targetDeclined && target === "dependant_ages")) missing.push({ id: "dependant_ages", followup: () => "What ages are your children or dependants?" });
+        if (!captured("dependant_count") && !hasDependantCount(text) && !targetNumber("dependants") && !targetNumber("dependant_count") && !(targetDeclined && target === "dependant_count")) missing.push({ id: "dependant_count", followup: () => "How many children or dependants do you have?" });
+        if (!captured("dependant_ages") && !hasDependantAges(text) && !(target === "dependant_ages" && hasStandaloneAgeAnswer(latest)) && !(targetDeclined && target === "dependant_ages")) missing.push({ id: "dependant_ages", followup: () => "What ages are your children or dependants?" });
       }
       return missing;
     }
     case "work": {
       const missing: MissingFact[] = [];
-      const statusKnown = hasEmploymentStatus(text) || targetAnsweredShortly("status") || (targetDeclined && target === "status");
+      const statusKnown = captured("status") || hasEmploymentStatus(text) || targetAnsweredShortly("status") || (targetDeclined && target === "status");
       if (!statusKnown) missing.push({ id: "status", followup: () => "Are you employed, self-employed, retired, unemployed, or something else?" });
       if (isRetiredOrUnemployed(text)) {
-        if (!hasIncome(text) && !(target === "income" && (hasMoneyLike(latest) || hasStandaloneNo(latest))) && !/\b(no|none|zero|0)\s+(?:income|earnings?)\b/i.test(text) && !(targetDeclined && target === "income")) missing.push({ id: "income", followup: () => "Do you currently have any regular income, and how much per year?" });
+        if (!captured("income") && !hasIncome(text) && !(target === "income" && (hasMoneyLike(latest) || hasStandaloneNo(latest))) && !/\b(no|none|zero|0)\s+(?:income|earnings?)\b/i.test(text) && !(targetDeclined && target === "income")) missing.push({ id: "income", followup: () => "Do you currently have any regular income, and how much per year?" });
         return missing;
       }
-      if (!hasEmployerOrBusiness(text) && !targetAnsweredShortly("employer") && !(targetDeclined && target === "employer")) missing.push({ id: "employer", followup: () => "Who is your employer, or what is your business called?" });
-      if (!hasJobTitle(text) && !targetAnsweredShortly("role") && !(targetDeclined && target === "role")) missing.push({ id: "role", followup: () => "What is your job title or role?" });
-      if (!hasDuration(text) && !(targetDeclined && target === "time")) missing.push({ id: "time", followup: () => "How long have you been in that role?" });
-      if (!hasIncome(text) && !(target === "income" && hasMoneyLike(latest)) && !(targetDeclined && target === "income")) missing.push({ id: "income", followup: () => "What is your annual gross income before tax?" });
+      if (!captured("employer") && !hasEmployerOrBusiness(text) && !targetAnsweredShortly("employer") && !(targetDeclined && target === "employer")) missing.push({ id: "employer", followup: () => "Who is your employer, or what is your business called?" });
+      if (!captured("role") && !hasJobTitle(text) && !targetAnsweredShortly("role") && !(targetDeclined && target === "role")) missing.push({ id: "role", followup: () => "What is your job title or role?" });
+      if (!captured("time") && !hasDuration(text) && !(targetDeclined && target === "time")) missing.push({ id: "time", followup: () => "How long have you been in that role?" });
+      if (!captured("income") && !hasIncome(text) && !(target === "income" && hasMoneyLike(latest)) && !(targetDeclined && target === "income")) missing.push({ id: "income", followup: () => "What is your annual gross income before tax?" });
       return missing;
     }
     case "retirement_income":
-      return hasIncome(text) || (target === "pension_income" && hasMoneyLike(latest)) || (targetDeclined && target === "pension_income") ? [] : [{ id: "pension_income", followup: () => "What is your total annual pension income before tax?" }];
+      return captured("pension_income") || hasIncome(text) || (target === "pension_income" && hasMoneyLike(latest)) || (targetDeclined && target === "pension_income") ? [] : [{ id: "pension_income", followup: () => "What is your total annual pension income before tax?" }];
     case "outgoings_credit": {
       const missing: MissingFact[] = [];
-      if (!hasMonthlyEssentials(text) && !(target === "essentials" && hasMoneyLike(latest)) && !(targetDeclined && target === "essentials")) missing.push({ id: "essentials", followup: () => "Roughly how much are your essential monthly outgoings?" });
-      if (!hasCreditPayments(text) && !(target === "credit" && (hasStandaloneNo(latest) || hasMoneyLike(latest) || targetYes("credit"))) && !(targetDeclined && target === "credit")) missing.push({ id: "credit", followup: () => "Do you have any credit, loans or card payments each month?" });
-      if (!hasAdverseCredit(text) && !(target === "adverse" && (hasStandaloneNo(latest) || targetYes("adverse"))) && !(targetDeclined && target === "adverse")) missing.push({ id: "adverse", followup: () => "Any missed payments, defaults, CCJs or bankruptcy in the last six years?" });
+      if (!captured("essentials") && !hasMonthlyEssentials(text) && !(target === "essentials" && hasMoneyLike(latest)) && !(targetDeclined && target === "essentials")) missing.push({ id: "essentials", followup: () => "Roughly how much are your essential monthly outgoings?" });
+      if (!captured("credit") && !hasCreditPayments(text) && !(target === "credit" && (hasStandaloneNo(latest) || hasMoneyLike(latest) || targetYes("credit"))) && !(targetDeclined && target === "credit")) missing.push({ id: "credit", followup: () => "Do you have any credit, loans or card payments each month?" });
+      if (!captured("adverse") && !hasAdverseCredit(text) && !(target === "adverse" && (hasStandaloneNo(latest) || targetYes("adverse"))) && !(targetDeclined && target === "adverse")) missing.push({ id: "adverse", followup: () => "Any missed payments, defaults, CCJs or bankruptcy in the last six years?" });
       return missing;
     }
     case "mortgage_need": {
       const missing: MissingFact[] = [];
-      if (!hasMortgagePurpose(text) && !targetAnsweredShortly("purpose") && !(targetDeclined && target === "purpose")) missing.push({ id: "purpose", followup: () => "Is this a purchase, remortgage, next home, or buy-to-let?" });
-      if (!hasPropertyPrice(text) && !(target === "price" && hasMoneyLike(latest)) && !(targetDeclined && target === "price")) missing.push({ id: "price", followup: () => "What is the property price or current value?" });
-      if (!hasDeposit(text) && !(target === "deposit" && (hasMoneyLike(latest) || /\b\d{1,2}\s?%\b/.test(latest))) && !(targetDeclined && target === "deposit")) missing.push({ id: "deposit", followup: () => "How much deposit do you have?" });
-      if (!hasMortgageTerm(text) && !(target === "term" && hasAnyNumber(latest)) && !(targetDeclined && target === "term")) missing.push({ id: "term", followup: () => "What mortgage term would you like, in years?" });
-      if (!hasPropertyType(text) && !targetAnsweredShortly("type") && !(targetDeclined && target === "type")) missing.push({ id: "type", followup: () => "What type of property is it — flat, terraced, semi or detached?" });
+      if (!captured("purpose") && !hasMortgagePurpose(text) && !targetAnsweredShortly("purpose") && !(targetDeclined && target === "purpose")) missing.push({ id: "purpose", followup: () => "Is this a purchase, remortgage, next home, or buy-to-let?" });
+      if (!captured("price") && !hasPropertyPrice(text) && !(target === "price" && hasMoneyLike(latest)) && !(targetDeclined && target === "price")) missing.push({ id: "price", followup: () => "What is the property price or current value?" });
+      if (!captured("deposit") && !hasDeposit(text) && !(target === "deposit" && (hasMoneyLike(latest) || /\b\d{1,2}\s?%\b/.test(latest))) && !(targetDeclined && target === "deposit")) missing.push({ id: "deposit", followup: () => "How much deposit do you have?" });
+      if (!captured("term") && !hasMortgageTerm(text) && !(target === "term" && hasAnyNumber(latest)) && !(targetDeclined && target === "term")) missing.push({ id: "term", followup: () => "What mortgage term would you like, in years?" });
+      if (!captured("type") && !hasPropertyType(text) && !targetAnsweredShortly("type") && !(targetDeclined && target === "type")) missing.push({ id: "type", followup: () => "What type of property is it — flat, terraced, semi or detached?" });
       return missing;
     }
     default:
