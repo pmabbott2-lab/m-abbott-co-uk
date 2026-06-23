@@ -413,9 +413,17 @@ function InterviewPage() {
     }
   };
 
+  const answersMap: AnswersMap = (() => {
+    const m: AnswersMap = {};
+    (sessionQ.data?.answers ?? []).forEach((a: { section: string; field_key: string; value: string | null }) => {
+      m[`${a.section}:${a.field_key}`] = a.value ?? "";
+    });
+    return m;
+  })();
+
   const handleBack = async () => {
     if (!current?.section || current.questionIndex == null) return;
-    const prev = prevStep(current.section, current.questionIndex);
+    const prev = prevStep(current.section, current.questionIndex, answersMap);
     if (!prev) {
       toast.info("You're at the first question");
       return;
