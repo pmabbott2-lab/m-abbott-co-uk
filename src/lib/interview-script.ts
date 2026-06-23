@@ -22,14 +22,18 @@ export interface SectionDef {
 }
 
 function isRetired(answers: AnswersMap): boolean {
-  const v = (answers["employment:employment_status"] ?? "").toLowerCase();
-  if (!v) return false;
-  return /\bretir/.test(v) || /\bpension/.test(v) || /no longer work/.test(v) || /not working/.test(v) || /stopped work/.test(v) || /\bex[- ]?employ/.test(v);
+  const v = (
+    (answers["employment:work"] ?? "") + " " + (answers["employment:employment_status"] ?? "")
+  ).toLowerCase();
+  if (!v.trim()) return false;
+  return /\bretir/.test(v) || /\bpension/.test(v) || /no longer work/.test(v) || /not working/.test(v) || /stopped work/.test(v);
 }
 
 function isNotRetired(answers: AnswersMap): boolean {
-  const v = (answers["employment:employment_status"] ?? "").toLowerCase();
-  if (!v) return true; // before we know, default to hiding the retiree-only field
+  const v = (
+    (answers["employment:work"] ?? "") + " " + (answers["employment:employment_status"] ?? "")
+  ).toLowerCase();
+  if (!v.trim()) return true;
   return !isRetired(answers);
 }
 
