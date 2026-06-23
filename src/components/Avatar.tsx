@@ -53,7 +53,7 @@ export function useAudioPlayback() {
     unlockedRef.current = true;
   };
 
-  const play = async (text: string) => {
+  const play = async (text: string, opts?: { onNearEnd?: () => void; nearEndMs?: number }) => {
     const audio = ensureAudio();
     if (!audio.loop) audio.pause();
     const res = await fetch("/api/tts", {
@@ -67,14 +67,32 @@ export function useAudioPlayback() {
     audio.loop = false;
     audio.src = url;
     audio.load();
+    const nearEndMs = opts?.nearEndMs ?? 700;
+    let nearEndFired = false;
+    const fireNearEnd = () => {
+      if (nearEndFired) return;
+      nearEndFired = true;
+      try { opts?.onNearEnd?.(); } catch (e) { console.error("onNearEnd", e); }
+    };
+    const onTime = () => {
+      if (nearEndFired) return;
+      const d = audio.duration;
+      if (Number.isFinite(d) && d > 0 && d - audio.currentTime <= nearEndMs / 1000) {
+        fireNearEnd();
+      }
+    };
+    audio.addEventListener("timeupdate", onTime);
     await new Promise<void>((resolve, reject) => {
       audio.onended = () => {
+        audio.removeEventListener("timeupdate", onTime);
+        fireNearEnd();
         audio.loop = false;
         setPlaying(false);
         URL.revokeObjectURL(url);
         resolve();
       };
       audio.onerror = () => {
+        audio.removeEventListener("timeupdate", onTime);
         audio.loop = false;
         setPlaying(false);
         URL.revokeObjectURL(url);
@@ -83,6 +101,7 @@ export function useAudioPlayback() {
       audio.play()
         .then(() => setPlaying(true))
         .catch((error) => {
+          audio.removeEventListener("timeupdate", onTime);
           setPlaying(false);
           URL.revokeObjectURL(url);
           reject(error);
