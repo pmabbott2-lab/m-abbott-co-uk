@@ -114,9 +114,9 @@ function hasStreetAddress(text: string): boolean {
 
 function hasPlausibleHouseNameAnswer(text: string): boolean {
   if (!isShortMeaningfulAnswer(text)) return false;
+  if (hasPostcode(text) && !hasStreetAddress(text)) return false;
   if (hasStreetAddress(text)) return true;
   if (/\b(?:house\s+name|property\s+name|house|property|home|called|named)\b/i.test(text)) return true;
-  if (/\b\d+[a-z]?\b/i.test(text)) return true;
   const words = text
     .replace(/[^\p{L}'\s-]/gu, " ")
     .trim()
