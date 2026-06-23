@@ -24,7 +24,7 @@ export interface EvaluateResult {
 }
 
 const MODEL = "gpt-4o-mini";
-const MAX_FOLLOWUPS = 3;
+const MAX_FOLLOWUPS = 8;
 
 export async function evaluateAnswer(input: EvaluateInput): Promise<EvaluateResult> {
   const fallback: EvaluateResult = {
