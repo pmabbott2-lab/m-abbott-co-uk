@@ -344,6 +344,31 @@ function InterviewPage() {
     }
   };
 
+  useEffect(() => {
+    if (!sessionQ.data || current || started || done) return;
+    const messages = sessionQ.data.messages;
+    const lastAvatar = [...messages].reverse().find((m) => m.role === "avatar");
+    const lastCustomer = [...messages].reverse().find((m) => m.role === "customer");
+    const hasOpenQuestion =
+      lastAvatar && (!lastCustomer || new Date(lastAvatar.created_at) > new Date(lastCustomer.created_at));
+    const section = (sessionQ.data.session.current_section as Section) || "personal";
+    const index = sessionQ.data.session.current_question_index ?? 0;
+    const sectionDef = findSection(section);
+    const question = getQuestion(section, index);
+    const sayText = hasOpenQuestion ? lastAvatar.text : buildPromptText(section, index);
+    if (!sayText) return;
+    setCurrent({
+      done: false,
+      section,
+      sectionTitle: sectionDef?.title ?? section,
+      questionIndex: index,
+      questionsInSection: sectionDef?.questions.length ?? 0,
+      fieldKey: hasOpenQuestion ? "resume" : question?.key,
+      fieldLabel: hasOpenQuestion ? "" : question?.label,
+      sayText,
+    });
+  }, [sessionQ.data, current, started, done]);
+
   useEffect(() => () => cleanupAudio(), []);
 
   const handleFinish = async () => {
