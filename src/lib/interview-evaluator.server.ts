@@ -59,12 +59,22 @@ function isUnsureOnly(text: string): boolean {
   return /^(?:\s*)(?:i\s+)?(?:don'?t\s+know|do\s+not\s+know|not\s+sure|unsure|can'?t\s+remember|no\s+idea)(?:\s*)$/i.test(text.trim());
 }
 
+function normaliseShortReply(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\d\s']/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function hasStandaloneNo(text: string): boolean {
-  return /^(?:\s*)(?:no|none|nope|zero|0|not\s+any|nothing)(?:\s*)$/i.test(text.trim());
+  const value = normaliseShortReply(text);
+  return /^(?:no|none|nope|zero|0|not\s+any|nothing|i\s+don'?t|we\s+don'?t|i\s+do\s+not|we\s+do\s+not|no\s+i\s+don'?t|no\s+we\s+don'?t|no\s+i\s+do\s+not|no\s+we\s+do\s+not)$/.test(value);
 }
 
 function hasStandaloneYes(text: string): boolean {
-  return /^(?:\s*)(?:yes|yeah|yep|i\s+do|we\s+do)(?:\s*)$/i.test(text.trim());
+  const value = normaliseShortReply(text);
+  return /^(?:yes|yeah|yep|yup|correct|that'?s\s+right|i\s+do|we\s+do|i\s+have|we\s+have|yes\s+i\s+do|yes\s+we\s+do|yes\s+i\s+have|yes\s+we\s+have|yeah\s+i\s+do|yeah\s+we\s+do|yeah\s+i\s+have|yeah\s+we\s+have)$/.test(value);
 }
 
 function hasAnyNumber(text: string): boolean {
@@ -224,9 +234,31 @@ function hasCreditPayments(text: string): boolean {
     (/\b(credit\s*card|loan|debt|finance|car\s+payment|hire\s+purchase)\b/i.test(text) && (/\b(no|none|zero|0)\b/i.test(text) || hasMoneyLike(text)));
 }
 
+function hasNoCreditPayments(text: string): boolean {
+  return /\b(?:no|none|nope|zero|0|not\s+any|nothing)\s+(?:credit|loans?|debts?|cards?|card\s+payments?|finance|car\s+payments?|hire\s+purchase)\b/i.test(text) ||
+    /\b(?:credit|loans?|debts?|cards?|card\s+payments?|finance|car\s+payments?|hire\s+purchase)\s*[:=-]?\s*(?:no|none|nope|zero|0|nothing)\b/i.test(text);
+}
+
+function hasCreditSubject(text: string): boolean {
+  return /\b(credit\s*cards?|cards?|loans?|debts?|finance|car\s+payments?|hire\s+purchase|hp|overdraft)\b/i.test(text);
+}
+
+function hasCreditPaymentAmount(text: string): boolean {
+  return hasMoneyLike(text) && /\b(credit\s*cards?|cards?|loans?|debts?|finance|car\s+payments?|hire\s+purchase|hp|overdraft|month|monthly|payment|repayments?|pay)\b/i.test(text);
+}
+
 function hasAdverseCredit(text: string): boolean {
   return /\b(no|none|never)\s+(?:adverse|missed\s+payments?|defaults?|ccjs?|bankrupt(?:cy|cies)?)\b/i.test(text) ||
     /\b(adverse\s+credit|missed\s+payments?|defaults?|ccjs?|bankrupt(?:cy|cies)?)\b/i.test(text);
+}
+
+function hasNoAdverseCredit(text: string): boolean {
+  return /\b(?:no|none|never)\s+(?:adverse\s+credit|missed\s+payments?|defaults?|ccjs?|bankrupt(?:cy|cies)?|bankruptcy|arrears)\b/i.test(text) ||
+    /\b(?:adverse\s+credit|missed\s+payments?|defaults?|ccjs?|bankrupt(?:cy|cies)?|bankruptcy|arrears)\s*[:=-]?\s*(?:no|none|never)\b/i.test(text);
+}
+
+function hasAdverseSubject(text: string): boolean {
+  return /\b(adverse\s+credit|missed\s+payments?|defaults?|ccjs?|county\s+court\s+judg(?:e)?ments?|bankrupt(?:cy|cies)?|bankruptcy|arrears|iva)\b/i.test(text);
 }
 
 function hasMortgagePurpose(text: string): boolean {
