@@ -360,7 +360,7 @@ function missingFactsFor(input: EvaluateInput, text: string, latest = "", target
       const missing: MissingFact[] = [];
       if (!captured("purpose") && !hasMortgagePurpose(text) && !targetAnsweredShortly("purpose") && !(targetDeclined && target === "purpose")) missing.push({ id: "purpose", followup: () => "Is this a purchase, remortgage, next home, or buy-to-let?" });
       if (!captured("price") && !hasPropertyPrice(text) && !(target === "price" && hasMoneyLike(latest)) && !(targetDeclined && target === "price")) missing.push({ id: "price", followup: () => "What is the property price or current value?" });
-      if (!captured("deposit") && !hasDeposit(text) && !(target === "deposit" && (hasMoneyLike(latest) || /\b\d{1,2}\s?%\b/.test(latest))) && !(targetDeclined && target === "deposit")) missing.push({ id: "deposit", followup: () => "How much deposit do you have?" });
+      if (!captured("deposit") && !hasDeposit(text) && !(target === "deposit" && (hasMoneyLike(latest) || hasPercentLike(latest))) && !(targetDeclined && target === "deposit")) missing.push({ id: "deposit", followup: () => "How much deposit do you have?" });
       if (!captured("term") && !hasMortgageTerm(text) && !(target === "term" && hasAnyNumber(latest)) && !(targetDeclined && target === "term")) missing.push({ id: "term", followup: () => "What mortgage term would you like, in years?" });
       if (!captured("type") && !hasPropertyType(text) && !targetAnsweredShortly("type") && !(targetDeclined && target === "type")) missing.push({ id: "type", followup: () => "What type of property is it — flat, terraced, semi or detached?" });
       return missing;
