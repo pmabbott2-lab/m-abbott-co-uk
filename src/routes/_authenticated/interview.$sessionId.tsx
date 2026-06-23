@@ -48,6 +48,10 @@ function buildPromptText(section: Section, index: number) {
   return `${sectionDef.intro} ${question.prompt}`;
 }
 
+function asSusan(text: string) {
+  return text.replace("Hi! I'll guide you", "Hi, I'm Susan. I'll guide you");
+}
+
 function InterviewPage() {
   const { sessionId } = Route.useParams();
   const navigate = useNavigate();
@@ -305,18 +309,20 @@ function InterviewPage() {
     if (hasOpenQuestion) {
       const sec = sessionQ.data.session.current_section as Section;
       const idx = sessionQ.data.session.current_question_index;
+      const secDef = findSection(sec);
+      const sayText = asSusan(lastAvatar!.text);
       setCurrent({
         done: false,
         section: sec,
-        sectionTitle: sec,
+        sectionTitle: secDef?.title ?? sec,
         questionIndex: idx,
-        questionsInSection: 5,
+        questionsInSection: secDef?.questions.length ?? 0,
         fieldKey: "resume",
         fieldLabel: "",
-        sayText: lastAvatar!.text,
+        sayText,
       });
       setStatus("Speaking…");
-      play(lastAvatar!.text)
+      play(sayText)
         .then(() => {
           if (!pausedRef.current && !doneRef.current) startListening();
         })
@@ -355,7 +361,7 @@ function InterviewPage() {
     const index = sessionQ.data.session.current_question_index ?? 0;
     const sectionDef = findSection(section);
     const question = getQuestion(section, index);
-    const sayText = hasOpenQuestion ? lastAvatar.text : buildPromptText(section, index);
+    const sayText = hasOpenQuestion ? asSusan(lastAvatar.text) : buildPromptText(section, index);
     if (!sayText) return;
     setCurrent({
       done: false,
