@@ -100,9 +100,17 @@ function InterviewPage() {
       setCurrent(data);
       if (data.sayText) {
         setStatus("Speaking…");
-        await play(data.sayText).catch((e) => console.error(e));
+        const spoke = await play(data.sayText)
+          .then(() => true)
+          .catch((e) => {
+            console.error("TTS play failed", e);
+            setPaused(true);
+            setStatus("Audio blocked — tap resume");
+            toast.error("Audio blocked — tap resume");
+            return false;
+          });
         // play() resolves when speech ends → start listening
-        if (!pausedRef.current && !doneRef.current) startListening();
+        if (spoke && !pausedRef.current && !doneRef.current) startListening();
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Something went wrong");
@@ -239,9 +247,18 @@ function InterviewPage() {
     if (current?.sayText) {
       setStatus("Speaking…");
       play(current.sayText)
-        .catch(() => {})
+        .catch((e) => {
+          console.error("TTS play failed", e);
+          setPaused(true);
+          setStatus("Audio blocked — tap resume");
+          toast.error("Audio blocked — tap resume");
+          throw e;
+        })
         .then(() => {
           if (!pausedRef.current && !doneRef.current) startListening();
+        })
+        .catch(() => {
+          // already surfaced above
         });
     } else {
       startListening();
@@ -283,9 +300,14 @@ function InterviewPage() {
       });
       setStatus("Speaking…");
       play(lastAvatar!.text)
-        .catch((e) => { console.error("TTS play failed", e); toast.error("Audio blocked — tap start again"); })
         .then(() => {
           if (!pausedRef.current && !doneRef.current) startListening();
+        })
+        .catch((e) => {
+          console.error("TTS play failed", e);
+          setPaused(true);
+          setStatus("Audio blocked — tap resume");
+          toast.error("Audio blocked — tap resume");
         });
     } else {
       callStep("");
