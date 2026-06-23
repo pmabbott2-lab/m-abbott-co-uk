@@ -178,9 +178,12 @@ function InterviewPage() {
       const buf = new Float32Array(analyser.fftSize);
       const startedAt = Date.now();
       let speechDetected = false;
+      let speechMs = 0;
       let lastSpeechAt = Date.now();
       let noiseFloor = 0.005;
+      let calibrated = false;
       const noiseSamples: number[] = [];
+      const TICK_MS = 80;
 
       const intervalId = window.setInterval(() => {
         const mr2 = mediaRef.current;
@@ -195,24 +198,31 @@ function InterviewPage() {
         const now = Date.now();
         const elapsed = now - startedAt;
 
-        // Calibrate noise floor in the first window
+        // Calibrate noise floor in the first window (75th percentile)
         if (elapsed < CALIBRATION_MS) {
           noiseSamples.push(rms);
-          rafRef.current = null;
           return;
         }
-        if (noiseSamples.length && noiseFloor === 0.005) {
+        if (!calibrated) {
           noiseSamples.sort((a, b) => a - b);
-          noiseFloor = noiseSamples[Math.floor(noiseSamples.length / 2)] || 0.005;
+          noiseFloor = noiseSamples[Math.floor(noiseSamples.length * 0.75)] || 0.005;
+          calibrated = true;
         }
 
-        const threshold = Math.max(MIN_SPEECH_RMS, noiseFloor * SPEECH_MULTIPLIER);
-        if (rms > threshold) {
+        const onThreshold = Math.max(MIN_SPEECH_RMS, noiseFloor * SPEECH_ON_MULT);
+        const offThreshold = Math.min(MIN_SILENCE_RMS, Math.max(noiseFloor * SPEECH_OFF_MULT, noiseFloor + 0.002));
+
+        if (rms > onThreshold) {
           speechDetected = true;
+          speechMs += TICK_MS;
           lastSpeechAt = now;
+        } else if (rms < offThreshold) {
+          // count as silence — do not bump lastSpeechAt
+        } else {
+          // in-between band — treat as quiet enough not to extend speech
         }
 
-        if (speechDetected && now - lastSpeechAt > SILENCE_MS) {
+        if (speechDetected && speechMs >= MIN_SPEECH_MS && now - lastSpeechAt > SILENCE_MS) {
           window.clearInterval(intervalId);
           try { mr2.stop(); } catch {}
           return;
@@ -227,7 +237,7 @@ function InterviewPage() {
           try { mr2.stop(); } catch {}
           return;
         }
-      }, 80);
+      }, TICK_MS);
       rafRef.current = intervalId as unknown as number;
     } catch {
       toast.error("Microphone access denied.");
