@@ -63,7 +63,9 @@ export function useAudioPlayback() {
     audio.loop = true;
     audio.src = silentWav;
     audio.load();
-    await audio.play();
+    await audio.play().catch((error) => {
+      if (audioCtxRef.current?.state !== "running") throw error;
+    });
     unlockedRef.current = true;
   };
 
@@ -150,13 +152,20 @@ export function useAudioPlayback() {
   const play = async (text: string) => {
     const audio = ensureAudio();
     if (!audio.loop) audio.pause();
-    const res = await fetch("/api/tts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    if (!res.ok) throw new Error("TTS failed");
-    const blob = await res.blob();
+    let blob: Blob;
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error("TTS failed");
+      blob = await res.blob();
+    } catch (error) {
+      console.warn("Remote TTS failed, trying browser speech", error);
+      await playWithSpeechSynthesis(text);
+      return;
+    }
     try {
       await playWithHtmlAudio(blob);
     } catch (htmlError) {
