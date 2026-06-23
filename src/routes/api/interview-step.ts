@@ -133,6 +133,15 @@ export const Route = createFileRoute("/api/interview-step")({
               .maybeSingle();
             const priorAnswer = existing?.value ?? "";
             const currentFollowupCount = session.followup_count ?? 0;
+            // Derive first name from any prior full_name answer for personalised follow-ups.
+            const { data: nameRow } = await supabase
+              .from("interview_answers")
+              .select("value")
+              .eq("session_id", body.sessionId)
+              .eq("section", "personal")
+              .eq("field_key", "full_name")
+              .maybeSingle();
+            const firstName = ((nameRow?.value ?? "").trim().split(/\s+/)[0] ?? "").replace(/[^\p{L}'-]/gu, "");
             const result = await evaluateAnswer({
               fieldLabel: currentQ.label,
               expects: currentQ.expects,
@@ -140,6 +149,7 @@ export const Route = createFileRoute("/api/interview-step")({
               transcript: rawValue,
               priorAnswer,
               followupCount: currentFollowupCount,
+              firstName: firstName || undefined,
             });
             cleanedValue = result.cleanedValue || rawValue;
             acknowledgement = result.acknowledgement || pickAck();
