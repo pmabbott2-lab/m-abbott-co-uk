@@ -46,12 +46,12 @@ export const SECTIONS: SectionDef[] = [
     questions: [
       { key: "full_name", label: "Full name", prompt: "Could you tell me your full legal name?" },
       { key: "date_of_birth", label: "Date of birth", prompt: "What's your date of birth?" },
-      { key: "address_line", label: "House number or name & street", prompt: "What's the house number or name, and street, of your current home?", silenceMs: 1800 },
-      { key: "postcode", label: "Postcode", prompt: "And what's the postcode?", silenceMs: 1500 },
+      { key: "address_line", label: "House number or name & street", prompt: "What's the house number or name, and street, of your current home?", silenceMs: 2000 },
+      { key: "postcode", label: "Postcode", prompt: "And what's the postcode?", silenceMs: 2000 },
       { key: "marital_status", label: "Marital status", prompt: "Are you single, married, in a civil partnership, or living with a partner?" },
       { key: "dependants", label: "Dependants", prompt: "Do you have any dependants?" },
-      { key: "dependants_count", label: "Number of children", prompt: "Lovely — how many children do you have?", skipWhen: (a) => !hasDependants(a) },
-      { key: "dependants_details", label: "Children's names & ages", prompt: "Thank you — please tell me each child's name and age. Take your time between each one, and just say \"that's everyone\" when you've finished.", skipWhen: (a) => !hasDependants(a), silenceMs: 5000 },
+      { key: "dependants_count", label: "Number of children", prompt: "Thanks — how many children do you have?", skipWhen: (a) => !hasDependants(a) },
+      { key: "dependants_details", label: "Children's names & ages", prompt: "Thank you — please tell me each child's name and age. I'll keep asking until I've got them all, or you say \"that's it\".", skipWhen: (a) => !hasDependants(a), silenceMs: 2000 },
     ],
   },
   {

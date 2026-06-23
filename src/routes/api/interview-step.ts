@@ -19,6 +19,42 @@ function pickAck(): string {
   return ACKS[Math.floor(Math.random() * ACKS.length)];
 }
 
+const NUMBER_WORDS: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+};
+
+function parseSmallNumber(text?: string | null): number | null {
+  const value = (text ?? "").toLowerCase();
+  const digit = value.match(/\b([1-9]|10)\b/);
+  if (digit) return Number(digit[1]);
+  for (const [word, n] of Object.entries(NUMBER_WORDS)) {
+    if (new RegExp(`\\b${word}\\b`).test(value)) return n;
+  }
+  return null;
+}
+
+function isFinishedChildren(text: string): boolean {
+  return /\b(that'?s\s+(it|all|everyone)|all\s+done|no\s+more|finished)\b/i.test(text);
+}
+
+function countChildDetails(text: string): number {
+  const parts = text
+    .split(/\s*;\s*|\s*\n\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const ageMatches = text.match(/\b(?:[1-9]|1[0-9]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)\b/gi);
+  return Math.max(parts.length, ageMatches?.length ?? 0);
+}
+
 export const Route = createFileRoute("/api/interview-step")({
   server: {
     handlers: {
@@ -67,7 +103,22 @@ export const Route = createFileRoute("/api/interview-step")({
 
           // Deterministic, fast path: store the transcript directly and pick a quick ack.
           // Skipping the per-answer LLM cleanup removes ~1-2s of latency between answers.
-          const value = body.transcript.trim().replace(/\s+/g, " ");
+          const rawValue = body.transcript.trim().replace(/\s+/g, " ");
+          let value = rawValue;
+          if (currentQ.key === "dependants_details") {
+            const { data: existingDetail } = await supabase
+              .from("interview_answers")
+              .select("value")
+              .eq("session_id", body.sessionId)
+              .eq("section", section)
+              .eq("field_key", currentQ.key)
+              .maybeSingle();
+            const newDetail = rawValue
+              .replace(/\b(that'?s\s+(it|all|everyone)|all\s+done|no\s+more|finished)\b/gi, "")
+              .replace(/^[\s,.;-]+|[\s,.;-]+$/g, "")
+              .trim();
+            value = [existingDetail?.value ?? "", newDetail].filter(Boolean).join("; ") || existingDetail?.value || rawValue;
+          }
           acknowledgement = pickAck();
           cleanedValue = value;
           await supabase.from("interview_answers").upsert(
@@ -98,7 +149,20 @@ export const Route = createFileRoute("/api/interview-step")({
 
         // Determine next question (advance)
         const isFirst = !body.transcript.trim() && index === 0 && section === "personal";
-        const step = isFirst ? { section, index } : nextStep(section, index, answersMap);
+        let step = isFirst ? { section, index } : nextStep(section, index, answersMap);
+        let followupPrompt = "";
+        if (body.transcript.trim() && currentQ?.key === "dependants_details" && !isFinishedChildren(body.transcript)) {
+          const expectedChildren = parseSmallNumber(answersMap["personal:dependants_count"]);
+          const detailsSoFar = answersMap["personal:dependants_details"] ?? cleanedValue ?? "";
+          const capturedChildren = countChildDetails(detailsSoFar);
+          if (!expectedChildren || capturedChildren < expectedChildren) {
+            step = { section, index };
+            acknowledgement = "";
+            followupPrompt = expectedChildren
+              ? `Thank you — I've got ${capturedChildren || "that"} of ${expectedChildren}. Please tell me the next child's name and age, or say "that's it" if there aren't any more.`
+              : "Thank you — please tell me the next child's name and age, or say \"that's it\" if there aren't any more.";
+          }
+        }
 
         if (!step) {
           // Interview complete — generate a written summary for the advisor
@@ -148,7 +212,7 @@ export const Route = createFileRoute("/api/interview-step")({
         const sec = findSection(step.section)!;
         const intro = !isFirst && (step.section !== section || step.index === 0) && step.index === 0 ? sec.intro + " " : "";
         const ack = !isFirst && acknowledgement ? acknowledgement + ". " : "";
-        const sayText = (isFirst
+        const sayText = followupPrompt || (isFirst
           ? "Hi, I'm Susan. I'll guide you through a quick fact-find for your mortgage application. " + sec.intro + " "
           : ack + intro) + nextQ.prompt;
 
