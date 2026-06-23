@@ -87,11 +87,13 @@ function InterviewPage() {
   pausedRef.current = paused;
   doneRef.current = done;
 
-  const cleanupAudio = () => {
+  const cleanupAudio = (stopTracks = true) => {
     if (rafRef.current) window.clearInterval(rafRef.current);
     rafRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+    if (stopTracks) {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
     audioCtxRef.current?.close().catch(() => {});
     audioCtxRef.current = null;
   };
@@ -141,9 +143,11 @@ function InterviewPage() {
           .then(() => true)
           .catch((e) => {
             console.error("TTS play failed", e);
+            bootedRef.current = false;
+            setNeedsGesture(true);
             setPaused(true);
-            setStatus("Audio blocked — tap resume");
-            toast.error("Audio blocked — tap resume");
+            setStatus("Audio blocked — tap Start");
+            toast.error("Audio blocked — tap Start");
             return false;
           });
         // play() resolves when speech ends → start listening
@@ -160,14 +164,15 @@ function InterviewPage() {
   const startListening = async () => {
     if (pausedRef.current || doneRef.current) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const existingStream = streamRef.current;
+      const stream = existingStream?.active ? existingStream : await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       const mimeType = ["audio/webm", "audio/mp4"].find((t) => MediaRecorder.isTypeSupported(t)) || "audio/webm";
       const mr = new MediaRecorder(stream, { mimeType });
       chunksRef.current = [];
       mr.ondataavailable = (e) => e.data.size > 0 && chunksRef.current.push(e.data);
       mr.onstop = async () => {
-        cleanupAudio();
+        cleanupAudio(false);
         setListening(false);
         const blob = new Blob(chunksRef.current, { type: mr.mimeType });
         if (blob.size < 1024) {
