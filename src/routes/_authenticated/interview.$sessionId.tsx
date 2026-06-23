@@ -398,7 +398,7 @@ function InterviewPage() {
           bootedRef.current = false;
           setStarted(false);
           setNeedsGesture(true);
-          setStatus("Tap to begin");
+          setStatus("Tap Start to begin");
         });
     } else if (firstPrompt) {
       const secDef = findSection(fallbackSection);
