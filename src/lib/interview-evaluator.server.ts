@@ -55,9 +55,9 @@ Original question asked: "${input.prompt}"
 Customer's first name: "${input.firstName ?? ""}"
 Captured so far (prior partial, may be empty): "${input.priorAnswer ?? ""}"
 Customer just said: "${input.transcript}"
-Follow-ups already asked for this field: ${input.followupCount} of ${MAX_FOLLOWUPS} max.
+Follow-ups already asked for this field: ${input.followupCount}.
 
-If follow-ups already at the maximum, set complete=true with whatever has been captured.`;
+Remember: do not set complete=true unless every required fact is captured or explicitly declined. A meta reply like "what do you need to know?" is NOT a refusal — ask the next specific missing fact.`;
 
   try {
     const res = await openAIFetch("/chat/completions", {
