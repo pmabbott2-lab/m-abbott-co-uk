@@ -40,7 +40,7 @@ function InterviewPage() {
   const navigate = useNavigate();
   const getSessionFn = useServerFn(getSession);
   const submitFn = useServerFn(submitSession);
-  const { play, playing, stop: stopPlayback } = useAudioPlayback();
+  const { play, playing, stop: stopPlayback, unlock } = useAudioPlayback();
 
   const sessionQ = useQuery({
     queryKey: ["session", sessionId],
@@ -100,9 +100,17 @@ function InterviewPage() {
       setCurrent(data);
       if (data.sayText) {
         setStatus("Speaking…");
-        await play(data.sayText).catch((e) => console.error(e));
+        const spoke = await play(data.sayText)
+          .then(() => true)
+          .catch((e) => {
+            console.error("TTS play failed", e);
+            setPaused(true);
+            setStatus("Audio blocked — tap resume");
+            toast.error("Audio blocked — tap resume");
+            return false;
+          });
         // play() resolves when speech ends → start listening
-        if (!pausedRef.current && !doneRef.current) startListening();
+        if (spoke && !pausedRef.current && !doneRef.current) startListening();
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Something went wrong");
@@ -233,14 +241,24 @@ function InterviewPage() {
     setStatus("Paused");
   };
 
-  const handleResume = () => {
+  const handleResume = async () => {
     setPaused(false);
+    await unlock().catch(() => {});
     if (current?.sayText) {
       setStatus("Speaking…");
       play(current.sayText)
-        .catch(() => {})
+        .catch((e) => {
+          console.error("TTS play failed", e);
+          setPaused(true);
+          setStatus("Audio blocked — tap resume");
+          toast.error("Audio blocked — tap resume");
+          throw e;
+        })
         .then(() => {
           if (!pausedRef.current && !doneRef.current) startListening();
+        })
+        .catch(() => {
+          // already surfaced above
         });
     } else {
       startListening();
@@ -248,10 +266,20 @@ function InterviewPage() {
   };
 
   // Boot must be triggered by a user gesture (mobile autoplay policy).
-  const handleStart = () => {
+  const handleStart = async () => {
     if (bootedRef.current || !sessionQ.data) return;
     bootedRef.current = true;
     setStarted(true);
+    try {
+      await unlock();
+    } catch (e) {
+      console.error("Audio unlock failed", e);
+      toast.error("Audio blocked — tap start again");
+      bootedRef.current = false;
+      setStarted(false);
+      setStatus("Tap start to begin");
+      return;
+    }
     const messages = sessionQ.data.messages;
     const lastAvatar = [...messages].reverse().find((m) => m.role === "avatar");
     const lastCustomer = [...messages].reverse().find((m) => m.role === "customer");
@@ -272,9 +300,14 @@ function InterviewPage() {
       });
       setStatus("Speaking…");
       play(lastAvatar!.text)
-        .catch((e) => { console.error("TTS play failed", e); toast.error("Audio blocked — tap start again"); })
         .then(() => {
           if (!pausedRef.current && !doneRef.current) startListening();
+        })
+        .catch((e) => {
+          console.error("TTS play failed", e);
+          setPaused(true);
+          setStatus("Audio blocked — tap resume");
+          toast.error("Audio blocked — tap resume");
         });
     } else {
       callStep("");
