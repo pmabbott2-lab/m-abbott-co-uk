@@ -51,7 +51,7 @@ function countChildDetails(text: string): number {
     .split(/\s*;\s*|\s*\n\s*/)
     .map((part) => part.trim())
     .filter(Boolean);
-  const ageMatches = text.match(/\b(?:age(?:d)?\s*)?(?:[1-9]|1[0-9]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)\b(?=\s*(?:years?\s*old|year\s*old|yrs?\b|$|[,;.]))/gi);
+  const ageMatches = text.match(/\b(?:[1-9]|1[0-9]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)\b/gi);
   return Math.max(parts.length, ageMatches?.length ?? 0);
 }
 
