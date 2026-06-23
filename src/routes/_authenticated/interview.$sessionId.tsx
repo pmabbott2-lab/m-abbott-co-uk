@@ -68,7 +68,7 @@ function InterviewPage() {
   doneRef.current = done;
 
   const cleanupAudio = () => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (rafRef.current) window.clearInterval(rafRef.current);
     rafRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
