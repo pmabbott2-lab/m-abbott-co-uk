@@ -80,7 +80,7 @@ function hasStandaloneYes(text: string): boolean {
 }
 
 function hasAnyNumber(text: string): boolean {
-  return new RegExp(`\\b(?:\\d+|${NUMBER_WORDS})\\b`, "i").test(text);
+  return new RegExp(`\\b(?:\\d+|${NUMBER_WORDS}|${TENS_WORDS})\\b`, "i").test(text);
 }
 
 function isShortMeaningfulAnswer(text: string): boolean {
@@ -91,6 +91,11 @@ function isShortMeaningfulAnswer(text: string): boolean {
     .split(/\s+/)
     .filter(Boolean);
   return words.length >= 1 && words.length <= 8;
+}
+
+function hasUsableDetailAnswer(text: string): boolean {
+  if (!text.trim() || isMetaReply(text) || hasExplicitDecline(text) || isUnsureOnly(text)) return false;
+  return /[\p{L}\d]/u.test(text);
 }
 
 function hasCapturedFact(text: string, id: string): boolean {
