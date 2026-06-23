@@ -24,11 +24,12 @@ interface StepResp {
   questionsInSection?: number;
   fieldKey?: string;
   fieldLabel?: string;
+  prompt?: string;
   sayText?: string;
 }
 
 // Voice-activity detection thresholds
-const SILENCE_MS = 1400; // sustained silence after speech ends the turn
+const SILENCE_MS = 800; // sustained silence after speech ends the turn
 const MAX_TURN_MS = 45000; // hard cap per answer
 const NO_SPEECH_TIMEOUT_MS = 10000; // if nothing detected at all, stop
 const CALIBRATION_MS = 500; // measure ambient noise floor at start
@@ -36,7 +37,7 @@ const SPEECH_ON_MULT = 3.0; // RMS must exceed noiseFloor * this to count as spe
 const SPEECH_OFF_MULT = 1.6; // below noiseFloor * this counts as silence (hysteresis)
 const MIN_SPEECH_RMS = 0.015; // absolute floor for speech-on
 const MIN_SILENCE_RMS = 0.009; // absolute ceiling for silence
-const MIN_SPEECH_MS = 350; // require this much cumulative speech before allowing end
+const MIN_SPEECH_MS = 250; // require this much cumulative speech before allowing end
 
 function buildPromptText(section: Section, index: number) {
   const sectionDef = findSection(section);
