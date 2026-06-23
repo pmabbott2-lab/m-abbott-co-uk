@@ -377,8 +377,9 @@ function InterviewPage() {
   };
 
   useEffect(() => {
-    if (!sessionQ.data || started || done || bootedRef.current) return;
-    void handleStart();
+    if (!sessionQ.data || started || done) return;
+    setNeedsGesture(true);
+    setStatus("Tap Start to begin");
   }, [sessionQ.data, started, done]);
 
   useEffect(() => () => cleanupAudio(), []);
@@ -445,7 +446,7 @@ function InterviewPage() {
                     size="lg"
                     className="rounded-full"
                   >
-                    <Play className="w-4 h-4 mr-2" /> Tap to begin
+                    <Play className="w-4 h-4 mr-2" /> {started ? "Tap to continue" : "Start interview"}
                   </Button>
                 ) : paused ? (
                   <Button onClick={handleResume} size="lg" className="rounded-full">
