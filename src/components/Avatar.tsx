@@ -55,7 +55,7 @@ export function useAudioPlayback() {
 
   const play = async (text: string) => {
     const audio = ensureAudio();
-    audio.pause();
+    if (!audio.loop) audio.pause();
     const res = await fetch("/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -69,11 +69,13 @@ export function useAudioPlayback() {
     audio.load();
     await new Promise<void>((resolve, reject) => {
       audio.onended = () => {
+        audio.loop = false;
         setPlaying(false);
         URL.revokeObjectURL(url);
         resolve();
       };
       audio.onerror = () => {
+        audio.loop = false;
         setPlaying(false);
         URL.revokeObjectURL(url);
         reject(new Error("Audio playback error"));
