@@ -29,7 +29,7 @@ interface StepResp {
 }
 
 // Voice-activity detection thresholds
-const SILENCE_MS = 450; // sustained silence after speech ends the turn
+const SILENCE_MS = 900; // sustained silence after speech ends the turn (default)
 const MAX_TURN_MS = 45000; // hard cap per answer
 const NO_SPEECH_TIMEOUT_MS = 10000; // if nothing detected at all, stop
 const CALIBRATION_MS = 500; // measure ambient noise floor at start
@@ -264,7 +264,10 @@ function InterviewPage() {
           // in-between band — treat as quiet enough not to extend speech
         }
 
-        if (speechDetected && speechMs >= MIN_SPEECH_MS && now - lastSpeechAt > SILENCE_MS) {
+        const silenceThreshold = (current?.fieldKey && current?.section)
+          ? (getQuestion(current.section, current.questionIndex ?? 0)?.silenceMs ?? SILENCE_MS)
+          : SILENCE_MS;
+        if (speechDetected && speechMs >= MIN_SPEECH_MS && now - lastSpeechAt > silenceThreshold) {
           window.clearInterval(intervalId);
           try { mr2.stop(); } catch {}
           return;
