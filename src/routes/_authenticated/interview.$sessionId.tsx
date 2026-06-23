@@ -374,8 +374,9 @@ function InterviewPage() {
       sectionTitle: sectionDef?.title ?? section,
       questionIndex: index,
       questionsInSection: sectionDef?.questions.length ?? 0,
-      fieldKey: hasOpenQuestion ? "resume" : question?.key,
-      fieldLabel: hasOpenQuestion ? "" : question?.label,
+      fieldKey: question?.key ?? (hasOpenQuestion ? "resume" : undefined),
+      fieldLabel: question?.label ?? "",
+      prompt: question?.prompt,
       sayText,
     });
   }, [sessionQ.data, current, started, done]);
