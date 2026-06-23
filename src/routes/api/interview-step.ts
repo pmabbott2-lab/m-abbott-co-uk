@@ -68,7 +68,7 @@ export const Route = createFileRoute("/api/interview-step")({
           // Deterministic, fast path: store the transcript directly and pick a quick ack.
           // Skipping the per-answer LLM cleanup removes ~1-2s of latency between answers.
           const value = body.transcript.trim().replace(/\s+/g, " ");
-          acknowledgement = pickAck(body.sessionId + ":" + currentQ.key);
+          acknowledgement = pickAck();
           cleanedValue = value;
           await supabase.from("interview_answers").upsert(
             {
