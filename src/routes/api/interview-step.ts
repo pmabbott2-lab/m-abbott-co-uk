@@ -269,7 +269,7 @@ export const Route = createFileRoute("/api/interview-step")({
           .update({
             current_section: step.section,
             current_question_index: step.index,
-            followup_count: 0,
+            followup_count: stayOnSameQuestion ? nextFollowupCount : 0,
             updated_at: new Date().toISOString(),
           })
           .eq("id", body.sessionId);
