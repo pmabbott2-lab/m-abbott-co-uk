@@ -13,7 +13,6 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiTtsRouteImport } from './routes/api/tts'
-import { Route as ApiTalkingHeadRouteImport } from './routes/api/talking-head'
 import { Route as ApiSttRouteImport } from './routes/api/stt'
 import { Route as ApiInterviewStepRouteImport } from './routes/api/interview-step'
 import { Route as AuthenticatedHomeRouteImport } from './routes/_authenticated/home'
@@ -37,11 +36,6 @@ const IndexRoute = IndexRouteImport.update({
 const ApiTtsRoute = ApiTtsRouteImport.update({
   id: '/api/tts',
   path: '/api/tts',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiTalkingHeadRoute = ApiTalkingHeadRouteImport.update({
-  id: '/api/talking-head',
-  path: '/api/talking-head',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSttRoute = ApiSttRouteImport.update({
@@ -78,7 +72,6 @@ export interface FileRoutesByFullPath {
   '/home': typeof AuthenticatedHomeRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
-  '/api/talking-head': typeof ApiTalkingHeadRoute
   '/api/tts': typeof ApiTtsRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
@@ -89,7 +82,6 @@ export interface FileRoutesByTo {
   '/home': typeof AuthenticatedHomeRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
-  '/api/talking-head': typeof ApiTalkingHeadRoute
   '/api/tts': typeof ApiTtsRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
@@ -102,7 +94,6 @@ export interface FileRoutesById {
   '/_authenticated/home': typeof AuthenticatedHomeRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
-  '/api/talking-head': typeof ApiTalkingHeadRoute
   '/api/tts': typeof ApiTtsRoute
   '/_authenticated/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/_authenticated/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
@@ -115,7 +106,6 @@ export interface FileRouteTypes {
     | '/home'
     | '/api/interview-step'
     | '/api/stt'
-    | '/api/talking-head'
     | '/api/tts'
     | '/interview/$sessionId'
     | '/sessions/$sessionId'
@@ -126,7 +116,6 @@ export interface FileRouteTypes {
     | '/home'
     | '/api/interview-step'
     | '/api/stt'
-    | '/api/talking-head'
     | '/api/tts'
     | '/interview/$sessionId'
     | '/sessions/$sessionId'
@@ -138,7 +127,6 @@ export interface FileRouteTypes {
     | '/_authenticated/home'
     | '/api/interview-step'
     | '/api/stt'
-    | '/api/talking-head'
     | '/api/tts'
     | '/_authenticated/interview/$sessionId'
     | '/_authenticated/sessions/$sessionId'
@@ -150,7 +138,6 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   ApiInterviewStepRoute: typeof ApiInterviewStepRoute
   ApiSttRoute: typeof ApiSttRoute
-  ApiTalkingHeadRoute: typeof ApiTalkingHeadRoute
   ApiTtsRoute: typeof ApiTtsRoute
 }
 
@@ -182,13 +169,6 @@ declare module '@tanstack/react-router' {
       path: '/api/tts'
       fullPath: '/api/tts'
       preLoaderRoute: typeof ApiTtsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/talking-head': {
-      id: '/api/talking-head'
-      path: '/api/talking-head'
-      fullPath: '/api/talking-head'
-      preLoaderRoute: typeof ApiTalkingHeadRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/stt': {
@@ -250,19 +230,8 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   ApiInterviewStepRoute: ApiInterviewStepRoute,
   ApiSttRoute: ApiSttRoute,
-  ApiTalkingHeadRoute: ApiTalkingHeadRoute,
   ApiTtsRoute: ApiTtsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

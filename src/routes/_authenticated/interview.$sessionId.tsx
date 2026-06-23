@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { getSession, submitSession, setSessionPosition } from "@/lib/sessions.functions";
 import { AppShell } from "@/components/AppShell";
-import { Avatar, useTalkingHead } from "@/components/Avatar";
+import { Avatar, useAudioPlayback } from "@/components/Avatar";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Pause, Play, ArrowLeft, Undo2 } from "lucide-react";
@@ -59,7 +59,7 @@ function InterviewPage() {
   const getSessionFn = useServerFn(getSession);
   const submitFn = useServerFn(submitSession);
   const setPositionFn = useServerFn(setSessionPosition);
-  const { play, playing, stop: stopPlayback, unlock, videoRef, showVideo } = useTalkingHead();
+  const { play, playing, stop: stopPlayback, unlock } = useAudioPlayback();
 
   const sessionQ = useQuery({
     queryKey: ["session", sessionId],
@@ -481,7 +481,7 @@ function InterviewPage() {
         </div>
 
         <div className="flex flex-col items-center text-center gap-6 bg-card rounded-3xl border p-6 sm:p-10">
-          <Avatar speaking={playing} listening={listening} videoRef={videoRef} showVideo={showVideo} />
+          <Avatar speaking={playing} listening={listening} />
           {done ? (
             <>
               <h2 className="text-2xl font-semibold">All done!</h2>

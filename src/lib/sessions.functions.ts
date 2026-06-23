@@ -139,22 +139,22 @@ export const updateAnswer = createServerFn({ method: "POST" })
 export const getMyRole = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: isAdvisor } = await context.supabase.rpc("has_role", {
-      _user_id: context.userId,
-      _role: "advisor",
-    });
-    return { isAdvisor: Boolean(isAdvisor), roles: isAdvisor ? ["advisor"] : [] };
+    const { data } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    const roles = (data ?? []).map((r) => r.role);
+    return { isAdvisor: roles.includes("advisor"), roles };
   });
 
 export const listAllSessionsForAdvisor = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: isAdvisor, error: roleErr } = await context.supabase.rpc("has_role", {
-      _user_id: context.userId,
-      _role: "advisor",
-    });
-    if (roleErr) throw new Error(roleErr.message);
-    if (!isAdvisor) {
+    const { data: roleRows } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    if (!(roleRows ?? []).some((r) => r.role === "advisor")) {
       throw new Error("Forbidden");
     }
     const { data: sessions, error } = await context.supabase
