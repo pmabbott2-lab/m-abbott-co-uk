@@ -160,11 +160,19 @@ export const generateLenderExample = createServerFn({ method: "POST" })
       moneyCandidates[0]?.value ??
       null;
     const depositPercent = parsePercentage(mortgageNeed, "deposit");
-    const deposit =
+    let deposit =
       parseMoney(map.get("property:deposit")) ??
-      parseContextMoney(mortgageNeed, ["deposit"], []) ??
-      moneyCandidates.find((candidate) => candidate.value !== price)?.value ??
-      (price != null && depositPercent != null ? (price * depositPercent) / 100 : null);
+      parseContextMoney(mortgageNeed, ["deposit", "putting down", "put down", "saved"], ["price", "value", "worth", "purchase", "buying", "property"]) ??
+      (price != null && depositPercent != null ? (price * depositPercent) / 100 : null) ??
+      moneyCandidates.find((candidate) => price == null || candidate.value !== price)?.value ??
+      null;
+    // Sanity: a deposit must be smaller than the price. If they match, prefer
+    // the next distinct candidate (e.g. "£200k property, £20k deposit").
+    if (price != null && deposit != null && deposit >= price) {
+      const alt = moneyCandidates.find((c) => c.value < price && c.value !== deposit);
+      if (alt) deposit = alt.value;
+    }
+
     const term = parseYears(map.get("property:term_years")) ?? parseYears(map.get("property:mortgage_term")) ?? parseYears(mortgageNeed) ?? 25;
     const work = map.get("employment:work") ?? "";
     const income = parseMoney(map.get("employment:annual_income")) ?? parseContextMoney(work, ["income", "salary", "earn", "annual", "year", "gross"], []);
