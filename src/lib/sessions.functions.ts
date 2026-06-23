@@ -150,11 +150,12 @@ export const getMyRole = createServerFn({ method: "GET" })
 export const listAllSessionsForAdvisor = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: roleRows } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    if (!(roleRows ?? []).some((r) => r.role === "advisor")) {
+    const { data: isAdvisor, error: roleErr } = await context.supabase.rpc("has_role", {
+      _user_id: context.userId,
+      _role: "advisor",
+    });
+    if (roleErr) throw new Error(roleErr.message);
+    if (!isAdvisor) {
       throw new Error("Forbidden");
     }
     const { data: sessions, error } = await context.supabase
