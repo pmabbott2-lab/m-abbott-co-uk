@@ -60,6 +60,121 @@ function parseYears(v: string | undefined | null): number | null {
   return m ? parseInt(m[1], 10) : null;
 }
 
+function findAllMoney(text: string): number[] {
+  if (!text) return [];
+  const out: number[] = [];
+  const t = text.toLowerCase();
+  // £NNN,NNN or £NNNk / NNNk / NNN thousand / NNN million
+  const re = /£?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(k|m|mil|million|thousand|grand)?/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(t)) !== null) {
+    const n = parseFloat(m[1].replace(/,/g, ""));
+    if (isNaN(n) || n <= 0) continue;
+    const suf = m[2];
+    let v = n;
+    if (suf === "k" || suf === "thousand" || suf === "grand") v = n * 1000;
+    else if (suf === "m" || suf === "mil" || suf === "million") v = n * 1_000_000;
+    // Filter obviously non-money small numbers (years, counts) — require >= 1000 or had a suffix / £ sign
+    const hadSign = /£/.test(m[0]) || !!suf;
+    if (hadSign || v >= 1000) out.push(v);
+  }
+  // Also spelled-out: "three hundred thousand", "two fifty thousand"
+  const spelled = t.match(/\b((?:[a-z]+\s+){0,6}(?:thousand|million))\b/g);
+  if (spelled) {
+    for (const phrase of spelled) {
+      const v = wordsToNumber(phrase);
+      if (v && v >= 1000) out.push(v);
+    }
+  }
+  return out;
+}
+
+function extractMortgageFacts(text: string): {
+  price: number | null;
+  deposit: number | null;
+  depositPct: number | null;
+  termYears: number | null;
+  purpose: string;
+} {
+  if (!text) return { price: null, deposit: null, depositPct: null, termYears: null, purpose: "" };
+  const t = text.toLowerCase();
+  // Deposit explicitly tagged
+  let deposit: number | null = null;
+  let depositPct: number | null = null;
+  const depMatch = t.match(/(?:deposit(?:\s+of)?|put(?:ting)?\s+down)\s*[:\-]?\s*£?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(k|m|thousand|grand|million|%|percent)?/);
+  if (depMatch) {
+    const n = parseFloat(depMatch[1].replace(/,/g, ""));
+    const suf = depMatch[2];
+    if (suf === "%" || suf === "percent") depositPct = n;
+    else if (!isNaN(n)) {
+      let v = n;
+      if (suf === "k" || suf === "thousand" || suf === "grand") v *= 1000;
+      else if (suf === "m" || suf === "million") v *= 1_000_000;
+      deposit = v;
+    }
+  }
+  // Price explicitly tagged
+  let price: number | null = null;
+  const priceMatch = t.match(/(?:price|value|worth|costs?|property(?:\s+is)?|house(?:\s+is)?|valued\s+at)\s*[:\-]?\s*£?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(k|m|thousand|grand|million)?/);
+  if (priceMatch) {
+    const n = parseFloat(priceMatch[1].replace(/,/g, ""));
+    const suf = priceMatch[2];
+    if (!isNaN(n)) {
+      let v = n;
+      if (suf === "k" || suf === "thousand" || suf === "grand") v *= 1000;
+      else if (suf === "m" || suf === "million") v *= 1_000_000;
+      price = v;
+    }
+  }
+  // Fallback: if either is still missing, infer from all money figures (largest = price, next = deposit)
+  if (price == null || deposit == null) {
+    const all = findAllMoney(t).sort((a, b) => b - a);
+    if (price == null && all.length) price = all[0];
+    if (deposit == null && all.length > 1) deposit = all[1];
+  }
+  // Term
+  let termYears: number | null = null;
+  const termMatch = t.match(/(\d{1,2})\s*(?:-|\s)?\s*(?:year|yr)s?\s*(?:term|mortgage)?/);
+  if (termMatch) termYears = parseInt(termMatch[1], 10);
+  else {
+    const spelled = t.match(/\b(ten|fifteen|twenty|twenty[-\s]?five|thirty|thirty[-\s]?five|forty)\b\s*(?:-|\s)?\s*(?:year|yr)s?/);
+    if (spelled) termYears = wordsToNumber(spelled[1]);
+  }
+  // Purpose
+  let purpose = "";
+  if (/\b(first[\s-]?time|first\s+purchase|first\s+home|ftb)\b/.test(t)) purpose = "first purchase";
+  else if (/\b(remortgage|re-?mortgage)\b/.test(t)) purpose = "remortgage";
+  else if (/\b(buy[\s-]?to[\s-]?let|btl|investment\s+property|rental)\b/.test(t)) purpose = "buy-to-let";
+  else if (/\b(next\s+home|moving|move|home\s+mover|new\s+home)\b/.test(t)) purpose = "next home";
+  return { price, deposit, depositPct, termYears, purpose };
+}
+
+function extractIncome(text: string): number | null {
+  if (!text) return null;
+  const m = text.toLowerCase().match(/(?:salary|income|earn(?:ing)?s?|paid|wage)[^0-9£]*£?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(k|m|thousand|grand|million)?/);
+  if (m) {
+    const n = parseFloat(m[1].replace(/,/g, ""));
+    const suf = m[2];
+    let v = n;
+    if (suf === "k" || suf === "thousand" || suf === "grand") v *= 1000;
+    else if (suf === "m" || suf === "million") v *= 1_000_000;
+    if (!isNaN(v) && v > 0) return v;
+  }
+  const all = findAllMoney(text);
+  return all.length ? Math.max(...all) : null;
+}
+
+function extractEmployment(text: string): string {
+  if (!text) return "";
+  const t = text.toLowerCase();
+  if (/\bself[\s-]?employed\b/.test(t)) return "self-employed";
+  if (/\b(contractor|contract)\b/.test(t)) return "contractor";
+  if (/\b(director|limited\s+company|ltd)\b/.test(t)) return "company director";
+  if (/\b(employed|employee|full[\s-]?time|part[\s-]?time|salaried|paye)\b/.test(t)) return "employed";
+  if (/\b(retired|pensioner)\b/.test(t)) return "retired";
+  return "";
+}
+
 function monthlyPayment(principal: number, annualRatePct: number, years: number): number {
   const r = annualRatePct / 100 / 12;
   const n = years * 12;
