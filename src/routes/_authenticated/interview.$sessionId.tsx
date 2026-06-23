@@ -155,7 +155,9 @@ function InterviewPage() {
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Something went wrong");
-      setStatus("Error — tap resume to retry");
+      bootedRef.current = false;
+      setNeedsGesture(true);
+      setStatus("Error — tap Start to retry");
     } finally {
       setThinking(false);
     }
@@ -281,7 +283,7 @@ function InterviewPage() {
     } catch {
       setNeedsGesture(true);
       setListening(false);
-      setStatus("Tap to enable microphone");
+      setStatus("Allow microphone, then tap Start");
     }
   };
 
