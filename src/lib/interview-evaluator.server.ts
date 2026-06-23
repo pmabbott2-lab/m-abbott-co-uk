@@ -54,9 +54,18 @@ function hasDob(text: string): boolean {
 }
 
 function hasStreetAddress(text: string): boolean {
-  return /\b(?:flat|apartment|apt)\s*[\w-]+\b/i.test(text) ||
-    /\b\d+[a-z]?\s+[\p{L}'-]+(?:\s+[\p{L}'-]+){0,5}\s+(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|close|cl|crescent|cres|court|ct|way|place|pl|terrace|gardens|grove|view|mews|park|rise|walk|row|square|sq|hill)\b/iu.test(text) ||
-    /\b[\p{L}'-]+(?:\s+[\p{L}'-]+){0,3}\s+(?:cottage|house|bungalow|farm)\b/iu.test(text);
+  // Flat/apartment number
+  if (/\b(?:flat|apartment|apt)\s*[\w-]+\b/i.test(text)) return true;
+  // House number + street
+  if (/\b\d+[a-z]?\s+[\p{L}'-]+(?:\s+[\p{L}'-]+){0,5}\s+(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|close|cl|crescent|cres|court|ct|way|place|pl|terrace|gardens|grove|view|mews|park|rise|walk|row|square|sq|hill)\b/iu.test(text)) return true;
+  // Named property suffix (cottage, house, bungalow, farm, manor, lodge, barn, mill, hall, villa)
+  if (/\b[\p{L}'-]+(?:\s+[\p{L}'-]+){0,3}\s+(?:cottage|house|bungalow|farm|manor|lodge|barn|mill|hall|villa|farmhouse)\b/iu.test(text)) return true;
+  // Explicit house/property name phrasing
+  if (/\b(?:house|property|home)\s+(?:is\s+)?(?:called|named)\s+[\p{L}'-]+/iu.test(text)) return true;
+  if (/\b(?:it'?s\s+called|called)\s+[\p{L}'-]+(?:\s+[\p{L}'-]+){0,3}\b/iu.test(text)) return true;
+  // "The Willows", "The Old Rectory" - definite article + capitalised name(s)
+  if (/\bThe\s+[A-Z][\p{L}'-]+(?:\s+[A-Z][\p{L}'-]+){0,3}\b/u.test(text)) return true;
+  return false;
 }
 
 function hasPostcode(text: string): boolean {
