@@ -12,6 +12,8 @@ export interface EvaluateInput {
   priorAnswer?: string;
   /** Number of follow-ups already asked for this field. */
   followupCount: number;
+  /** Customer's first name, for personalised follow-ups. */
+  firstName?: string;
 }
 
 export interface EvaluateResult {
