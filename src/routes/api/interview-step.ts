@@ -10,10 +10,10 @@ interface Body {
 }
 
 const ACKS = [
-  "Thank you", "Thanks", "Got it", "Great", "Brilliant", "Perfect",
-  "That's great", "Lovely", "Wonderful", "Okay, noted", "Cheers",
-  "Smashing", "Fantastic", "Appreciate that", "Right", "Understood",
-  "Excellent", "Noted, thanks",
+  "Thank you", "Thanks for that", "That's great", "Brilliant", "Perfect",
+  "Got it", "Wonderful", "Excellent", "Cheers", "Appreciate that",
+  "Okay, noted", "Right, thanks", "Understood", "Smashing", "Fantastic",
+  "Noted, thanks", "Lovely", "Great",
 ];
 function pickAck(): string {
   return ACKS[Math.floor(Math.random() * ACKS.length)];
