@@ -446,7 +446,7 @@ function InterviewPage() {
                     size="lg"
                     className="rounded-full"
                   >
-                    <Play className="w-4 h-4 mr-2" /> Tap to begin
+                    <Play className="w-4 h-4 mr-2" /> {started ? "Tap to continue" : "Start interview"}
                   </Button>
                 ) : paused ? (
                   <Button onClick={handleResume} size="lg" className="rounded-full">
