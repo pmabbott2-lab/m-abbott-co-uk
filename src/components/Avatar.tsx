@@ -27,6 +27,8 @@ export function Avatar({ speaking, listening, size = 220 }: { speaking?: boolean
 
 export function useAudioPlayback() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const unlockedRef = useRef(false);
   const [playing, setPlaying] = useState(false);
 
@@ -44,25 +46,31 @@ export function useAudioPlayback() {
   const unlock = async () => {
     const audio = ensureAudio();
     if (unlockedRef.current && !audio.paused) return;
+    const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (AC && !audioCtxRef.current) audioCtxRef.current = new AC();
+    if (audioCtxRef.current?.state === "suspended") await audioCtxRef.current.resume();
+    if (audioCtxRef.current) {
+      const buffer = audioCtxRef.current.createBuffer(1, 1, audioCtxRef.current.sampleRate);
+      const source = audioCtxRef.current.createBufferSource();
+      const gain = audioCtxRef.current.createGain();
+      gain.gain.value = 0;
+      source.buffer = buffer;
+      source.connect(gain).connect(audioCtxRef.current.destination);
+      source.start(0);
+    }
     audio.onended = null;
     audio.onerror = null;
     audio.loop = true;
     audio.src = silentWav;
     audio.load();
-    await audio.play();
+    await audio.play().catch((error) => {
+      if (audioCtxRef.current?.state !== "running") throw error;
+    });
     unlockedRef.current = true;
   };
 
-  const play = async (text: string) => {
+  const playWithHtmlAudio = async (blob: Blob) => {
     const audio = ensureAudio();
-    if (!audio.loop) audio.pause();
-    const res = await fetch("/api/tts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    if (!res.ok) throw new Error("TTS failed");
-    const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     audio.loop = false;
     audio.src = url;
@@ -90,11 +98,99 @@ export function useAudioPlayback() {
     });
   };
 
+  const playWithAudioContext = async (blob: Blob) => {
+    const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AC) throw new Error("Web audio is unavailable");
+    const ctx = audioCtxRef.current ?? new AC();
+    audioCtxRef.current = ctx;
+    if (ctx.state === "suspended") await ctx.resume();
+    const arrayBuffer = await blob.arrayBuffer();
+    const buffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+    await new Promise<void>((resolve, reject) => {
+      const source = ctx.createBufferSource();
+      sourceRef.current = source;
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.onended = () => {
+        if (sourceRef.current === source) sourceRef.current = null;
+        setPlaying(false);
+        resolve();
+      };
+      try {
+        setPlaying(true);
+        source.start(0);
+      } catch (error) {
+        setPlaying(false);
+        reject(error);
+      }
+    });
+  };
+
+  const playWithSpeechSynthesis = async (text: string) => {
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+      throw new Error("Speech output is unavailable");
+    }
+    await new Promise<void>((resolve, reject) => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = "en-GB";
+      utterance.rate = 0.95;
+      utterance.pitch = 1;
+      utterance.onend = () => {
+        setPlaying(false);
+        resolve();
+      };
+      utterance.onerror = () => {
+        setPlaying(false);
+        reject(new Error("Speech synthesis failed"));
+      };
+      setPlaying(true);
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+    });
+  };
+
+  const play = async (text: string) => {
+    const audio = ensureAudio();
+    if (!audio.loop) audio.pause();
+    let blob: Blob;
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error("TTS failed");
+      blob = await res.blob();
+    } catch (error) {
+      console.warn("Remote TTS failed, trying browser speech", error);
+      await playWithSpeechSynthesis(text);
+      return;
+    }
+    try {
+      await playWithHtmlAudio(blob);
+    } catch (htmlError) {
+      console.warn("HTML audio playback failed, trying Web Audio", htmlError);
+      try {
+        await playWithAudioContext(blob);
+      } catch (webAudioError) {
+        console.warn("Web Audio playback failed, trying browser speech", webAudioError);
+        await playWithSpeechSynthesis(text);
+      }
+    }
+  };
+
   const stop = () => {
     audioRef.current?.pause();
+    try { sourceRef.current?.stop(); } catch {}
+    sourceRef.current = null;
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     setPlaying(false);
   };
 
-  useEffect(() => () => audioRef.current?.pause(), []);
+  useEffect(() => () => {
+    audioRef.current?.pause();
+    try { sourceRef.current?.stop(); } catch {}
+    audioCtxRef.current?.close().catch(() => {});
+  }, []);
   return { play, stop, playing, unlock };
 }
