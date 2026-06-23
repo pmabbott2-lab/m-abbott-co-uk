@@ -264,7 +264,7 @@ Remember: do not set complete=true unless every required fact is captured or exp
     const parsed = JSON.parse(content) as Partial<EvaluateResult>;
     const cleanedValue = (parsed.cleanedValue ?? fallback.cleanedValue).trim();
     const missingAfterAi = missingFacts(input, [combinedText, cleanedValue].filter(Boolean).join(" "));
-    const complete = explicitlyDeclined || (!!parsed.complete && missingAfterAi.length === 0);
+    const complete = explicitlyDeclined || missingAfterAi.length === 0;
     return {
       complete,
       cleanedValue,
