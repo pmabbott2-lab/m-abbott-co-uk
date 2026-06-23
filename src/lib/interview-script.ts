@@ -2,6 +2,17 @@ export type Section = "personal" | "employment" | "outgoings" | "property";
 
 export type AnswersMap = Record<string, string>;
 
+export type ChoiceOption = { value: string; label: string };
+
+export type CompositeField =
+  | { key: string; label: string; kind: "single"; options: ChoiceOption[]; showWhen?: (vals: Record<string, string>) => boolean }
+  | { key: string; label: string; kind: "voice"; hint?: string; showWhen?: (vals: Record<string, string>) => boolean };
+
+export type InputSpec =
+  | { kind: "voice" }
+  | { kind: "single"; options: ChoiceOption[] }
+  | { kind: "composite"; fields: CompositeField[] };
+
 export interface Question {
   key: string;
   label: string;
@@ -12,6 +23,8 @@ export interface Question {
   skipWhen?: (answers: AnswersMap) => boolean;
   /** Optional per-question sustained-silence threshold (ms) used by the client VAD. */
   silenceMs?: number;
+  /** UI input type — defaults to voice. */
+  input?: InputSpec;
 }
 
 export interface SectionDef {
