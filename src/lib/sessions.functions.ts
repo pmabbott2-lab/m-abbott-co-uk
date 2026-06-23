@@ -154,9 +154,10 @@ export const generateLenderExample = createServerFn({ method: "POST" })
       moneyCandidates.find((candidate) => candidate.value !== price)?.value ??
       (price != null && depositPercent != null ? (price * depositPercent) / 100 : null);
     const term = parseYears(map.get("property:term_years")) ?? parseYears(map.get("property:mortgage_term")) ?? parseYears(mortgageNeed) ?? 25;
-    const income = parseMoney(map.get("employment:annual_income"));
+    const work = map.get("employment:work") ?? "";
+    const income = parseMoney(map.get("employment:annual_income")) ?? parseContextMoney(work, ["income", "salary", "earn", "annual", "year", "gross"], []);
     const purpose = map.get("property:purpose") ?? parsePurpose(mortgageNeed);
-    const employment = map.get("employment:employment_status") ?? "";
+    const employment = map.get("employment:employment_status") ?? work;
 
     if (price == null || deposit == null) {
       throw new Error("Need property price and deposit captured in the fact-find to calculate.");
