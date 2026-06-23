@@ -153,9 +153,9 @@ export const Route = createFileRoute("/api/interview-step")({
             });
             cleanedValue = result.cleanedValue || rawValue;
             acknowledgement = result.acknowledgement || pickAck();
-            if (!result.complete && result.followup && currentFollowupCount < MAX_FOLLOWUPS) {
+            if (!result.complete && currentFollowupCount < MAX_FOLLOWUPS) {
               stayOnSameQuestion = true;
-              followupPrompt = result.followup;
+              followupPrompt = result.followup || `Sorry ${firstName || ""}, could you tell me a bit more so I can capture: ${currentQ.expects}`.trim();
               nextFollowupCount = currentFollowupCount + 1;
             }
           } else {
