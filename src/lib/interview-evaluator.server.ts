@@ -278,7 +278,7 @@ function hasPropertyPrice(text: string): boolean {
 }
 
 function hasDeposit(text: string): boolean {
-  return /\b(deposit)\b/i.test(text) && (hasMoneyLike(text) || /\b\d{1,2}\s?%\b/.test(text));
+  return /\b(deposit)\b/i.test(text) && (hasMoneyLike(text) || hasPercentLike(text));
 }
 
 function hasMortgageTerm(text: string): boolean {
@@ -286,7 +286,7 @@ function hasMortgageTerm(text: string): boolean {
 }
 
 function hasPropertyType(text: string): boolean {
-  return /\b(flat|apartment|terraced|terrace|semi[-\s]?detached|detached|bungalow|maisonette|house)\b/i.test(text);
+  return /\b(flat|apartment|terraced|terrace|semi|semi[-\s]?detached|detached|bungalow|maisonette|house)\b/i.test(text);
 }
 
 function missingFactsFor(input: EvaluateInput, text: string, latest = "", target?: string): MissingFact[] {
