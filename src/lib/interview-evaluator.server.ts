@@ -1,7 +1,7 @@
 // Server-only OpenAI-driven evaluator for interview answers.
 // OpenAI tidies the notes, but this deterministic fact gate decides whether
 // the interview is allowed to move on.
-import { openAIFetch } from "./openai.server";
+import { chatCompletion } from "./ai-gateway.server";
 
 export interface EvaluateInput {
   fieldKey: string;
@@ -29,7 +29,7 @@ type MissingFact = {
   followup: (firstName?: string) => string;
 };
 
-const MODEL = "gpt-4o-mini";
+const MODEL = "google/gemini-3-flash-preview";
 const MAX_FOLLOWUPS = 20;
 const NUMBER_WORDS = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty";
 const TENS_WORDS = "twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety";
@@ -560,24 +560,15 @@ Missing facts the deterministic gate still requires: ${hardMissing.map((f) => f.
 Remember: if a fact is still missing, ask only the first specific missing fact. A meta reply like "what do you need to know?" is not an answer.`;
 
   try {
-    const res = await openAIFetch("/chat/completions", {
-      method: "POST",
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0.2,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: sys },
-          { role: "user", content: user },
-        ],
-      }),
+    const content = await chatCompletion({
+      model: MODEL,
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: user },
+      ],
     });
-    if (!res.ok) {
-      console.error("evaluateAnswer non-ok", res.status, await res.text().catch(() => ""));
-      return fallback;
-    }
-    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const content = json.choices?.[0]?.message?.content ?? "{}";
     const parsed = JSON.parse(content) as Partial<EvaluateResult>;
     const aiCleanedValue = (parsed.cleanedValue ?? fallback.cleanedValue).trim();
     const missingAfterAi = missingFacts(input, [fallback.cleanedValue, aiCleanedValue].filter(Boolean).join(" "));
