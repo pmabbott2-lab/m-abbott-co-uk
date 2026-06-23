@@ -32,6 +32,8 @@ type MissingFact = {
 const MODEL = "gpt-4o-mini";
 const MAX_FOLLOWUPS = 20;
 const NUMBER_WORDS = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty";
+const TENS_WORDS = "twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety";
+const MONEY_WORDS = `(?:${NUMBER_WORDS}|${TENS_WORDS}|hundred|thousand|million|and|a)`;
 const NUMBER_WORD_TO_DIGIT: Record<string, string> = {
   zero: "0",
   oh: "0",
