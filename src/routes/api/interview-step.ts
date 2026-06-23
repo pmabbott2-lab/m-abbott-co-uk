@@ -9,11 +9,14 @@ interface Body {
   transcript: string;
 }
 
-const ACKS = ["Thanks", "Got it", "Lovely", "Great", "Okay, noted", "Brilliant", "Perfect"];
-function pickAck(seed: string): string {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
-  return ACKS[Math.abs(h) % ACKS.length];
+const ACKS = [
+  "Thank you", "Thanks", "Got it", "Great", "Brilliant", "Perfect",
+  "That's great", "Lovely", "Wonderful", "Okay, noted", "Cheers",
+  "Smashing", "Fantastic", "Appreciate that", "Right", "Understood",
+  "Excellent", "Noted, thanks",
+];
+function pickAck(): string {
+  return ACKS[Math.floor(Math.random() * ACKS.length)];
 }
 
 export const Route = createFileRoute("/api/interview-step")({
@@ -65,7 +68,7 @@ export const Route = createFileRoute("/api/interview-step")({
           // Deterministic, fast path: store the transcript directly and pick a quick ack.
           // Skipping the per-answer LLM cleanup removes ~1-2s of latency between answers.
           const value = body.transcript.trim().replace(/\s+/g, " ");
-          acknowledgement = pickAck(body.sessionId + ":" + currentQ.key);
+          acknowledgement = pickAck();
           cleanedValue = value;
           await supabase.from("interview_answers").upsert(
             {
