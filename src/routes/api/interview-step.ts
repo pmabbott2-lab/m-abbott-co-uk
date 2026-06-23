@@ -7,6 +7,7 @@ import type { Database } from "@/integrations/supabase/types";
 interface Body {
   sessionId: string;
   transcript: string;
+  skipEvaluation?: boolean;
 }
 
 const ACKS = [
