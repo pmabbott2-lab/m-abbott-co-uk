@@ -288,6 +288,7 @@ function InterviewPage() {
   };
 
   const handlePause = () => {
+    pausedRef.current = true;
     setPaused(true);
     stopPlayback();
     if (mediaRef.current?.state === "recording") mediaRef.current.stop();
@@ -296,10 +297,30 @@ function InterviewPage() {
     setStatus("Paused");
   };
 
+  const prepareMediaFromGesture = async () => {
+    const unlockPromise = unlock();
+    const streamPromise = streamRef.current?.active
+      ? Promise.resolve(streamRef.current)
+      : navigator.mediaDevices.getUserMedia({ audio: true });
+    const [, stream] = await Promise.all([unlockPromise, streamPromise]);
+    streamRef.current = stream;
+  };
+
   const handleResume = async () => {
     pausedRef.current = false;
+    setNeedsGesture(false);
     setPaused(false);
-    await unlock().catch(() => {});
+    try {
+      await prepareMediaFromGesture();
+    } catch (e) {
+      console.error("Resume media unlock failed", e);
+      pausedRef.current = true;
+      setNeedsGesture(true);
+      setPaused(true);
+      setStatus("Allow microphone, then tap Start");
+      toast.error("Please allow microphone access, then tap Start");
+      return;
+    }
     if (current?.sayText) {
       setStatus("Speaking…");
       play(current.sayText)
