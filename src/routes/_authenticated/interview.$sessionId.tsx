@@ -468,7 +468,7 @@ function InterviewPage() {
 
   const sec = (current?.section ?? "personal") as Section;
   const qi = current?.questionIndex ?? 0;
-  const progress = done ? 100 : Math.round((questionIndexGlobal(sec, qi) / totalQuestions()) * 100);
+  const progress = done ? 100 : Math.round((questionIndexGlobal(sec, qi, answersMap) / Math.max(1, totalQuestions(answersMap))) * 100);
 
   return (
     <AppShell
