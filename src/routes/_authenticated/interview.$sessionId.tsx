@@ -11,6 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { Pause, Play, ArrowLeft, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { totalQuestions, questionIndexGlobal, getQuestion, findSection, prevStep, type Section, type AnswersMap } from "@/lib/interview-script";
+import { QuestionInput } from "@/components/QuestionInput";
 
 export const Route = createFileRoute("/_authenticated/interview/$sessionId")({
   component: InterviewPage,
@@ -119,7 +120,7 @@ function InterviewPage() {
     };
   };
 
-  const callStep = async (transcript: string) => {
+  const callStep = async (transcript: string, opts?: { skipEvaluation?: boolean }) => {
     setThinking(true);
     setStatus(transcript ? "Thinking…" : "Preparing…");
     try {
@@ -129,7 +130,7 @@ function InterviewPage() {
       const res = await fetch("/api/interview-step", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ sessionId, transcript }),
+        body: JSON.stringify({ sessionId, transcript, skipEvaluation: opts?.skipEvaluation }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = normaliseStep((await res.json()) as StepResp);
@@ -143,19 +144,32 @@ function InterviewPage() {
       setCurrent(data);
       if (data.sayText) {
         setStatus("Speaking…");
-        const spoke = await play(data.sayText)
-          .then(() => true)
-          .catch((e) => {
-            console.error("TTS play failed", e);
-            bootedRef.current = false;
-            setNeedsGesture(true);
-            setPaused(true);
-            setStatus("Audio blocked — tap Start");
-            toast.error("Audio blocked — tap Start");
-            return false;
-          });
-        // play() resolves when speech ends → start listening
-        if (spoke && !pausedRef.current && !doneRef.current) startListening();
+        // Only auto-start the mic for voice questions; choice/composite use tap inputs.
+        const nextQ = data.section != null && data.questionIndex != null ? getQuestion(data.section, data.questionIndex) : undefined;
+        const isVoiceQ = !nextQ?.input || nextQ.input.kind === "voice";
+        let micStarted = false;
+        const opts = isVoiceQ
+          ? {
+              onNearEnd: () => {
+                if (micStarted || pausedRef.current || doneRef.current) return;
+                micStarted = true;
+                startListening();
+              },
+            }
+          : undefined;
+        await play(data.sayText, opts).catch((e) => {
+          console.error("TTS play failed", e);
+          bootedRef.current = false;
+          setNeedsGesture(true);
+          setPaused(true);
+          setStatus("Audio blocked — tap Start");
+          toast.error("Audio blocked — tap Start");
+        });
+        if (isVoiceQ) {
+          setStatus("Listening…");
+        } else {
+          setStatus("Choose your answer");
+        }
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Something went wrong");
@@ -166,6 +180,8 @@ function InterviewPage() {
       setThinking(false);
     }
   };
+
+
 
   const startListening = async () => {
     if (pausedRef.current || doneRef.current) return;
@@ -331,20 +347,23 @@ function InterviewPage() {
     }
     if (current?.sayText) {
       setStatus("Speaking…");
-      play(current.sayText)
+      const q = current.section != null && current.questionIndex != null ? getQuestion(current.section, current.questionIndex) : undefined;
+      const isVoiceQ = !q?.input || q.input.kind === "voice";
+      let micStarted = false;
+      const playOpts = isVoiceQ
+        ? { onNearEnd: () => {
+            if (micStarted || pausedRef.current || doneRef.current) return;
+            micStarted = true;
+            startListening();
+          } }
+        : undefined;
+      play(current.sayText, playOpts)
         .catch((e) => {
           console.error("TTS play failed", e);
           setPaused(true);
           setNeedsGesture(true);
           setStatus("Audio blocked — tap Start");
           toast.error("Audio blocked — tap Start");
-          throw e;
-        })
-        .then(() => {
-          if (!pausedRef.current && !doneRef.current) startListening();
-        })
-        .catch(() => {
-          // already surfaced above
         });
     } else {
       startListening();
@@ -368,10 +387,16 @@ function InterviewPage() {
     currentRef.current = localStep;
     setCurrent(localStep);
     setStatus("Speaking…");
-    play(sayText)
-      .then(() => {
-        if (!pausedRef.current && !doneRef.current) startListening();
-      })
+    const isVoiceQ = !q?.input || q.input.kind === "voice";
+    let micStarted = false;
+    const playOpts = isVoiceQ
+      ? { onNearEnd: () => {
+          if (micStarted || pausedRef.current || doneRef.current) return;
+          micStarted = true;
+          startListening();
+        } }
+      : undefined;
+    play(sayText, playOpts)
       .catch((e) => {
         console.error("TTS play failed", e);
         bootedRef.current = false;
@@ -381,6 +406,7 @@ function InterviewPage() {
         setStatus("Audio blocked — tap Start");
       });
   };
+
 
   const handleStart = async () => {
     if (bootedRef.current || !sessionQ.data) return;
@@ -513,6 +539,20 @@ function InterviewPage() {
               <p className="text-sm text-muted-foreground">
                 {transcribing ? "Transcribing…" : thinking ? "Thinking…" : status}
               </p>
+              {(() => {
+                const q = current?.section != null && current.questionIndex != null
+                  ? getQuestion(current.section, current.questionIndex)
+                  : undefined;
+                if (!q?.input || q.input.kind === "voice") return null;
+                return (
+                  <QuestionInput
+                    key={`${current?.section}:${current?.questionIndex}`}
+                    question={q}
+                    disabled={thinking || transcribing || playing || paused || needsGesture}
+                    onSubmit={(assembled) => callStep(assembled, { skipEvaluation: true })}
+                  />
+                );
+              })()}
               <div className="flex flex-wrap justify-center gap-2">
                 {needsGesture ? (
                   <Button

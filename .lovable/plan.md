@@ -1,66 +1,67 @@
+# Hybrid voice + tap interview
 
-# Mortgage Fact-Find Avatar App — Build Plan
+Two changes to make the interview feel more natural.
 
-## What we're building
-A mobile-friendly web app where a mortgage customer signs in, taps "Start interview", and is guided through a spoken fact-find by an on-screen avatar. The avatar asks each question aloud, the customer answers with their voice, the answer is transcribed, and an AI moves to the next question. Each interview is saved as a separate session that the customer (and their advisor) can review later. Advisors see a dashboard listing every customer's sessions with a clean structured summary of the answers.
+## 1. Open the mic before Susan finishes speaking
 
-## Core experience
+Right now the mic only starts recording once the TTS audio's `onended` fires, so anyone who answers a beat early gets cut off.
 
-**Customer side**
-- Sign up / log in (email + password, plus Google).
-- Home screen: list of past interview sessions + big "Start new interview" button.
-- Interview screen: animated avatar, current question shown as text + spoken, mic button to record answer, live transcript, "Next" auto-advances.
-- End of interview: summary of captured answers, option to edit any field, submit to advisor.
+- In `src/components/Avatar.tsx` (`useAudioPlayback`), expose a `onNearEnd` callback (or a `nearEndMs` option) that fires when the audio is ~700ms from finishing.
+- In `src/routes/_authenticated/interview.$sessionId.tsx`, start the recorder when `onNearEnd` fires instead of after `play()` resolves. Keep playback running; only stop the recorder on the user's silence trigger as today.
+- Guard against double-starts if the user is already speaking.
 
-**Advisor side**
-- Separate login (role = advisor).
-- Dashboard: table of customers and their sessions (status: in-progress / submitted, date, completeness %).
-- Session detail page: structured answers grouped by section, raw transcript, ability to add notes.
+## 2. Tap-to-select for closed questions, voice for soft facts
 
-## Sections covered in v1
-1. Personal & contact details (name, DOB, address, marital status, dependants)
-2. Employment & income (employer, role, salary, self-employed accounts)
-3. Outgoings & credit (monthly expenses, debts, credit history)
-4. Property & mortgage need (purchase price, deposit, type, term, purpose)
+Today every question is voice-only. We'll classify each question and render the right input.
 
-The AI follows a scripted question list per section but can ask brief follow-ups when an answer is unclear, then extracts structured fields from the conversation.
+### Question type system
 
-## Technical approach (for reference)
+In `src/lib/interview-script.ts`, add an optional `input` field on `Question`:
 
-- **Stack**: TanStack Start (existing), Lovable Cloud for auth + database + storage.
-- **Auth**: Email/password + Google. `profiles` table + `user_roles` table (`customer`, `advisor`) with `has_role()` security-definer for RLS.
-- **Database**:
-  - `interview_sessions` (id, customer_id, status, started_at, submitted_at, completeness)
-  - `interview_messages` (id, session_id, role: avatar/customer, text, audio_url, created_at)
-  - `interview_answers` (id, session_id, section, field_key, value_json) — structured fields extracted by the AI
-  - `advisor_notes` (id, session_id, advisor_id, note, created_at)
-  - RLS: customers see only their own rows; advisors see all (via `has_role`).
-- **AI**: Lovable AI Gateway.
-  - STT: `openai/gpt-4o-mini-transcribe` for customer speech.
-  - LLM: `google/gemini-3-flash-preview` drives the question flow + structured extraction (Output.object schema per section).
-  - TTS: `openai/gpt-4o-mini-tts` (voice: `alloy`) streams the avatar's spoken question.
-  - All AI calls in TanStack server routes / server functions; `LOVABLE_API_KEY` stays server-side.
-- **Avatar**: animated SVG/Lottie-style talking head that lip-syncs to audio output volume (no third-party avatar SDK in v1). If you'd later prefer a photoreal avatar (HeyGen, D-ID, Ready Player Me), we can swap that layer in.
-- **Routing**:
-  - `/auth` — login/signup
-  - `/_authenticated/` — customer home, `/interview/$sessionId` — live interview, `/sessions/$sessionId` — review
-  - `/_authenticated/_advisor/dashboard`, `/sessions/$sessionId` (shared, role-gated)
-- **Design**: calm, trustworthy financial-services feel — soft neutrals, deep navy primary, generous spacing, large tap targets, clear progress indicator across sections.
+```ts
+type ChoiceOption = { value: string; label: string };
+type InputSpec =
+  | { kind: "voice" }                                       // current behaviour
+  | { kind: "single"; options: ChoiceOption[] }             // radio buttons
+  | { kind: "multi"; options: ChoiceOption[] }              // checkboxes
+  | { kind: "composite"; fields: Array<                     // mix of taps + one voice slot
+      | { key: string; label: string; kind: "single"; options: ChoiceOption[] }
+      | { key: string; label: string; kind: "voice"; prompt?: string }
+    > };
+```
 
-## What's out of scope for v1
-- Document upload (payslips, ID) — easy to add next.
-- E-signature / DIP submission.
-- Multi-language.
-- Photoreal avatar provider integration.
-- SMS/email notifications to the advisor.
+Default remains `{ kind: "voice" }` so nothing breaks.
 
-## Suggested build order
-1. Enable Lovable Cloud, set up auth + roles + tables.
-2. Design system + shell (auth screen, customer home, advisor dashboard skeleton).
-3. Interview engine: question script, server route for next-question + extraction.
-4. Voice layer: TTS streaming for avatar, mic capture + STT for customer.
-5. Animated avatar component with speaking state.
-6. Session review + advisor session detail + notes.
-7. Polish: progress bar, edit-answer flow, empty/error states.
+### Mapping current questions
 
-Reply with any tweaks (e.g. swap voice, change sections, add document upload) and I'll start building.
+| Question | New input |
+|---|---|
+| `personal:full_name` | voice |
+| `personal:date_of_birth` | voice |
+| `personal:home` | voice (house name/number, street, town, postcode, years there) |
+| `personal:family` | composite — single-select marital status (Single / Married / Civil partnership / Cohabiting / Divorced / Separated / Widowed), single-select dependants count (None / 1 / 2 / 3 / 4+), then voice slot for "names and ages" (only shown when dependants > 0) |
+| `employment:work` | composite — single-select employment status (Employed / Self-employed / Contractor / Retired / Other), voice slot for employer, job title, time in role, gross annual income |
+| `employment:retirement_income` | voice |
+| `outgoings:outgoings_credit` | composite — voice slot for essentials £/month, single-select "Any credit/loans?" (Yes / No) + voice slot for monthly amount when Yes, single-select "Adverse credit in last 6 yrs?" (Yes / No) + voice slot for details when Yes |
+| `property:mortgage_need` | composite — single-select purpose (First-time buyer / Next home / Remortgage / Buy-to-let), single-select property type (Flat / Terraced / Semi-detached / Detached), voice slot for price, deposit, term |
+
+### UI
+
+New component `src/components/QuestionInput.tsx`:
+- Renders Susan's prompt and the appropriate control(s).
+- For `single`/`multi`: shadcn `RadioGroup` / `Checkbox` cards, large tap targets, "Continue" button.
+- For `composite`: stacked cards — each tap field uses radios; each voice field shows a Record button + live transcript area, reusing the existing recorder hook.
+- On submit, assembles a single answer string (e.g. `"Marital status: Married. Dependants: 2. Names/ages: Alice 6, Ben 4"`) so the existing evaluator/fact-find pipeline keeps working unchanged.
+
+In `interview.$sessionId.tsx`:
+- Branch on `question.input.kind`: voice-only keeps current flow; choice/composite renders `<QuestionInput />` and skips the evaluator loop (we already have the structured answer — submit straight to `submitAnswer`).
+- Susan still speaks the prompt; for composite, mic opens (near-end of TTS) only when the active sub-field is a voice slot.
+
+### Evaluator
+
+`src/lib/interview-evaluator.server.ts` doesn't need new logic — structured answers already satisfy its fact gates (purpose, property type, marital status, dependants count, employment status, credit yes/no). We only keep the evaluator engaged for the remaining voice slots, so the recent loop fixes still apply.
+
+## Out of scope
+
+- No changes to fact-find storage, lender calc, or auth.
+- No redesign of the session list or summary pages.

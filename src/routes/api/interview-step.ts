@@ -7,6 +7,7 @@ import type { Database } from "@/integrations/supabase/types";
 interface Body {
   sessionId: string;
   transcript: string;
+  skipEvaluation?: boolean;
 }
 
 const ACKS = [
@@ -121,7 +122,7 @@ export const Route = createFileRoute("/api/interview-step")({
               .trim();
             cleanedValue = [existingDetail?.value ?? "", newDetail].filter(Boolean).join("; ") || existingDetail?.value || rawValue;
             acknowledgement = pickAck();
-          } else if (currentQ.expects) {
+          } else if (currentQ.expects && !body.skipEvaluation) {
             // AI-driven evaluation: ask follow-ups when the answer is incomplete.
             const { evaluateAnswer } = await import("@/lib/interview-evaluator.server");
             const { data: existing } = await supabase
