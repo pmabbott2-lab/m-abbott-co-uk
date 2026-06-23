@@ -264,7 +264,10 @@ function InterviewPage() {
           // in-between band — treat as quiet enough not to extend speech
         }
 
-        if (speechDetected && speechMs >= MIN_SPEECH_MS && now - lastSpeechAt > SILENCE_MS) {
+        const silenceThreshold = (current?.fieldKey && current?.section)
+          ? (getQuestion(current.section, current.questionIndex ?? 0)?.silenceMs ?? SILENCE_MS)
+          : SILENCE_MS;
+        if (speechDetected && speechMs >= MIN_SPEECH_MS && now - lastSpeechAt > silenceThreshold) {
           window.clearInterval(intervalId);
           try { mr2.stop(); } catch {}
           return;
