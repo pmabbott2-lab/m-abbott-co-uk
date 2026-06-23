@@ -124,30 +124,36 @@ export type Database = {
           current_question_index: number
           current_section: string
           customer_id: string
+          followup_count: number
           id: string
           started_at: string
           status: Database["public"]["Enums"]["session_status"]
           submitted_at: string | null
+          summary: string | null
           updated_at: string
         }
         Insert: {
           current_question_index?: number
           current_section?: string
           customer_id: string
+          followup_count?: number
           id?: string
           started_at?: string
           status?: Database["public"]["Enums"]["session_status"]
           submitted_at?: string | null
+          summary?: string | null
           updated_at?: string
         }
         Update: {
           current_question_index?: number
           current_section?: string
           customer_id?: string
+          followup_count?: number
           id?: string
           started_at?: string
           status?: Database["public"]["Enums"]["session_status"]
           submitted_at?: string | null
+          summary?: string | null
           updated_at?: string
         }
         Relationships: []
