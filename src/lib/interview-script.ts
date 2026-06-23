@@ -88,6 +88,44 @@ export const SECTIONS: SectionDef[] = [
         prompt: "Tell me a little about your family, {firstName}.",
         expects: "Relationship status (single, married, civil partnership, cohabiting, divorced, separated, widowed) AND whether they have any dependants. If yes, how many and their ages.",
         silenceMs: 2200,
+        input: {
+          kind: "composite",
+          fields: [
+            {
+              key: "marital_status",
+              label: "Relationship status",
+              kind: "single",
+              options: [
+                { value: "Single", label: "Single" },
+                { value: "Married", label: "Married" },
+                { value: "Civil partnership", label: "Civil partnership" },
+                { value: "Cohabiting", label: "Cohabiting" },
+                { value: "Divorced", label: "Divorced" },
+                { value: "Separated", label: "Separated" },
+                { value: "Widowed", label: "Widowed" },
+              ],
+            },
+            {
+              key: "dependants",
+              label: "Number of dependants",
+              kind: "single",
+              options: [
+                { value: "None", label: "None" },
+                { value: "1", label: "1" },
+                { value: "2", label: "2" },
+                { value: "3", label: "3" },
+                { value: "4+", label: "4 or more" },
+              ],
+            },
+            {
+              key: "dependants_details",
+              label: "Names and ages of your dependants",
+              kind: "voice",
+              hint: "e.g. 'Alice 6, Ben 4'",
+              showWhen: (v) => !!v.dependants && v.dependants !== "None",
+            },
+          ],
+        },
       },
     ],
   },
@@ -102,6 +140,30 @@ export const SECTIONS: SectionDef[] = [
         prompt: "{firstName}, tell me about what you do for work.",
         expects: "Employment status (employed / self-employed / contractor / retired / other), employer or business name, job title, time in role, and annual gross income in GBP including any regular bonus.",
         silenceMs: 2200,
+        input: {
+          kind: "composite",
+          fields: [
+            {
+              key: "employment_status",
+              label: "Employment status",
+              kind: "single",
+              options: [
+                { value: "Employed", label: "Employed" },
+                { value: "Self-employed", label: "Self-employed" },
+                { value: "Contractor", label: "Contractor" },
+                { value: "Retired", label: "Retired" },
+                { value: "Other", label: "Other" },
+              ],
+            },
+            {
+              key: "work_details",
+              label: "Employer, job title, time in role and gross annual income",
+              kind: "voice",
+              hint: "e.g. 'Acme Ltd, software engineer, 3 years, £55,000 plus bonus'",
+              showWhen: (v) => v.employment_status !== "Retired" && !!v.employment_status,
+            },
+          ],
+        },
       },
       {
         key: "retirement_income",
@@ -123,6 +185,48 @@ export const SECTIONS: SectionDef[] = [
         prompt: "Tell me about your regular monthly outgoings, {firstName}.",
         expects: "Three things: (1) monthly essentials spend in GBP (bills, food, travel etc.), (2) any existing credit/loan/credit-card payments — total per month, or 'none', (3) any adverse credit in the last six years — missed payments, defaults, CCJs or bankruptcies (yes with details, or no).",
         silenceMs: 2500,
+        input: {
+          kind: "composite",
+          fields: [
+            {
+              key: "essentials",
+              label: "Roughly how much do you spend on essentials each month? (bills, food, travel)",
+              kind: "voice",
+              hint: "e.g. '£1,200 a month'",
+            },
+            {
+              key: "has_credit",
+              label: "Any existing credit, loans or credit-card payments?",
+              kind: "single",
+              options: [
+                { value: "Yes", label: "Yes" },
+                { value: "No", label: "No" },
+              ],
+            },
+            {
+              key: "credit_amount",
+              label: "Total monthly credit payments",
+              kind: "voice",
+              hint: "e.g. '£250 a month'",
+              showWhen: (v) => v.has_credit === "Yes",
+            },
+            {
+              key: "has_adverse",
+              label: "Any adverse credit in the last 6 years? (missed payments, defaults, CCJs, bankruptcy)",
+              kind: "single",
+              options: [
+                { value: "Yes", label: "Yes" },
+                { value: "No", label: "No" },
+              ],
+            },
+            {
+              key: "adverse_details",
+              label: "Please describe the adverse credit",
+              kind: "voice",
+              showWhen: (v) => v.has_adverse === "Yes",
+            },
+          ],
+        },
       },
     ],
   },
@@ -137,6 +241,39 @@ export const SECTIONS: SectionDef[] = [
         prompt: "Finally, {firstName}, tell me about the mortgage you're looking for.",
         expects: "Five things: purpose (first purchase / next home / remortgage / buy-to-let), property price or value in GBP, deposit in GBP, mortgage term in years, and property type (flat, terraced, semi or detached).",
         silenceMs: 2500,
+        input: {
+          kind: "composite",
+          fields: [
+            {
+              key: "purpose",
+              label: "What's the mortgage for?",
+              kind: "single",
+              options: [
+                { value: "First-time buyer", label: "First-time buyer" },
+                { value: "Next home", label: "Next home" },
+                { value: "Remortgage", label: "Remortgage" },
+                { value: "Buy-to-let", label: "Buy-to-let" },
+              ],
+            },
+            {
+              key: "property_type",
+              label: "Property type",
+              kind: "single",
+              options: [
+                { value: "Flat", label: "Flat" },
+                { value: "Terraced", label: "Terraced" },
+                { value: "Semi-detached", label: "Semi-detached" },
+                { value: "Detached", label: "Detached" },
+              ],
+            },
+            {
+              key: "money_term",
+              label: "Property price, deposit and mortgage term",
+              kind: "voice",
+              hint: "e.g. '£250,000 price, £25,000 deposit, 30 year term'",
+            },
+          ],
+        },
       },
     ],
   },
