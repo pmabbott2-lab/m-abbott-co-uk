@@ -28,6 +28,13 @@ function isNotRetired(answers: AnswersMap): boolean {
   return !(/\bretir/.test(v) || /pension/.test(v));
 }
 
+function hasDependants(answers: AnswersMap): boolean {
+  const v = (answers["personal:dependants"] ?? "").toLowerCase().trim();
+  if (!v) return false;
+  if (/\b(no|none|nope|zero|0|n\/a|na)\b/.test(v)) return false;
+  return /\b(yes|child|children|kid|son|daughter|dependant|dependent|[1-9])/.test(v);
+}
+
 export const SECTIONS: SectionDef[] = [
   {
     id: "personal",
@@ -38,7 +45,8 @@ export const SECTIONS: SectionDef[] = [
       { key: "date_of_birth", label: "Date of birth", prompt: "What's your date of birth?" },
       { key: "address", label: "Current address", prompt: "What's your current home address, including postcode?" },
       { key: "marital_status", label: "Marital status", prompt: "Are you single, married, in a civil partnership, or living with a partner?" },
-      { key: "dependants", label: "Dependants", prompt: "Do you have any dependants, and if so, how many and what ages?" },
+      { key: "dependants", label: "Dependants", prompt: "Do you have any dependants?" },
+      { key: "dependants_details", label: "Children's names & ages", prompt: "Lovely — could you tell me their names and ages?", skipWhen: (a) => !hasDependants(a) },
     ],
   },
   {
