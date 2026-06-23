@@ -120,7 +120,7 @@ function InterviewPage() {
     };
   };
 
-  const callStep = async (transcript: string) => {
+  const callStep = async (transcript: string, opts?: { skipEvaluation?: boolean }) => {
     setThinking(true);
     setStatus(transcript ? "Thinking…" : "Preparing…");
     try {
@@ -130,7 +130,7 @@ function InterviewPage() {
       const res = await fetch("/api/interview-step", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ sessionId, transcript }),
+        body: JSON.stringify({ sessionId, transcript, skipEvaluation: opts?.skipEvaluation }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = normaliseStep((await res.json()) as StepResp);
@@ -144,19 +144,32 @@ function InterviewPage() {
       setCurrent(data);
       if (data.sayText) {
         setStatus("Speaking…");
-        const spoke = await play(data.sayText)
-          .then(() => true)
-          .catch((e) => {
-            console.error("TTS play failed", e);
-            bootedRef.current = false;
-            setNeedsGesture(true);
-            setPaused(true);
-            setStatus("Audio blocked — tap Start");
-            toast.error("Audio blocked — tap Start");
-            return false;
-          });
-        // play() resolves when speech ends → start listening
-        if (spoke && !pausedRef.current && !doneRef.current) startListening();
+        // Only auto-start the mic for voice questions; choice/composite use tap inputs.
+        const nextQ = data.section != null && data.questionIndex != null ? getQuestion(data.section, data.questionIndex) : undefined;
+        const isVoiceQ = !nextQ?.input || nextQ.input.kind === "voice";
+        let micStarted = false;
+        const opts = isVoiceQ
+          ? {
+              onNearEnd: () => {
+                if (micStarted || pausedRef.current || doneRef.current) return;
+                micStarted = true;
+                startListening();
+              },
+            }
+          : undefined;
+        await play(data.sayText, opts).catch((e) => {
+          console.error("TTS play failed", e);
+          bootedRef.current = false;
+          setNeedsGesture(true);
+          setPaused(true);
+          setStatus("Audio blocked — tap Start");
+          toast.error("Audio blocked — tap Start");
+        });
+        if (isVoiceQ) {
+          setStatus("Listening…");
+        } else {
+          setStatus("Choose your answer");
+        }
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Something went wrong");
@@ -167,6 +180,8 @@ function InterviewPage() {
       setThinking(false);
     }
   };
+
+
 
   const startListening = async () => {
     if (pausedRef.current || doneRef.current) return;
