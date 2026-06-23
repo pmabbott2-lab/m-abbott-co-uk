@@ -149,7 +149,20 @@ export const Route = createFileRoute("/api/interview-step")({
 
         // Determine next question (advance)
         const isFirst = !body.transcript.trim() && index === 0 && section === "personal";
-        const step = isFirst ? { section, index } : nextStep(section, index, answersMap);
+        let step = isFirst ? { section, index } : nextStep(section, index, answersMap);
+        let followupPrompt = "";
+        if (body.transcript.trim() && currentQ?.key === "dependants_details" && !isFinishedChildren(body.transcript)) {
+          const expectedChildren = parseSmallNumber(answersMap["personal:dependants_count"]);
+          const detailsSoFar = answersMap["personal:dependants_details"] ?? cleanedValue ?? "";
+          const capturedChildren = countChildDetails(detailsSoFar);
+          if (!expectedChildren || capturedChildren < expectedChildren) {
+            step = { section, index };
+            acknowledgement = "";
+            followupPrompt = expectedChildren
+              ? `Thank you — I've got ${capturedChildren || "that"} of ${expectedChildren}. Please tell me the next child's name and age, or say "that's it" if there aren't any more.`
+              : "Thank you — please tell me the next child's name and age, or say \"that's it\" if there aren't any more.";
+          }
+        }
 
         if (!step) {
           // Interview complete — generate a written summary for the advisor
@@ -199,7 +212,7 @@ export const Route = createFileRoute("/api/interview-step")({
         const sec = findSection(step.section)!;
         const intro = !isFirst && (step.section !== section || step.index === 0) && step.index === 0 ? sec.intro + " " : "";
         const ack = !isFirst && acknowledgement ? acknowledgement + ". " : "";
-        const sayText = (isFirst
+        const sayText = followupPrompt || (isFirst
           ? "Hi, I'm Susan. I'll guide you through a quick fact-find for your mortgage application. " + sec.intro + " "
           : ack + intro) + nextQ.prompt;
 
