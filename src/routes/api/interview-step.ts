@@ -140,6 +140,7 @@ If the reply doesn't actually answer the question, set confident to false and va
           questionsInSection: sec.questions.length,
           fieldKey: nextQ.key,
           fieldLabel: nextQ.label,
+          prompt: nextQ.prompt,
           sayText,
         });
       },
