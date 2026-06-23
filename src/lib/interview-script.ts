@@ -89,6 +89,15 @@ export function nextStep(section: Section, index: number): { section: Section; i
   return { section: next.id, index: 0 };
 }
 
+export function prevStep(section: Section, index: number): { section: Section; index: number } | null {
+  const sIdx = SECTIONS.findIndex((s) => s.id === section);
+  if (sIdx < 0) return null;
+  if (index > 0) return { section, index: index - 1 };
+  const prev = SECTIONS[sIdx - 1];
+  if (!prev) return null;
+  return { section: prev.id, index: prev.questions.length - 1 };
+}
+
 export function getQuestion(section: Section, index: number): Question | undefined {
   return findSection(section)?.questions[index];
 }
