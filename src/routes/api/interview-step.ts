@@ -153,9 +153,19 @@ Rules:
           });
         }
 
+        // Build current answers map (including the value we just saved) so skip logic is up-to-date
+        const { data: answerRows } = await supabase
+          .from("interview_answers")
+          .select("section, field_key, value")
+          .eq("session_id", body.sessionId);
+        const answersMap: AnswersMap = {};
+        (answerRows ?? []).forEach((a) => {
+          answersMap[`${a.section}:${a.field_key}`] = a.value ?? "";
+        });
+
         // Determine next question (advance)
         const isFirst = !body.transcript.trim() && index === 0 && section === "personal";
-        const step = isFirst ? { section, index } : nextStep(section, index);
+        const step = isFirst ? { section, index } : nextStep(section, index, answersMap);
 
         if (!step) {
           // Interview complete — generate a written summary for the advisor
