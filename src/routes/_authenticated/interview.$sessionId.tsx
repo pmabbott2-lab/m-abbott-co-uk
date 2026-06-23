@@ -351,12 +351,7 @@ function InterviewPage() {
     setStarted(true);
     setStatus("Starting…");
     try {
-      const unlockPromise = unlock();
-      const streamPromise = streamRef.current?.active
-        ? Promise.resolve(streamRef.current)
-        : navigator.mediaDevices.getUserMedia({ audio: true });
-      const [, stream] = await Promise.all([unlockPromise, streamPromise]);
-      streamRef.current = stream;
+      await prepareMediaFromGesture();
     } catch (e) {
       console.error("Start media unlock failed", e);
       pausedRef.current = true;
