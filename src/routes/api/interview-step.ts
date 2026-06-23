@@ -103,7 +103,22 @@ export const Route = createFileRoute("/api/interview-step")({
 
           // Deterministic, fast path: store the transcript directly and pick a quick ack.
           // Skipping the per-answer LLM cleanup removes ~1-2s of latency between answers.
-          const value = body.transcript.trim().replace(/\s+/g, " ");
+          const rawValue = body.transcript.trim().replace(/\s+/g, " ");
+          let value = rawValue;
+          if (currentQ.key === "dependants_details") {
+            const { data: existingDetail } = await supabase
+              .from("interview_answers")
+              .select("value")
+              .eq("session_id", body.sessionId)
+              .eq("section", section)
+              .eq("field_key", currentQ.key)
+              .maybeSingle();
+            const newDetail = rawValue
+              .replace(/\b(that'?s\s+(it|all|everyone)|all\s+done|no\s+more|finished)\b/gi, "")
+              .replace(/^[\s,.;-]+|[\s,.;-]+$/g, "")
+              .trim();
+            value = [existingDetail?.value ?? "", newDetail].filter(Boolean).join("; ") || existingDetail?.value || rawValue;
+          }
           acknowledgement = pickAck();
           cleanedValue = value;
           await supabase.from("interview_answers").upsert(
