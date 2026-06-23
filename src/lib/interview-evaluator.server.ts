@@ -103,9 +103,14 @@ function hasFullName(text: string): boolean {
 }
 
 function hasDob(text: string): boolean {
+  const monthNames = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+  const ordinalDayWords = "first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|twenty\\s+first|twenty\\s+second|twenty\\s+third|twenty\\s+fourth|twenty\\s+fifth|twenty\\s+sixth|twenty\\s+seventh|twenty\\s+eighth|twenty\\s+ninth|thirtieth|thirty\\s+first";
+  const fullYear = "(?:19|20)\\\\d{2}";
   return (
     /\b\d{1,2}[\/.-]\d{1,2}[\/.-](?:\d{2}|\d{4})\b/.test(text) ||
-    new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(?:19|20)\\d{2}\\b`, "i").test(text)
+    /\b\d{1,2}\s+\d{1,2}\s+(?:(?:19|20)?\d{2})\b/.test(text) ||
+    new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:${monthNames})\\s+${fullYear}\\b`, "i").test(text) ||
+    new RegExp(`\\b(?:the\\s+)?(?:${ordinalDayWords})\\s+(?:of\\s+)?(?:${monthNames})\\s+${fullYear}\\b`, "i").test(text)
   );
 }
 
