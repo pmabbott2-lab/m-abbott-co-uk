@@ -334,8 +334,18 @@ function missingFactsFor(input: EvaluateInput, text: string, latest = "", target
     case "outgoings_credit": {
       const missing: MissingFact[] = [];
       if (!captured("essentials") && !hasMonthlyEssentials(text) && !(target === "essentials" && hasMoneyLike(latest)) && !(targetDeclined && target === "essentials")) missing.push({ id: "essentials", followup: () => "Roughly how much are your essential monthly outgoings?" });
-      if (!captured("credit") && !hasCreditPayments(text) && !(target === "credit" && (hasStandaloneNo(latest) || hasMoneyLike(latest) || targetYes("credit"))) && !(targetDeclined && target === "credit")) missing.push({ id: "credit", followup: () => "Do you have any credit, loans or card payments each month?" });
-      if (!captured("adverse") && !hasAdverseCredit(text) && !(target === "adverse" && (hasStandaloneNo(latest) || targetYes("adverse"))) && !(targetDeclined && target === "adverse")) missing.push({ id: "adverse", followup: () => "Any missed payments, defaults, CCJs or bankruptcy in the last six years?" });
+      const noCreditKnown = hasCapturedNo(text, "credit") || hasNoCreditPayments(text) || (target === "credit" && hasStandaloneNo(latest)) || (targetDeclined && target === "credit");
+      const creditKnown = hasCapturedYes(text, "credit") || hasCreditPayments(text) || hasCreditSubject(text) || (target === "credit" && (hasStandaloneYes(latest) || hasMoneyLike(latest))) || noCreditKnown;
+      if (!creditKnown) missing.push({ id: "credit", followup: () => "Do you have any credit, loans or card payments each month?" });
+      if (creditKnown && !noCreditKnown && !captured("credit_amount") && !hasCreditPaymentAmount(text) && !(target === "credit_amount" && (hasMoneyLike(latest) || hasExplicitDecline(latest))) && !(target === "credit" && hasMoneyLike(latest))) {
+        missing.push({ id: "credit_amount", followup: () => "How much do you pay towards them each month?" });
+      }
+      const noAdverseKnown = hasCapturedNo(text, "adverse") || hasNoAdverseCredit(text) || (target === "adverse" && hasStandaloneNo(latest)) || (targetDeclined && target === "adverse");
+      const adverseKnown = hasCapturedYes(text, "adverse") || hasAdverseCredit(text) || hasAdverseSubject(text) || (target === "adverse" && hasStandaloneYes(latest)) || noAdverseKnown;
+      if (!adverseKnown) missing.push({ id: "adverse", followup: () => "Any missed payments, defaults, CCJs or bankruptcy in the last six years?" });
+      if (adverseKnown && !noAdverseKnown && !captured("adverse_details") && !(target === "adverse_details" && isShortMeaningfulAnswer(latest)) && !(targetDeclined && target === "adverse_details")) {
+        missing.push({ id: "adverse_details", followup: () => "Could you briefly tell me what happened and when?" });
+      }
       return missing;
     }
     case "mortgage_need": {
