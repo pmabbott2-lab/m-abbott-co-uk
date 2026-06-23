@@ -54,10 +54,71 @@ function parseMoney(v: string | undefined | null): number | null {
   return wordsToNumber(s);
 }
 
+const MONEY_WORD_PATTERN = "zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|and";
+
+function extractMoneyCandidates(text: string): Array<{ value: number; index: number; raw: string }> {
+  const candidates: Array<{ value: number; index: number; raw: string }> = [];
+  const addMatches = (regex: RegExp) => {
+    for (const match of text.matchAll(regex)) {
+      const raw = match[0].trim();
+      const value = parseMoney(raw.replace(/\b(pounds?|quid)\b/gi, "").trim());
+      if (value != null && value >= 1_000) candidates.push({ value, index: match.index ?? 0, raw });
+    }
+  };
+
+  addMatches(/£\s*\d[\d,]*(?:\.\d+)?\s*(?:k|m|mil|million|thousand)?\b/gi);
+  addMatches(/\b\d+(?:,\d{3})+(?:\.\d+)?\s*(?:k|m|mil|million|thousand)?\b/gi);
+  addMatches(/\b\d+(?:\.\d+)?\s*(?:k|m|mil|million|thousand)\b/gi);
+  addMatches(/\b\d{5,8}\b/g);
+  addMatches(new RegExp(`\\b(?:(?:${MONEY_WORD_PATTERN})[\\s-]+)*(?:${MONEY_WORD_PATTERN})\\s+(?:thousand|million)(?:\\s+pounds?)?\\b`, "gi"));
+
+  return candidates
+    .filter((candidate, idx, arr) => arr.findIndex((other) => Math.abs(other.index - candidate.index) < 3 && other.value === candidate.value) === idx)
+    .sort((a, b) => a.index - b.index);
+}
+
+function parseContextMoney(text: string, labels: string[], excludeLabels: string[] = []): number | null {
+  const candidates = extractMoneyCandidates(text);
+  const lower = text.toLowerCase();
+  const scored = candidates
+    .map((candidate) => {
+      const context = lower.slice(Math.max(0, candidate.index - 45), candidate.index + candidate.raw.length + 45);
+      const hasLabel = labels.some((label) => new RegExp(`\\b${label}\\b`, "i").test(context));
+      const hasExcluded = excludeLabels.some((label) => new RegExp(`\\b${label}\\b`, "i").test(context));
+      return { ...candidate, score: (hasLabel ? 2 : 0) - (hasExcluded ? 3 : 0) };
+    })
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+  return scored[0]?.value ?? null;
+}
+
+function parsePercentage(text: string, label?: string): number | null {
+  const lower = text.toLowerCase();
+  const searchArea = label && lower.includes(label)
+    ? lower.slice(Math.max(0, lower.indexOf(label) - 35), lower.indexOf(label) + 80)
+    : lower;
+  const digit = searchArea.match(/\b(\d+(?:\.\d+)?)\s*(?:%|percent|per cent)\b/);
+  if (digit) return Number(digit[1]);
+  const word = searchArea.match(new RegExp(`\\b((?:(?:${MONEY_WORD_PATTERN})[\\s-]+){0,4}(?:${MONEY_WORD_PATTERN}))\\s+(?:percent|per cent)\\b`, "i"));
+  if (word) return wordsToNumber(word[1]);
+  return null;
+}
+
 function parseYears(v: string | undefined | null): number | null {
   if (!v) return null;
-  const m = v.match(/(\d+)/);
-  return m ? parseInt(m[1], 10) : null;
+  const m = v.match(/\b(\d{1,2})\s*(?:years?|yrs?|year\s+term)\b/i) ?? v.match(/\b(?:over|for|term(?:\s+of)?)\D{0,20}(\d{1,2})\b/i);
+  if (m) return parseInt(m[1], 10);
+  const word = v.match(new RegExp(`\\b((?:(?:${MONEY_WORD_PATTERN})[\\s-]+){0,3}(?:${MONEY_WORD_PATTERN}))\\s+(?:years?|yrs?|year\\s+term)\\b`, "i"));
+  if (word) return wordsToNumber(word[1]);
+  return null;
+}
+
+function parsePurpose(text: string): string {
+  if (/\b(first[-\s]?time|first\s+purchase|purchase|buying|buy)\b/i.test(text)) return "Purchase";
+  if (/\b(remortgage|re[-\s]?mortgage)\b/i.test(text)) return "Remortgage";
+  if (/\b(next\s+home|home\s+mover|moving\s+home)\b/i.test(text)) return "Next home";
+  if (/\b(buy[-\s]?to[-\s]?let|btl|investment)\b/i.test(text)) return "Buy-to-let";
+  return "";
 }
 
 function monthlyPayment(principal: number, annualRatePct: number, years: number): number {
@@ -78,11 +139,23 @@ export const generateLenderExample = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
 
     const map = new Map((answers ?? []).map((a) => [`${a.section}:${a.field_key}`, a.value]));
-    const price = parseMoney(map.get("property:property_value"));
-    const deposit = parseMoney(map.get("property:deposit"));
-    const term = parseYears(map.get("property:term_years")) ?? 25;
+    const mortgageNeed = map.get("property:mortgage_need") ?? "";
+    const moneyCandidates = extractMoneyCandidates(mortgageNeed);
+    const price =
+      parseMoney(map.get("property:property_value")) ??
+      parseMoney(map.get("property:home_price")) ??
+      parseContextMoney(mortgageNeed, ["price", "value", "property", "purchase", "buying", "worth"], ["deposit"] ) ??
+      moneyCandidates[0]?.value ??
+      null;
+    const depositPercent = parsePercentage(mortgageNeed, "deposit");
+    const deposit =
+      parseMoney(map.get("property:deposit")) ??
+      parseContextMoney(mortgageNeed, ["deposit"], []) ??
+      moneyCandidates.find((candidate) => candidate.value !== price)?.value ??
+      (price != null && depositPercent != null ? (price * depositPercent) / 100 : null);
+    const term = parseYears(map.get("property:term_years")) ?? parseYears(map.get("property:mortgage_term")) ?? parseYears(mortgageNeed) ?? 25;
     const income = parseMoney(map.get("employment:annual_income"));
-    const purpose = map.get("property:purpose") ?? "";
+    const purpose = map.get("property:purpose") ?? parsePurpose(mortgageNeed);
     const employment = map.get("employment:employment_status") ?? "";
 
     if (price == null || deposit == null) {
