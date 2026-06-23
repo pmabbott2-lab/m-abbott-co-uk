@@ -347,20 +347,23 @@ function InterviewPage() {
     }
     if (current?.sayText) {
       setStatus("Speaking…");
-      play(current.sayText)
+      const q = current.section != null && current.questionIndex != null ? getQuestion(current.section, current.questionIndex) : undefined;
+      const isVoiceQ = !q?.input || q.input.kind === "voice";
+      let micStarted = false;
+      const playOpts = isVoiceQ
+        ? { onNearEnd: () => {
+            if (micStarted || pausedRef.current || doneRef.current) return;
+            micStarted = true;
+            startListening();
+          } }
+        : undefined;
+      play(current.sayText, playOpts)
         .catch((e) => {
           console.error("TTS play failed", e);
           setPaused(true);
           setNeedsGesture(true);
           setStatus("Audio blocked — tap Start");
           toast.error("Audio blocked — tap Start");
-          throw e;
-        })
-        .then(() => {
-          if (!pausedRef.current && !doneRef.current) startListening();
-        })
-        .catch(() => {
-          // already surfaced above
         });
     } else {
       startListening();
@@ -384,10 +387,16 @@ function InterviewPage() {
     currentRef.current = localStep;
     setCurrent(localStep);
     setStatus("Speaking…");
-    play(sayText)
-      .then(() => {
-        if (!pausedRef.current && !doneRef.current) startListening();
-      })
+    const isVoiceQ = !q?.input || q.input.kind === "voice";
+    let micStarted = false;
+    const playOpts = isVoiceQ
+      ? { onNearEnd: () => {
+          if (micStarted || pausedRef.current || doneRef.current) return;
+          micStarted = true;
+          startListening();
+        } }
+      : undefined;
+    play(sayText, playOpts)
       .catch((e) => {
         console.error("TTS play failed", e);
         bootedRef.current = false;
@@ -397,6 +406,7 @@ function InterviewPage() {
         setStatus("Audio blocked — tap Start");
       });
   };
+
 
   const handleStart = async () => {
     if (bootedRef.current || !sessionQ.data) return;
