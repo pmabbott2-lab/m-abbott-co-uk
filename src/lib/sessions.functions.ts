@@ -78,15 +78,23 @@ export const generateLenderExample = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
 
     const map = new Map((answers ?? []).map((a) => [`${a.section}:${a.field_key}`, a.value]));
-    const price = parseMoney(map.get("property:property_value"));
-    const deposit = parseMoney(map.get("property:deposit"));
-    const term = parseYears(map.get("property:term_years")) ?? 25;
-    const income = parseMoney(map.get("employment:annual_income"));
-    const purpose = map.get("property:purpose") ?? "";
-    const employment = map.get("employment:employment_status") ?? "";
+    const mortgageNeed = (map.get("property:mortgage_need") ?? "") as string;
+    const work = (map.get("employment:work") ?? "") as string;
+
+    const facts = extractMortgageFacts(mortgageNeed);
+    let price = parseMoney(map.get("property:property_value")) ?? facts.price;
+    let deposit = parseMoney(map.get("property:deposit")) ?? facts.deposit;
+    // If deposit was given as a percentage of price
+    if (price != null && deposit == null && facts.depositPct != null) {
+      deposit = price * (facts.depositPct / 100);
+    }
+    const term = parseYears(map.get("property:term_years")) ?? facts.termYears ?? 25;
+    const income = parseMoney(map.get("employment:annual_income")) ?? extractIncome(work);
+    const purpose = (map.get("property:purpose") as string) || facts.purpose || "";
+    const employment = (map.get("employment:employment_status") as string) || extractEmployment(work) || "";
 
     if (price == null || deposit == null) {
-      throw new Error("Need property price and deposit captured in the fact-find to calculate.");
+      throw new Error("I need the property price and deposit from the fact-find to calculate. Please make sure these were captured in the mortgage section.");
     }
 
     const loan = Math.max(price - deposit, 0);
