@@ -30,6 +30,8 @@ export function useAudioPlayback() {
   const unlockedRef = useRef(false);
   const [playing, setPlaying] = useState(false);
 
+  const silentWav = "data:audio/wav;base64,UklGRlIAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YS4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
   const ensureAudio = () => {
     if (!audioRef.current) {
       const audio = new Audio();
@@ -42,10 +44,12 @@ export function useAudioPlayback() {
   const unlock = async () => {
     if (unlockedRef.current) return;
     const audio = ensureAudio();
-    audio.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQQAAAAAAA==";
+    audio.onended = null;
+    audio.onerror = null;
+    audio.loop = true;
+    audio.src = silentWav;
+    audio.load();
     await audio.play();
-    audio.pause();
-    audio.currentTime = 0;
     unlockedRef.current = true;
   };
 
@@ -60,6 +64,7 @@ export function useAudioPlayback() {
     if (!res.ok) throw new Error("TTS failed");
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
+    audio.loop = false;
     audio.src = url;
     audio.load();
     await new Promise<void>((resolve, reject) => {
