@@ -53,7 +53,8 @@ function InterviewPage() {
   const [thinking, setThinking] = useState(false);
   const [done, setDone] = useState(false);
   const [paused, setPaused] = useState(false);
-  const [status, setStatus] = useState<string>("Starting…");
+  const [started, setStarted] = useState(false);
+  const [status, setStatus] = useState<string>("Tap start to begin");
 
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -246,10 +247,11 @@ function InterviewPage() {
     }
   };
 
-  // Boot: ask first question (or resume).
-  useEffect(() => {
+  // Boot must be triggered by a user gesture (mobile autoplay policy).
+  const handleStart = () => {
     if (bootedRef.current || !sessionQ.data) return;
     bootedRef.current = true;
+    setStarted(true);
     const messages = sessionQ.data.messages;
     const lastAvatar = [...messages].reverse().find((m) => m.role === "avatar");
     const lastCustomer = [...messages].reverse().find((m) => m.role === "customer");
@@ -270,15 +272,14 @@ function InterviewPage() {
       });
       setStatus("Speaking…");
       play(lastAvatar!.text)
-        .catch(() => {})
+        .catch((e) => { console.error("TTS play failed", e); toast.error("Audio blocked — tap start again"); })
         .then(() => {
           if (!pausedRef.current && !doneRef.current) startListening();
         });
     } else {
       callStep("");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionQ.data]);
+  };
 
   useEffect(() => () => cleanupAudio(), []);
 
@@ -327,7 +328,11 @@ function InterviewPage() {
                 {transcribing ? "Transcribing…" : thinking ? "Thinking…" : status}
               </p>
               <div className="flex gap-2">
-                {paused ? (
+                {!started ? (
+                  <Button onClick={handleStart} size="lg" className="rounded-full">
+                    <Play className="w-4 h-4 mr-2" /> Start interview
+                  </Button>
+                ) : paused ? (
                   <Button onClick={handleResume} size="lg" className="rounded-full">
                     <Play className="w-4 h-4 mr-2" /> Resume
                   </Button>
