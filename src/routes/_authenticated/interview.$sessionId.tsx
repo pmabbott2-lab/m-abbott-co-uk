@@ -312,14 +312,16 @@ function InterviewPage() {
       const idx = sessionQ.data.session.current_question_index;
       const secDef = findSection(sec);
       const sayText = asSusan(lastAvatar!.text);
+      const curQ = getQuestion(sec, idx);
       setCurrent({
         done: false,
         section: sec,
         sectionTitle: secDef?.title ?? sec,
         questionIndex: idx,
         questionsInSection: secDef?.questions.length ?? 0,
-        fieldKey: "resume",
-        fieldLabel: "",
+        fieldKey: curQ?.key ?? "resume",
+        fieldLabel: curQ?.label ?? "",
+        prompt: curQ?.prompt,
         sayText,
       });
       setStatus("Speaking…");
@@ -335,14 +337,16 @@ function InterviewPage() {
         });
     } else if (firstPrompt) {
       const secDef = findSection(fallbackSection);
+      const q = getQuestion(fallbackSection, fallbackIndex);
       setCurrent({
         done: false,
         section: fallbackSection,
         sectionTitle: secDef?.title ?? fallbackSection,
         questionIndex: fallbackIndex,
         questionsInSection: secDef?.questions.length ?? 0,
-        fieldKey: getQuestion(fallbackSection, fallbackIndex)?.key,
-        fieldLabel: getQuestion(fallbackSection, fallbackIndex)?.label,
+        fieldKey: q?.key,
+        fieldLabel: q?.label,
+        prompt: q?.prompt,
         sayText: firstPrompt,
       });
       callStep("");
