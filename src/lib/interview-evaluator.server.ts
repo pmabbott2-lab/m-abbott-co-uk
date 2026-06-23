@@ -220,7 +220,8 @@ function hasMoneyLike(text: string): boolean {
   return hasMoneyAmount(text) ||
     /\b\d[\d,]{2,}(?:\.\d+)?\b/.test(text) ||
     /\b\d+(?:\.\d+)?\s*(?:pounds?|quid|grand|thousand|k)\b/i.test(text) ||
-    new RegExp(`\\b(?:${NUMBER_WORDS}|thirty|forty|fifty|sixty|seventy|eighty|ninety)\\s+(?:thousand|grand|k|pounds?)\\b`, "i").test(text);
+    new RegExp(`\\b${MONEY_WORDS}(?:[\\s-]+${MONEY_WORDS}){0,7}\\s+(?:pounds?|quid|grand|thousand|million|k)\\b`, "i").test(text) ||
+    new RegExp(`\\b(?:${NUMBER_WORDS}|${TENS_WORDS})[\\s-]+hundred(?:\\s+and)?(?:[\\s-]+(?:${NUMBER_WORDS}|${TENS_WORDS}))?\\b`, "i").test(text);
 }
 
 function hasIncome(text: string): boolean {
