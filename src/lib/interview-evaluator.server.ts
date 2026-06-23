@@ -39,7 +39,7 @@ function hasExplicitDecline(text: string): boolean {
 
 function hasFullName(text: string): boolean {
   const words = text
-    .replace(/[^\p{L}'-\s]/gu, " ")
+    .replace(/[^\p{L}'\s-]/gu, " ")
     .trim()
     .split(/\s+/)
     .filter((w) => w.length > 1);

@@ -143,6 +143,7 @@ export const Route = createFileRoute("/api/interview-step")({
               .maybeSingle();
             const firstName = ((nameRow?.value ?? "").trim().split(/\s+/)[0] ?? "").replace(/[^\p{L}'-]/gu, "");
             const result = await evaluateAnswer({
+              fieldKey: currentQ.key,
               fieldLabel: currentQ.label,
               expects: currentQ.expects,
               prompt: currentQ.prompt,
