@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { chatCompletion } from "@/lib/ai-gateway.server";
-import { getQuestion, nextStep, findSection, SECTIONS, type Section } from "@/lib/interview-script";
+import { getQuestion, nextStep, findSection, SECTIONS, type Section, type AnswersMap } from "@/lib/interview-script";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 
