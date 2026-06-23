@@ -58,6 +58,7 @@ function InterviewPage() {
   const navigate = useNavigate();
   const getSessionFn = useServerFn(getSession);
   const submitFn = useServerFn(submitSession);
+  const setPositionFn = useServerFn(setSessionPosition);
   const { play, playing, stop: stopPlayback, unlock } = useAudioPlayback();
 
   const sessionQ = useQuery({
