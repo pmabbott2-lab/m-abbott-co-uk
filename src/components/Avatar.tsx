@@ -42,17 +42,11 @@ export function useAudioPlayback() {
   const unlock = async () => {
     if (unlockedRef.current) return;
     const audio = ensureAudio();
-    const previousMuted = audio.muted;
-    audio.muted = true;
     audio.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQQAAAAAAA==";
-    try {
-      await audio.play();
-      audio.pause();
-      audio.currentTime = 0;
-      unlockedRef.current = true;
-    } finally {
-      audio.muted = previousMuted;
-    }
+    await audio.play();
+    audio.pause();
+    audio.currentTime = 0;
+    unlockedRef.current = true;
   };
 
   const play = async (text: string) => {
