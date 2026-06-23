@@ -19,6 +19,42 @@ function pickAck(): string {
   return ACKS[Math.floor(Math.random() * ACKS.length)];
 }
 
+const NUMBER_WORDS: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+};
+
+function parseSmallNumber(text?: string | null): number | null {
+  const value = (text ?? "").toLowerCase();
+  const digit = value.match(/\b([1-9]|10)\b/);
+  if (digit) return Number(digit[1]);
+  for (const [word, n] of Object.entries(NUMBER_WORDS)) {
+    if (new RegExp(`\\b${word}\\b`).test(value)) return n;
+  }
+  return null;
+}
+
+function isFinishedChildren(text: string): boolean {
+  return /\b(that'?s\s+(it|all|everyone)|all\s+done|no\s+more|finished)\b/i.test(text);
+}
+
+function countChildDetails(text: string): number {
+  const parts = text
+    .split(/\s*;\s*|\s*\n\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const ageMatches = text.match(/\b(?:age(?:d)?\s*)?(?:[1-9]|1[0-9]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)\b(?=\s*(?:years?\s*old|year\s*old|yrs?\b|$|[,;.]))/gi);
+  return Math.max(parts.length, ageMatches?.length ?? 0);
+}
+
 export const Route = createFileRoute("/api/interview-step")({
   server: {
     handlers: {
