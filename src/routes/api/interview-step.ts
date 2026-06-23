@@ -106,7 +106,16 @@ If the reply doesn't actually answer the question, set confident to false and va
         const sec = findSection(step.section)!;
         // Intro line if changing section
         const intro = !isFirst && (step.section !== section || step.index === 0) && step.index === 0 ? sec.intro + " " : "";
-        const sayText = (isFirst ? "Hi! I'll guide you through a quick fact-find for your mortgage application. " + sec.intro + " " : intro) + nextQ.prompt;
+        // Verbal confirmation echoing the prior answer back to the customer
+        const lastAnswer = body.transcript.trim() && currentQ ? (await supabase
+          .from("interview_answers")
+          .select("value")
+          .eq("session_id", body.sessionId)
+          .eq("section", section)
+          .eq("field_key", currentQ.key)
+          .maybeSingle()).data?.value : null;
+        const confirm = lastAnswer ? `Got it — ${lastAnswer}. ` : "";
+        const sayText = (isFirst ? "Hi! I'll guide you through a quick fact-find for your mortgage application. " + sec.intro + " " : confirm + intro) + nextQ.prompt;
 
         await supabase.from("interview_messages").insert({
           session_id: body.sessionId,
