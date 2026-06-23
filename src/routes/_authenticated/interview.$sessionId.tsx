@@ -73,6 +73,7 @@ function InterviewPage() {
   const [paused, setPaused] = useState(false);
   const [started, setStarted] = useState(false);
   const [status, setStatus] = useState<string>("Starting…");
+  const [needsGesture, setNeedsGesture] = useState(false);
 
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -273,8 +274,9 @@ function InterviewPage() {
       }, TICK_MS);
       rafRef.current = intervalId as unknown as number;
     } catch {
-      toast.error("Microphone access denied.");
-      setStatus("Mic blocked — enable microphone access");
+      setNeedsGesture(true);
+      setListening(false);
+      setStatus("Tap to enable microphone");
     }
   };
 
@@ -349,9 +351,10 @@ function InterviewPage() {
         })
         .catch((e) => {
           console.error("TTS play failed", e);
-          setPaused(true);
-          setStatus("Audio blocked — tap resume");
-          toast.error("Audio blocked — tap resume");
+          bootedRef.current = false;
+          setStarted(false);
+          setNeedsGesture(true);
+          setStatus("Tap to begin");
         });
     } else if (firstPrompt) {
       const secDef = findSection(fallbackSection);
@@ -432,7 +435,19 @@ function InterviewPage() {
                 {transcribing ? "Transcribing…" : thinking ? "Thinking…" : status}
               </p>
               <div className="flex gap-2">
-                {paused ? (
+                {needsGesture ? (
+                  <Button
+                    onClick={() => {
+                      setNeedsGesture(false);
+                      setPaused(false);
+                      void handleStart();
+                    }}
+                    size="lg"
+                    className="rounded-full"
+                  >
+                    <Play className="w-4 h-4 mr-2" /> Tap to begin
+                  </Button>
+                ) : paused ? (
                   <Button onClick={handleResume} size="lg" className="rounded-full">
                     <Play className="w-4 h-4 mr-2" /> Resume
                   </Button>
