@@ -9,6 +9,7 @@ import {
   getMyRole,
   addAdvisorNote,
   listNotes,
+  generateLenderExample,
 } from "@/lib/sessions.functions";
 import { SECTIONS } from "@/lib/interview-script";
 import { AppShell } from "@/components/AppShell";
