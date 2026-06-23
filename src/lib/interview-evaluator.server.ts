@@ -233,7 +233,7 @@ function hasPropertyType(text: string): boolean {
 }
 
 function missingFactsFor(input: EvaluateInput, text: string, latest = "", target?: string): MissingFact[] {
-  const targetDeclined = Boolean(target) && (hasExplicitDecline(latest) || isUnsureOnly(latest));
+  const targetDeclined = Boolean(target) && hasExplicitDecline(latest);
   const targetAnsweredShortly = (id: string) => target === id && isShortMeaningfulAnswer(latest);
   const targetNo = (id: string) => target === id && hasStandaloneNo(latest);
   const targetYes = (id: string) => target === id && hasStandaloneYes(latest);
