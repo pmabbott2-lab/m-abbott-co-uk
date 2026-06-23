@@ -72,7 +72,7 @@ function InterviewPage() {
   const [done, setDone] = useState(false);
   const [paused, setPaused] = useState(false);
   const [started, setStarted] = useState(false);
-  const [status, setStatus] = useState<string>("Tap start to begin");
+  const [status, setStatus] = useState<string>("Starting…");
 
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -95,6 +95,24 @@ function InterviewPage() {
     audioCtxRef.current = null;
   };
 
+  const normaliseStep = (data: StepResp): StepResp => {
+    if (data.done) return data;
+    const section = (data.section ?? "personal") as Section;
+    const index = data.questionIndex ?? 0;
+    const sectionDef = findSection(section);
+    const question = getQuestion(section, index);
+    return {
+      ...data,
+      section,
+      sectionTitle: data.sectionTitle ?? sectionDef?.title ?? section,
+      questionIndex: index,
+      questionsInSection: data.questionsInSection ?? sectionDef?.questions.length ?? 0,
+      fieldKey: data.fieldKey ?? question?.key,
+      fieldLabel: data.fieldLabel ?? question?.label,
+      prompt: data.prompt ?? question?.prompt,
+    };
+  };
+
   const callStep = async (transcript: string) => {
     setThinking(true);
     setStatus(transcript ? "Thinking…" : "Preparing…");
@@ -108,7 +126,7 @@ function InterviewPage() {
         body: JSON.stringify({ sessionId, transcript }),
       });
       if (!res.ok) throw new Error(await res.text());
-      const data = (await res.json()) as StepResp;
+      const data = normaliseStep((await res.json()) as StepResp);
       if (data.done) {
         setDone(true);
         setCurrent(null);
@@ -293,7 +311,7 @@ function InterviewPage() {
     }
   };
 
-  // Boot must be triggered by a user gesture (mobile autoplay policy).
+  // Try to boot automatically; if the browser blocks audio, Resume provides the required user gesture.
   const handleStart = async () => {
     if (bootedRef.current || !sessionQ.data) return;
     bootedRef.current = true;
@@ -356,30 +374,9 @@ function InterviewPage() {
   };
 
   useEffect(() => {
-    if (!sessionQ.data || current || started || done) return;
-    const messages = sessionQ.data.messages;
-    const lastAvatar = [...messages].reverse().find((m) => m.role === "avatar");
-    const lastCustomer = [...messages].reverse().find((m) => m.role === "customer");
-    const hasOpenQuestion =
-      lastAvatar && (!lastCustomer || new Date(lastAvatar.created_at) > new Date(lastCustomer.created_at));
-    const section = (sessionQ.data.session.current_section as Section) || "personal";
-    const index = sessionQ.data.session.current_question_index ?? 0;
-    const sectionDef = findSection(section);
-    const question = getQuestion(section, index);
-    const sayText = hasOpenQuestion ? asSusan(lastAvatar.text) : buildPromptText(section, index);
-    if (!sayText) return;
-    setCurrent({
-      done: false,
-      section,
-      sectionTitle: sectionDef?.title ?? section,
-      questionIndex: index,
-      questionsInSection: sectionDef?.questions.length ?? 0,
-      fieldKey: question?.key ?? (hasOpenQuestion ? "resume" : undefined),
-      fieldLabel: question?.label ?? "",
-      prompt: question?.prompt,
-      sayText,
-    });
-  }, [sessionQ.data, current, started, done]);
+    if (!sessionQ.data || started || done || bootedRef.current) return;
+    void handleStart();
+  }, [sessionQ.data, started, done]);
 
   useEffect(() => () => cleanupAudio(), []);
 
@@ -429,17 +426,13 @@ function InterviewPage() {
           ) : (
             <>
               <p className="text-lg font-medium leading-snug min-h-[3rem]">
-                {current?.prompt ?? current?.sayText ?? (thinking ? "Preparing your first question…" : "")}
+                {current?.sayText ?? current?.prompt ?? (thinking ? "Preparing your first question…" : "")}
               </p>
               <p className="text-sm text-muted-foreground">
                 {transcribing ? "Transcribing…" : thinking ? "Thinking…" : status}
               </p>
               <div className="flex gap-2">
-                {!started ? (
-                  <Button onClick={handleStart} size="lg" className="rounded-full">
-                    <Play className="w-4 h-4 mr-2" /> Start interview
-                  </Button>
-                ) : paused ? (
+                {paused ? (
                   <Button onClick={handleResume} size="lg" className="rounded-full">
                     <Play className="w-4 h-4 mr-2" /> Resume
                   </Button>
