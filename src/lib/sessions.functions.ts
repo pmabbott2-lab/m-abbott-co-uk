@@ -1,6 +1,100 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
+import { chatCompletion } from "@/lib/ai-gateway.server";
+
+function parseMoney(v: string | undefined | null): number | null {
+  if (!v) return null;
+  const cleaned = v.replace(/[^0-9.]/g, "");
+  if (!cleaned) return null;
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? null : n;
+}
+
+function parseYears(v: string | undefined | null): number | null {
+  if (!v) return null;
+  const m = v.match(/(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function monthlyPayment(principal: number, annualRatePct: number, years: number): number {
+  const r = annualRatePct / 100 / 12;
+  const n = years * 12;
+  if (r === 0) return principal / n;
+  return (principal * r) / (1 - Math.pow(1 + r, -n));
+}
+
+export const generateLenderExample = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { data: answers, error } = await context.supabase
+      .from("interview_answers")
+      .select("section, field_key, value")
+      .eq("session_id", data.sessionId);
+    if (error) throw new Error(error.message);
+
+    const map = new Map((answers ?? []).map((a) => [`${a.section}:${a.field_key}`, a.value]));
+    const price = parseMoney(map.get("property:property_value"));
+    const deposit = parseMoney(map.get("property:deposit"));
+    const term = parseYears(map.get("property:term_years")) ?? 25;
+    const income = parseMoney(map.get("employment:annual_income"));
+    const purpose = map.get("property:purpose") ?? "";
+    const employment = map.get("employment:employment_status") ?? "";
+
+    if (price == null || deposit == null) {
+      throw new Error("Need property price and deposit captured in the fact-find to calculate.");
+    }
+
+    const loan = Math.max(price - deposit, 0);
+    const ltv = price > 0 ? (loan / price) * 100 : 0;
+
+    // Ask AI to suggest an illustrative rate band based on LTV/term/purpose
+    let rate = 4.75;
+    let productLabel = "5-year fixed";
+    let aiNote = "";
+    try {
+      const out = await chatCompletion({
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a UK mortgage analyst. Return ONLY JSON. Provide an illustrative (not a real quote) rate and product for the given scenario. Be realistic for current UK high-street pricing trends.",
+          },
+          {
+            role: "user",
+            content: `Loan: £${loan.toFixed(0)}, Property: £${price.toFixed(0)}, LTV: ${ltv.toFixed(1)}%, Term: ${term} years, Purpose: ${purpose}, Employment: ${employment}, Annual income: ${income ?? "unknown"}.
+Return JSON: { "rate": <number, annual %>, "product": "<e.g. '5-year fixed'>", "note": "<one short paragraph (max 60 words) explaining the illustrative lender scenario and any affordability/LTV considerations. End with 'For illustration only — not a quote.'>" }`,
+          },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.3,
+      });
+      const parsed = JSON.parse(out) as { rate?: number; product?: string; note?: string };
+      if (typeof parsed.rate === "number" && parsed.rate > 0 && parsed.rate < 20) rate = parsed.rate;
+      if (parsed.product) productLabel = parsed.product;
+      if (parsed.note) aiNote = parsed.note;
+    } catch (e) {
+      console.error("lender example AI failed", e);
+      aiNote = "Illustrative example based on typical UK rates. For illustration only — not a quote.";
+    }
+
+    const monthly = monthlyPayment(loan, rate, term);
+    const incomeMultiple = income && income > 0 ? loan / income : null;
+
+    return {
+      inputs: { price, deposit, loan, ltv, term, income, purpose, employment },
+      illustration: {
+        rate,
+        product: productLabel,
+        monthly,
+        totalPayable: monthly * term * 12,
+        incomeMultiple,
+        note: aiNote,
+      },
+    };
+  });
+
 
 export const listMySessions = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
