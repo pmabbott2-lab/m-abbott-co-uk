@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Pause, Play, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
-import { totalQuestions, questionIndexGlobal, type Section } from "@/lib/interview-script";
+import { totalQuestions, questionIndexGlobal, getQuestion, findSection, type Section } from "@/lib/interview-script";
 
 export const Route = createFileRoute("/_authenticated/interview/$sessionId")({
   component: InterviewPage,
@@ -37,6 +37,20 @@ const SPEECH_OFF_MULT = 1.6; // below noiseFloor * this counts as silence (hyste
 const MIN_SPEECH_RMS = 0.015; // absolute floor for speech-on
 const MIN_SILENCE_RMS = 0.009; // absolute ceiling for silence
 const MIN_SPEECH_MS = 350; // require this much cumulative speech before allowing end
+
+function buildPromptText(section: Section, index: number) {
+  const sectionDef = findSection(section);
+  const question = getQuestion(section, index);
+  if (!sectionDef || !question) return "";
+  if (section === "personal" && index === 0) {
+    return `Hi, I'm Susan. I'll guide you through a quick fact-find for your mortgage application. ${sectionDef.intro} ${question.prompt}`;
+  }
+  return `${sectionDef.intro} ${question.prompt}`;
+}
+
+function asSusan(text: string) {
+  return text.replace("Hi! I'll guide you", "Hi, I'm Susan. I'll guide you");
+}
 
 function InterviewPage() {
   const { sessionId } = Route.useParams();
@@ -283,36 +297,32 @@ function InterviewPage() {
     if (bootedRef.current || !sessionQ.data) return;
     bootedRef.current = true;
     setStarted(true);
-    try {
-      await unlock();
-    } catch (e) {
-      console.error("Audio unlock failed", e);
-      toast.error("Audio blocked — tap start again");
-      bootedRef.current = false;
-      setStarted(false);
-      setStatus("Tap start to begin");
-      return;
-    }
+    await unlock().catch((e) => console.warn("Audio unlock skipped", e));
     const messages = sessionQ.data.messages;
     const lastAvatar = [...messages].reverse().find((m) => m.role === "avatar");
     const lastCustomer = [...messages].reverse().find((m) => m.role === "customer");
     const hasOpenQuestion =
       lastAvatar && (!lastCustomer || new Date(lastAvatar.created_at) > new Date(lastCustomer.created_at));
+    const fallbackSection = (sessionQ.data.session.current_section as Section) || "personal";
+    const fallbackIndex = sessionQ.data.session.current_question_index ?? 0;
+    const firstPrompt = buildPromptText(fallbackSection, fallbackIndex);
     if (hasOpenQuestion) {
       const sec = sessionQ.data.session.current_section as Section;
       const idx = sessionQ.data.session.current_question_index;
+      const secDef = findSection(sec);
+      const sayText = asSusan(lastAvatar!.text);
       setCurrent({
         done: false,
         section: sec,
-        sectionTitle: sec,
+        sectionTitle: secDef?.title ?? sec,
         questionIndex: idx,
-        questionsInSection: 5,
+        questionsInSection: secDef?.questions.length ?? 0,
         fieldKey: "resume",
         fieldLabel: "",
-        sayText: lastAvatar!.text,
+        sayText,
       });
       setStatus("Speaking…");
-      play(lastAvatar!.text)
+      play(sayText)
         .then(() => {
           if (!pausedRef.current && !doneRef.current) startListening();
         })
@@ -322,10 +332,48 @@ function InterviewPage() {
           setStatus("Audio blocked — tap resume");
           toast.error("Audio blocked — tap resume");
         });
+    } else if (firstPrompt) {
+      const secDef = findSection(fallbackSection);
+      setCurrent({
+        done: false,
+        section: fallbackSection,
+        sectionTitle: secDef?.title ?? fallbackSection,
+        questionIndex: fallbackIndex,
+        questionsInSection: secDef?.questions.length ?? 0,
+        fieldKey: getQuestion(fallbackSection, fallbackIndex)?.key,
+        fieldLabel: getQuestion(fallbackSection, fallbackIndex)?.label,
+        sayText: firstPrompt,
+      });
+      callStep("");
     } else {
       callStep("");
     }
   };
+
+  useEffect(() => {
+    if (!sessionQ.data || current || started || done) return;
+    const messages = sessionQ.data.messages;
+    const lastAvatar = [...messages].reverse().find((m) => m.role === "avatar");
+    const lastCustomer = [...messages].reverse().find((m) => m.role === "customer");
+    const hasOpenQuestion =
+      lastAvatar && (!lastCustomer || new Date(lastAvatar.created_at) > new Date(lastCustomer.created_at));
+    const section = (sessionQ.data.session.current_section as Section) || "personal";
+    const index = sessionQ.data.session.current_question_index ?? 0;
+    const sectionDef = findSection(section);
+    const question = getQuestion(section, index);
+    const sayText = hasOpenQuestion ? asSusan(lastAvatar.text) : buildPromptText(section, index);
+    if (!sayText) return;
+    setCurrent({
+      done: false,
+      section,
+      sectionTitle: sectionDef?.title ?? section,
+      questionIndex: index,
+      questionsInSection: sectionDef?.questions.length ?? 0,
+      fieldKey: hasOpenQuestion ? "resume" : question?.key,
+      fieldLabel: hasOpenQuestion ? "" : question?.label,
+      sayText,
+    });
+  }, [sessionQ.data, current, started, done]);
 
   useEffect(() => () => cleanupAudio(), []);
 
