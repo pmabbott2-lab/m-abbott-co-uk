@@ -21,13 +21,14 @@ export interface SectionDef {
 
 function isRetired(answers: AnswersMap): boolean {
   const v = (answers["employment:employment_status"] ?? "").toLowerCase();
-  return /\bretir/.test(v) || /pension/.test(v);
+  if (!v) return false;
+  return /\bretir/.test(v) || /\bpension/.test(v) || /no longer work/.test(v) || /not working/.test(v) || /stopped work/.test(v) || /\bex[- ]?employ/.test(v);
 }
 
 function isNotRetired(answers: AnswersMap): boolean {
   const v = (answers["employment:employment_status"] ?? "").toLowerCase();
   if (!v) return true; // before we know, default to hiding the retiree-only field
-  return !(/\bretir/.test(v) || /pension/.test(v));
+  return !isRetired(answers);
 }
 
 function hasDependants(answers: AnswersMap): boolean {
