@@ -351,9 +351,10 @@ function InterviewPage() {
         })
         .catch((e) => {
           console.error("TTS play failed", e);
-          setPaused(true);
-          setStatus("Audio blocked — tap resume");
-          toast.error("Audio blocked — tap resume");
+          bootedRef.current = false;
+          setStarted(false);
+          setNeedsGesture(true);
+          setStatus("Tap to begin");
         });
     } else if (firstPrompt) {
       const secDef = findSection(fallbackSection);
