@@ -123,7 +123,7 @@ export const Route = createFileRoute("/api/interview-step")({
             acknowledgement = pickAck();
           } else if (currentQ.expects) {
             // AI-driven evaluation: ask follow-ups when the answer is incomplete.
-            const { evaluateAnswer, MAX_FOLLOWUPS } = await import("@/lib/interview-evaluator.server");
+            const { evaluateAnswer } = await import("@/lib/interview-evaluator.server");
             const { data: existing } = await supabase
               .from("interview_answers")
               .select("value")
@@ -143,6 +143,7 @@ export const Route = createFileRoute("/api/interview-step")({
               .maybeSingle();
             const firstName = ((nameRow?.value ?? "").trim().split(/\s+/)[0] ?? "").replace(/[^\p{L}'-]/gu, "");
             const result = await evaluateAnswer({
+              fieldKey: currentQ.key,
               fieldLabel: currentQ.label,
               expects: currentQ.expects,
               prompt: currentQ.prompt,
@@ -153,7 +154,7 @@ export const Route = createFileRoute("/api/interview-step")({
             });
             cleanedValue = result.cleanedValue || rawValue;
             acknowledgement = result.acknowledgement || pickAck();
-            if (!result.complete && currentFollowupCount < MAX_FOLLOWUPS) {
+            if (!result.complete) {
               stayOnSameQuestion = true;
               followupPrompt = result.followup || `Sorry ${firstName || ""}, could you tell me a bit more so I can capture: ${currentQ.expects}`.trim();
               nextFollowupCount = currentFollowupCount + 1;
