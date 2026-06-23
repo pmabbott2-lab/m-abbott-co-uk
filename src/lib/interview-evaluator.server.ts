@@ -224,6 +224,11 @@ function hasMoneyLike(text: string): boolean {
     new RegExp(`\\b(?:${NUMBER_WORDS}|${TENS_WORDS})[\\s-]+hundred(?:\\s+and)?(?:[\\s-]+(?:${NUMBER_WORDS}|${TENS_WORDS}))?\\b`, "i").test(text);
 }
 
+function hasPercentLike(text: string): boolean {
+  return /\b\d{1,2}\s?(?:%|percent|per\s+cent)\b/i.test(text) ||
+    new RegExp(`\\b(?:${NUMBER_WORDS}|${TENS_WORDS})(?:[\\s-]+(?:${NUMBER_WORDS}))?\\s+(?:percent|per\\s+cent)\\b`, "i").test(text);
+}
+
 function hasIncome(text: string): boolean {
   return hasMoneyLike(text) && /\b(salary|income|earn|earning|wage|gross|annual|year|pa|per\s+annum|month)\b/i.test(text);
 }
