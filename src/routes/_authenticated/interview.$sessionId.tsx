@@ -303,8 +303,9 @@ function InterviewPage() {
         .catch((e) => {
           console.error("TTS play failed", e);
           setPaused(true);
-          setStatus("Audio blocked — tap resume");
-          toast.error("Audio blocked — tap resume");
+          setNeedsGesture(true);
+          setStatus("Audio blocked — tap Start");
+          toast.error("Audio blocked — tap Start");
           throw e;
         })
         .then(() => {
@@ -318,12 +319,27 @@ function InterviewPage() {
     }
   };
 
-  // Try to boot automatically; if the browser blocks audio, Resume provides the required user gesture.
   const handleStart = async () => {
     if (bootedRef.current || !sessionQ.data) return;
-    bootedRef.current = true;
+    setNeedsGesture(false);
+    setPaused(false);
     setStarted(true);
-    await unlock().catch((e) => console.warn("Audio unlock skipped", e));
+    setStatus("Starting…");
+    try {
+      if (!streamRef.current?.active) {
+        streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+      await unlock();
+    } catch (e) {
+      console.error("Start media unlock failed", e);
+      setNeedsGesture(true);
+      setStarted(false);
+      setPaused(true);
+      setStatus("Allow microphone, then tap Start");
+      toast.error("Please allow microphone access, then tap Start");
+      return;
+    }
+    bootedRef.current = true;
     const messages = sessionQ.data.messages;
     const lastAvatar = [...messages].reverse().find((m) => m.role === "avatar");
     const lastCustomer = [...messages].reverse().find((m) => m.role === "customer");
