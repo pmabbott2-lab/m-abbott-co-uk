@@ -344,6 +344,35 @@ function InterviewPage() {
     }
   };
 
+  const playLocal = (sayText: string, section: Section, index: number) => {
+    const secDef = findSection(section);
+    const q = getQuestion(section, index);
+    setCurrent({
+      done: false,
+      section,
+      sectionTitle: secDef?.title ?? section,
+      questionIndex: index,
+      questionsInSection: secDef?.questions.length ?? 0,
+      fieldKey: q?.key,
+      fieldLabel: q?.label,
+      prompt: q?.prompt,
+      sayText,
+    });
+    setStatus("Speaking…");
+    play(sayText)
+      .then(() => {
+        if (!pausedRef.current && !doneRef.current) startListening();
+      })
+      .catch((e) => {
+        console.error("TTS play failed", e);
+        bootedRef.current = false;
+        setStarted(false);
+        setNeedsGesture(true);
+        setPaused(true);
+        setStatus("Audio blocked — tap Start");
+      });
+  };
+
   const handleStart = async () => {
     if (bootedRef.current || !sessionQ.data) return;
     pausedRef.current = false;
@@ -369,57 +398,44 @@ function InterviewPage() {
     const lastCustomer = [...messages].reverse().find((m) => m.role === "customer");
     const hasOpenQuestion =
       lastAvatar && (!lastCustomer || new Date(lastAvatar.created_at) > new Date(lastCustomer.created_at));
-    const fallbackSection = (sessionQ.data.session.current_section as Section) || "personal";
-    const fallbackIndex = sessionQ.data.session.current_question_index ?? 0;
-    const firstPrompt = buildPromptText(fallbackSection, fallbackIndex);
+    const savedSection = (sessionQ.data.session.current_section as Section) || "personal";
+    const savedIndex = sessionQ.data.session.current_question_index ?? 0;
+
     if (hasOpenQuestion) {
-      const sec = sessionQ.data.session.current_section as Section;
-      const idx = sessionQ.data.session.current_question_index;
-      const secDef = findSection(sec);
-      const sayText = asSusan(lastAvatar!.text);
-      const curQ = getQuestion(sec, idx);
-      setCurrent({
-        done: false,
-        section: sec,
-        sectionTitle: secDef?.title ?? sec,
-        questionIndex: idx,
-        questionsInSection: secDef?.questions.length ?? 0,
-        fieldKey: curQ?.key ?? "resume",
-        fieldLabel: curQ?.label ?? "",
-        prompt: curQ?.prompt,
-        sayText,
-      });
-      setStatus("Speaking…");
-      play(sayText)
-        .then(() => {
-          if (!pausedRef.current && !doneRef.current) startListening();
-        })
-        .catch((e) => {
-          console.error("TTS play failed", e);
-          bootedRef.current = false;
-          setStarted(false);
-          setNeedsGesture(true);
-          setStatus("Tap Start to begin");
-        });
-    } else if (firstPrompt) {
-      const secDef = findSection(fallbackSection);
-      const q = getQuestion(fallbackSection, fallbackIndex);
-      setCurrent({
-        done: false,
-        section: fallbackSection,
-        sectionTitle: secDef?.title ?? fallbackSection,
-        questionIndex: fallbackIndex,
-        questionsInSection: secDef?.questions.length ?? 0,
-        fieldKey: q?.key,
-        fieldLabel: q?.label,
-        prompt: q?.prompt,
-        sayText: firstPrompt,
-      });
-      callStep("");
+      // Resume an in-flight question — replay the exact avatar line
+      playLocal(asSusan(lastAvatar!.text), savedSection, savedIndex);
+    } else if (messages.length > 0) {
+      // Resume after an answer — re-ask the saved question locally, no server advance
+      playLocal(buildPromptText(savedSection, savedIndex), savedSection, savedIndex);
     } else {
+      // Fresh session — let the server seed the first question
       callStep("");
     }
   };
+
+  const handleBack = async () => {
+    if (!current?.section || current.questionIndex == null) return;
+    const prev = prevStep(current.section, current.questionIndex);
+    if (!prev) {
+      toast.info("You're at the first question");
+      return;
+    }
+    stopPlayback();
+    if (mediaRef.current?.state === "recording") {
+      try { mediaRef.current.stop(); } catch {}
+    }
+    cleanupAudio(false);
+    setListening(false);
+    setThinking(false);
+    try {
+      await setPositionFn({ data: { sessionId, section: prev.section, index: prev.index } });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't go back");
+      return;
+    }
+    playLocal(buildPromptText(prev.section, prev.index), prev.section, prev.index);
+  };
+
 
   useEffect(() => {
     if (!sessionQ.data || started || done) return;
