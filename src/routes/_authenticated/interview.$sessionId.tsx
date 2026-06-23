@@ -8,7 +8,7 @@ import { AppShell } from "@/components/AppShell";
 import { Avatar, useAudioPlayback } from "@/components/Avatar";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Pause, Play } from "lucide-react";
+import { Pause, Play, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { totalQuestions, questionIndexGlobal, type Section } from "@/lib/interview-script";
 
