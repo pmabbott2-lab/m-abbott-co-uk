@@ -167,30 +167,56 @@ function InterviewPage() {
       const startedAt = Date.now();
       let speechDetected = false;
       let lastSpeechAt = Date.now();
+      let noiseFloor = 0.005;
+      const noiseSamples: number[] = [];
 
-      const tick = () => {
-        if (!mediaRef.current || mediaRef.current.state !== "recording") return;
+      const intervalId = window.setInterval(() => {
+        const mr2 = mediaRef.current;
+        if (!mr2 || mr2.state !== "recording") {
+          window.clearInterval(intervalId);
+          return;
+        }
         analyser.getFloatTimeDomainData(buf);
         let sum = 0;
         for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
         const rms = Math.sqrt(sum / buf.length);
         const now = Date.now();
-        if (rms > SPEECH_RMS) {
+        const elapsed = now - startedAt;
+
+        // Calibrate noise floor in the first window
+        if (elapsed < CALIBRATION_MS) {
+          noiseSamples.push(rms);
+          rafRef.current = null;
+          return;
+        }
+        if (noiseSamples.length && noiseFloor === 0.005) {
+          noiseSamples.sort((a, b) => a - b);
+          noiseFloor = noiseSamples[Math.floor(noiseSamples.length / 2)] || 0.005;
+        }
+
+        const threshold = Math.max(MIN_SPEECH_RMS, noiseFloor * SPEECH_MULTIPLIER);
+        if (rms > threshold) {
           speechDetected = true;
           lastSpeechAt = now;
         }
-        const elapsed = now - startedAt;
+
         if (speechDetected && now - lastSpeechAt > SILENCE_MS) {
-          mediaRef.current.stop();
+          window.clearInterval(intervalId);
+          try { mr2.stop(); } catch {}
+          return;
+        }
+        if (!speechDetected && elapsed > NO_SPEECH_TIMEOUT_MS) {
+          window.clearInterval(intervalId);
+          try { mr2.stop(); } catch {}
           return;
         }
         if (elapsed > MAX_TURN_MS) {
-          mediaRef.current.stop();
+          window.clearInterval(intervalId);
+          try { mr2.stop(); } catch {}
           return;
         }
-        rafRef.current = requestAnimationFrame(tick);
-      };
-      rafRef.current = requestAnimationFrame(tick);
+      }, 80);
+      rafRef.current = intervalId as unknown as number;
     } catch {
       toast.error("Microphone access denied.");
       setStatus("Mic blocked — enable microphone access");
