@@ -301,7 +301,14 @@ function InterviewPage() {
   const progress = done ? 100 : Math.round((questionIndexGlobal(sec, qi) / totalQuestions()) * 100);
 
   return (
-    <AppShell title="Interview">
+    <AppShell
+      title="Interview"
+      action={
+        <Button variant="outline" size="sm" onClick={() => navigate({ to: "/home" })}>
+          <ArrowLeft className="w-4 h-4 mr-2" /> Back
+        </Button>
+      }
+    >
       <div className="max-w-2xl mx-auto">
         <div className="mb-6">
           <Progress value={progress} className="h-2" />
