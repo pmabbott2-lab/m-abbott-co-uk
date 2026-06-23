@@ -247,10 +247,11 @@ function InterviewPage() {
     }
   };
 
-  // Boot: ask first question (or resume).
-  useEffect(() => {
+  // Boot must be triggered by a user gesture (mobile autoplay policy).
+  const handleStart = () => {
     if (bootedRef.current || !sessionQ.data) return;
     bootedRef.current = true;
+    setStarted(true);
     const messages = sessionQ.data.messages;
     const lastAvatar = [...messages].reverse().find((m) => m.role === "avatar");
     const lastCustomer = [...messages].reverse().find((m) => m.role === "customer");
@@ -271,15 +272,14 @@ function InterviewPage() {
       });
       setStatus("Speaking…");
       play(lastAvatar!.text)
-        .catch(() => {})
+        .catch((e) => { console.error("TTS play failed", e); toast.error("Audio blocked — tap start again"); })
         .then(() => {
           if (!pausedRef.current && !doneRef.current) startListening();
         });
     } else {
       callStep("");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionQ.data]);
+  };
 
   useEffect(() => () => cleanupAudio(), []);
 
