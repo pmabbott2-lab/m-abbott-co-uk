@@ -51,7 +51,7 @@ export const SECTIONS: SectionDef[] = [
       { key: "marital_status", label: "Marital status", prompt: "Are you single, married, in a civil partnership, or living with a partner?" },
       { key: "dependants", label: "Dependants", prompt: "Do you have any dependants?" },
       { key: "dependants_count", label: "Number of children", prompt: "Lovely — how many children do you have?", skipWhen: (a) => !hasDependants(a) },
-      { key: "dependants_details", label: "Children's names & ages", prompt: "Thank you — could you tell me each of their names and ages, one by one?", skipWhen: (a) => !hasDependants(a), silenceMs: 2500 },
+      { key: "dependants_details", label: "Children's names & ages", prompt: "Thank you — please tell me each child's name and age. Take your time between each one, and just say \"that's everyone\" when you've finished.", skipWhen: (a) => !hasDependants(a), silenceMs: 5000 },
     ],
   },
   {
