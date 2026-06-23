@@ -115,7 +115,7 @@ If the reply doesn't actually answer the question, set confident to false and va
           .eq("field_key", currentQ.key)
           .maybeSingle()).data?.value : null;
         const confirm = lastAnswer ? `Got it — ${lastAnswer}. ` : "";
-        const sayText = (isFirst ? "Hi! I'll guide you through a quick fact-find for your mortgage application. " + sec.intro + " " : confirm + intro) + nextQ.prompt;
+        const sayText = (isFirst ? "Hi, I'm Susan. I'll guide you through a quick fact-find for your mortgage application. " + sec.intro + " " : confirm + intro) + nextQ.prompt;
 
         await supabase.from("interview_messages").insert({
           session_id: body.sessionId,

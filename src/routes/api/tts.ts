@@ -17,7 +17,8 @@ export const Route = createFileRoute("/api/tts")({
           body: JSON.stringify({
             model: "openai/gpt-4o-mini-tts",
             input: text,
-            voice: "alloy",
+            voice: "shimmer",
+            instructions: "Speak as Susan, a warm, calm UK mortgage interview guide. Keep the pacing natural and reassuring.",
             response_format: "mp3",
           }),
         });
