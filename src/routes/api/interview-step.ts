@@ -121,7 +121,7 @@ export const Route = createFileRoute("/api/interview-step")({
           }
           acknowledgement = pickAck();
           cleanedValue = value;
-          await supabase.from("interview_answers").upsert(
+          const { error: answerErr } = await supabase.from("interview_answers").upsert(
             {
               session_id: body.sessionId,
               section,
@@ -132,6 +132,10 @@ export const Route = createFileRoute("/api/interview-step")({
             },
             { onConflict: "session_id,section,field_key" },
           );
+          if (answerErr) {
+            console.error("answer save failed", answerErr);
+            return new Response("Could not save answer", { status: 500 });
+          }
         }
 
 
@@ -146,6 +150,9 @@ export const Route = createFileRoute("/api/interview-step")({
         (answerRows ?? []).forEach((a) => {
           answersMap[`${a.section}:${a.field_key}`] = a.value ?? "";
         });
+        if (currentQ && cleanedValue !== null) {
+          answersMap[`${section}:${currentQ.key}`] = cleanedValue;
+        }
 
         // Determine next question (advance)
         const isFirst = !body.transcript.trim() && index === 0 && section === "personal";
