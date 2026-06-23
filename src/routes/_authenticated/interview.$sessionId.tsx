@@ -28,9 +28,12 @@ interface StepResp {
 }
 
 // Voice-activity detection thresholds
-const SPEECH_RMS = 0.02; // above this counts as speech
-const SILENCE_MS = 2000; // 2s of silence after speech ends the turn
-const MAX_TURN_MS = 30000; // hard cap per answer
+const SILENCE_MS = 1800; // silence after speech ends the turn
+const MAX_TURN_MS = 25000; // hard cap per answer
+const NO_SPEECH_TIMEOUT_MS = 8000; // if nothing detected at all, stop
+const CALIBRATION_MS = 600; // measure ambient noise floor at start
+const SPEECH_MULTIPLIER = 2.5; // speech must be this much louder than noise floor
+const MIN_SPEECH_RMS = 0.012; // absolute floor
 
 function InterviewPage() {
   const { sessionId } = Route.useParams();
