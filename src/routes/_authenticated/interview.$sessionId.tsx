@@ -328,7 +328,11 @@ function InterviewPage() {
                 {transcribing ? "Transcribing…" : thinking ? "Thinking…" : status}
               </p>
               <div className="flex gap-2">
-                {paused ? (
+                {!started ? (
+                  <Button onClick={handleStart} size="lg" className="rounded-full">
+                    <Play className="w-4 h-4 mr-2" /> Start interview
+                  </Button>
+                ) : paused ? (
                   <Button onClick={handleResume} size="lg" className="rounded-full">
                     <Play className="w-4 h-4 mr-2" /> Resume
                   </Button>
