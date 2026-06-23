@@ -28,12 +28,15 @@ interface StepResp {
 }
 
 // Voice-activity detection thresholds
-const SILENCE_MS = 1800; // silence after speech ends the turn
-const MAX_TURN_MS = 25000; // hard cap per answer
-const NO_SPEECH_TIMEOUT_MS = 8000; // if nothing detected at all, stop
-const CALIBRATION_MS = 600; // measure ambient noise floor at start
-const SPEECH_MULTIPLIER = 2.5; // speech must be this much louder than noise floor
-const MIN_SPEECH_RMS = 0.012; // absolute floor
+const SILENCE_MS = 1400; // sustained silence after speech ends the turn
+const MAX_TURN_MS = 45000; // hard cap per answer
+const NO_SPEECH_TIMEOUT_MS = 10000; // if nothing detected at all, stop
+const CALIBRATION_MS = 500; // measure ambient noise floor at start
+const SPEECH_ON_MULT = 3.0; // RMS must exceed noiseFloor * this to count as speech
+const SPEECH_OFF_MULT = 1.6; // below noiseFloor * this counts as silence (hysteresis)
+const MIN_SPEECH_RMS = 0.015; // absolute floor for speech-on
+const MIN_SILENCE_RMS = 0.009; // absolute ceiling for silence
+const MIN_SPEECH_MS = 350; // require this much cumulative speech before allowing end
 
 function InterviewPage() {
   const { sessionId } = Route.useParams();
@@ -175,9 +178,12 @@ function InterviewPage() {
       const buf = new Float32Array(analyser.fftSize);
       const startedAt = Date.now();
       let speechDetected = false;
+      let speechMs = 0;
       let lastSpeechAt = Date.now();
       let noiseFloor = 0.005;
+      let calibrated = false;
       const noiseSamples: number[] = [];
+      const TICK_MS = 80;
 
       const intervalId = window.setInterval(() => {
         const mr2 = mediaRef.current;
@@ -192,24 +198,31 @@ function InterviewPage() {
         const now = Date.now();
         const elapsed = now - startedAt;
 
-        // Calibrate noise floor in the first window
+        // Calibrate noise floor in the first window (75th percentile)
         if (elapsed < CALIBRATION_MS) {
           noiseSamples.push(rms);
-          rafRef.current = null;
           return;
         }
-        if (noiseSamples.length && noiseFloor === 0.005) {
+        if (!calibrated) {
           noiseSamples.sort((a, b) => a - b);
-          noiseFloor = noiseSamples[Math.floor(noiseSamples.length / 2)] || 0.005;
+          noiseFloor = noiseSamples[Math.floor(noiseSamples.length * 0.75)] || 0.005;
+          calibrated = true;
         }
 
-        const threshold = Math.max(MIN_SPEECH_RMS, noiseFloor * SPEECH_MULTIPLIER);
-        if (rms > threshold) {
+        const onThreshold = Math.max(MIN_SPEECH_RMS, noiseFloor * SPEECH_ON_MULT);
+        const offThreshold = Math.min(MIN_SILENCE_RMS, Math.max(noiseFloor * SPEECH_OFF_MULT, noiseFloor + 0.002));
+
+        if (rms > onThreshold) {
           speechDetected = true;
+          speechMs += TICK_MS;
           lastSpeechAt = now;
+        } else if (rms < offThreshold) {
+          // count as silence — do not bump lastSpeechAt
+        } else {
+          // in-between band — treat as quiet enough not to extend speech
         }
 
-        if (speechDetected && now - lastSpeechAt > SILENCE_MS) {
+        if (speechDetected && speechMs >= MIN_SPEECH_MS && now - lastSpeechAt > SILENCE_MS) {
           window.clearInterval(intervalId);
           try { mr2.stop(); } catch {}
           return;
@@ -224,7 +237,7 @@ function InterviewPage() {
           try { mr2.stop(); } catch {}
           return;
         }
-      }, 80);
+      }, TICK_MS);
       rafRef.current = intervalId as unknown as number;
     } catch {
       toast.error("Microphone access denied.");
