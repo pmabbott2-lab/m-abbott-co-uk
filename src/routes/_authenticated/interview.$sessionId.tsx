@@ -274,8 +274,9 @@ function InterviewPage() {
       }, TICK_MS);
       rafRef.current = intervalId as unknown as number;
     } catch {
-      toast.error("Microphone access denied.");
-      setStatus("Mic blocked — enable microphone access");
+      setNeedsGesture(true);
+      setListening(false);
+      setStatus("Tap to enable microphone");
     }
   };
 
