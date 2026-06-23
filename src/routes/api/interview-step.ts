@@ -252,11 +252,17 @@ export const Route = createFileRoute("/api/interview-step")({
 
         const nextQ = getQuestion(step.section, step.index)!;
         const sec = findSection(step.section)!;
+
+        // Personalise prompts using the customer's first name once we have it.
+        const fullName = answersMap["personal:full_name"] ?? "";
+        const firstName = (fullName.trim().split(/\s+/)[0] ?? "").replace(/[^\p{L}'-]/gu, "");
+        const personalise = (text: string) =>
+          firstName ? text.replace(/\{firstName\}/g, firstName) : text.replace(/,?\s*\{firstName\}/g, "");
+
         const intro = !isFirst && (step.section !== section || step.index === 0) && step.index === 0 ? sec.intro + " " : "";
         const ack = !isFirst && acknowledgement ? acknowledgement + ". " : "";
-        const sayText = followupPrompt || (isFirst
-          ? "Hi, I'm Susan. I'll guide you through a quick fact-find for your mortgage application. " + sec.intro + " "
-          : ack + intro) + nextQ.prompt;
+        const basePrompt = personalise(followupPrompt || (isFirst ? nextQ.prompt : ack + intro + nextQ.prompt));
+        const sayText = basePrompt;
 
         await supabase.from("interview_messages").insert({
           session_id: body.sessionId,
