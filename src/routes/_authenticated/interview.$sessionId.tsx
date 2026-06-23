@@ -496,7 +496,7 @@ function InterviewPage() {
               <p className="text-sm text-muted-foreground">
                 {transcribing ? "Transcribing…" : thinking ? "Thinking…" : status}
               </p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap justify-center gap-2">
                 {needsGesture ? (
                   <Button
                     onClick={() => {
@@ -517,6 +517,18 @@ function InterviewPage() {
                 ) : (
                   <Button onClick={handlePause} size="lg" variant="outline" className="rounded-full">
                     <Pause className="w-4 h-4 mr-2" /> Pause
+                  </Button>
+                )}
+                {started && current?.section && current.questionIndex != null && !needsGesture &&
+                  prevStep(current.section, current.questionIndex) && (
+                  <Button
+                    onClick={handleBack}
+                    size="lg"
+                    variant="outline"
+                    className="rounded-full"
+                    disabled={thinking || transcribing}
+                  >
+                    <Undo2 className="w-4 h-4 mr-2" /> Previous question
                   </Button>
                 )}
               </div>
