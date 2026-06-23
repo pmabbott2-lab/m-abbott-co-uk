@@ -8,7 +8,7 @@ import { AppShell } from "@/components/AppShell";
 import { Avatar, useAudioPlayback } from "@/components/Avatar";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Mic, Square, Send } from "lucide-react";
+import { Pause, Play } from "lucide-react";
 import { toast } from "sonner";
 import { totalQuestions, questionIndexGlobal, type Section } from "@/lib/interview-script";
 
@@ -27,12 +27,17 @@ interface StepResp {
   sayText?: string;
 }
 
+// Voice-activity detection thresholds
+const SPEECH_RMS = 0.02; // above this counts as speech
+const SILENCE_MS = 2000; // 2s of silence after speech ends the turn
+const MAX_TURN_MS = 30000; // hard cap per answer
+
 function InterviewPage() {
   const { sessionId } = Route.useParams();
   const navigate = useNavigate();
   const getSessionFn = useServerFn(getSession);
   const submitFn = useServerFn(submitSession);
-  const { play, playing } = useAudioPlayback();
+  const { play, playing, stop: stopPlayback } = useAudioPlayback();
 
   const sessionQ = useQuery({
     queryKey: ["session", sessionId],
@@ -40,18 +45,37 @@ function InterviewPage() {
   });
 
   const [current, setCurrent] = useState<StepResp | null>(null);
-  const [recording, setRecording] = useState(false);
+  const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
-  const [pendingTranscript, setPendingTranscript] = useState("");
   const [thinking, setThinking] = useState(false);
   const [done, setDone] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [status, setStatus] = useState<string>("Starting…");
+
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const rafRef = useRef<number | null>(null);
   const bootedRef = useRef(false);
+  const pausedRef = useRef(false);
+  const doneRef = useRef(false);
+
+  pausedRef.current = paused;
+  doneRef.current = done;
+
+  const cleanupAudio = () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    audioCtxRef.current?.close().catch(() => {});
+    audioCtxRef.current = null;
+  };
 
   const callStep = async (transcript: string) => {
     setThinking(true);
+    setStatus(transcript ? "Thinking…" : "Preparing…");
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
@@ -63,27 +87,140 @@ function InterviewPage() {
       });
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as StepResp;
-      setPendingTranscript("");
       if (data.done) {
         setDone(true);
         setCurrent(null);
+        setStatus("All done");
         return;
       }
       setCurrent(data);
-      if (data.sayText) play(data.sayText).catch((e) => console.error(e));
+      if (data.sayText) {
+        setStatus("Speaking…");
+        await play(data.sayText).catch((e) => console.error(e));
+        // play() resolves when speech ends → start listening
+        if (!pausedRef.current && !doneRef.current) startListening();
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Something went wrong");
+      setStatus("Error — tap resume to retry");
     } finally {
       setThinking(false);
     }
   };
 
-  // Boot: ask first question (or resume). Use existing transcript to decide.
+  const startListening = async () => {
+    if (pausedRef.current || doneRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mimeType = ["audio/webm", "audio/mp4"].find((t) => MediaRecorder.isTypeSupported(t)) || "audio/webm";
+      const mr = new MediaRecorder(stream, { mimeType });
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => e.data.size > 0 && chunksRef.current.push(e.data);
+      mr.onstop = async () => {
+        cleanupAudio();
+        setListening(false);
+        const blob = new Blob(chunksRef.current, { type: mr.mimeType });
+        if (blob.size < 1024) {
+          // nothing meaningful — re-listen
+          if (!pausedRef.current && !doneRef.current) startListening();
+          return;
+        }
+        setTranscribing(true);
+        setStatus("Transcribing…");
+        try {
+          const ext = mr.mimeType.includes("mp4") ? "mp4" : "webm";
+          const form = new FormData();
+          form.append("file", blob, `recording.${ext}`);
+          const res = await fetch("/api/stt", { method: "POST", body: form });
+          if (!res.ok) throw new Error("Transcription failed");
+          const { text } = (await res.json()) as { text: string };
+          setTranscribing(false);
+          if (text.trim()) {
+            await callStep(text.trim());
+          } else if (!pausedRef.current && !doneRef.current) {
+            startListening();
+          }
+        } catch (e) {
+          setTranscribing(false);
+          toast.error(e instanceof Error ? e.message : "Transcription failed");
+          if (!pausedRef.current && !doneRef.current) startListening();
+        }
+      };
+      mr.start();
+      mediaRef.current = mr;
+      setListening(true);
+      setStatus("Listening…");
+
+      // Voice-activity detection
+      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AC();
+      audioCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      const buf = new Float32Array(analyser.fftSize);
+      const startedAt = Date.now();
+      let speechDetected = false;
+      let lastSpeechAt = Date.now();
+
+      const tick = () => {
+        if (!mediaRef.current || mediaRef.current.state !== "recording") return;
+        analyser.getFloatTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        const rms = Math.sqrt(sum / buf.length);
+        const now = Date.now();
+        if (rms > SPEECH_RMS) {
+          speechDetected = true;
+          lastSpeechAt = now;
+        }
+        const elapsed = now - startedAt;
+        if (speechDetected && now - lastSpeechAt > SILENCE_MS) {
+          mediaRef.current.stop();
+          return;
+        }
+        if (elapsed > MAX_TURN_MS) {
+          mediaRef.current.stop();
+          return;
+        }
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      rafRef.current = requestAnimationFrame(tick);
+    } catch {
+      toast.error("Microphone access denied.");
+      setStatus("Mic blocked — enable microphone access");
+    }
+  };
+
+  const handlePause = () => {
+    setPaused(true);
+    stopPlayback();
+    if (mediaRef.current?.state === "recording") mediaRef.current.stop();
+    cleanupAudio();
+    setListening(false);
+    setStatus("Paused");
+  };
+
+  const handleResume = () => {
+    setPaused(false);
+    if (current?.sayText) {
+      setStatus("Speaking…");
+      play(current.sayText)
+        .catch(() => {})
+        .then(() => {
+          if (!pausedRef.current && !doneRef.current) startListening();
+        });
+    } else {
+      startListening();
+    }
+  };
+
+  // Boot: ask first question (or resume).
   useEffect(() => {
     if (bootedRef.current || !sessionQ.data) return;
     bootedRef.current = true;
-    // Always call step with empty transcript — backend serves current pending question (or first).
-    // To avoid duplicating an avatar message, only call if there's no recent avatar question without a customer reply.
     const messages = sessionQ.data.messages;
     const lastAvatar = [...messages].reverse().find((m) => m.role === "avatar");
     const lastCustomer = [...messages].reverse().find((m) => m.role === "customer");
@@ -102,60 +239,19 @@ function InterviewPage() {
         fieldLabel: "",
         sayText: lastAvatar!.text,
       });
-      play(lastAvatar!.text).catch(() => {});
+      setStatus("Speaking…");
+      play(lastAvatar!.text)
+        .catch(() => {})
+        .then(() => {
+          if (!pausedRef.current && !doneRef.current) startListening();
+        });
     } else {
       callStep("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionQ.data]);
 
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      const mimeType = ["audio/webm", "audio/mp4"].find((t) => MediaRecorder.isTypeSupported(t)) || "audio/webm";
-      const mr = new MediaRecorder(stream, { mimeType });
-      chunksRef.current = [];
-      mr.ondataavailable = (e) => e.data.size > 0 && chunksRef.current.push(e.data);
-      mr.onstop = async () => {
-        streamRef.current?.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: mr.mimeType });
-        if (blob.size < 1024) {
-          toast.error("That was too short — try again.");
-          return;
-        }
-        setTranscribing(true);
-        try {
-          const ext = mr.mimeType.includes("mp4") ? "mp4" : "webm";
-          const form = new FormData();
-          form.append("file", blob, `recording.${ext}`);
-          const res = await fetch("/api/stt", { method: "POST", body: form });
-          if (!res.ok) throw new Error("Transcription failed");
-          const { text } = (await res.json()) as { text: string };
-          setPendingTranscript(text);
-        } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Transcription failed");
-        } finally {
-          setTranscribing(false);
-        }
-      };
-      mr.start();
-      mediaRef.current = mr;
-      setRecording(true);
-    } catch {
-      toast.error("Microphone access denied.");
-    }
-  };
-
-  const stopRecording = () => {
-    mediaRef.current?.stop();
-    setRecording(false);
-  };
-
-  const handleSubmit = async () => {
-    if (!pendingTranscript.trim()) return;
-    await callStep(pendingTranscript.trim());
-  };
+  useEffect(() => () => cleanupAudio(), []);
 
   const handleFinish = async () => {
     try {
@@ -186,7 +282,7 @@ function InterviewPage() {
         </div>
 
         <div className="flex flex-col items-center text-center gap-6 bg-card rounded-3xl border p-6 sm:p-10">
-          <Avatar speaking={playing} listening={recording} />
+          <Avatar speaking={playing} listening={listening} />
           {done ? (
             <>
               <h2 className="text-2xl font-semibold">All done!</h2>
@@ -198,43 +294,20 @@ function InterviewPage() {
               <p className="text-lg font-medium leading-snug min-h-[3rem]">
                 {current?.sayText ?? (thinking ? "Preparing your first question…" : "")}
               </p>
-
-              {pendingTranscript ? (
-                <div className="w-full">
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Your answer</div>
-                  <textarea
-                    className="w-full rounded-xl border bg-background p-3 text-sm min-h-[80px]"
-                    value={pendingTranscript}
-                    onChange={(e) => setPendingTranscript(e.target.value)}
-                  />
-                  <div className="flex gap-2 mt-3 justify-center">
-                    <Button variant="outline" onClick={() => setPendingTranscript("")}>Re-record</Button>
-                    <Button onClick={handleSubmit} disabled={thinking}>
-                      <Send className="w-4 h-4 mr-2" />{thinking ? "Saving…" : "Next question"}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center gap-3">
-                  {!recording ? (
-                    <Button
-                      size="lg"
-                      className="rounded-full w-20 h-20"
-                      onClick={startRecording}
-                      disabled={thinking || transcribing || playing}
-                    >
-                      <Mic className="w-7 h-7" />
-                    </Button>
-                  ) : (
-                    <Button size="lg" variant="destructive" className="rounded-full w-20 h-20" onClick={stopRecording}>
-                      <Square className="w-7 h-7" />
-                    </Button>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    {transcribing ? "Transcribing…" : recording ? "Recording — tap to stop" : playing ? "Listening to the question…" : "Tap to answer"}
-                  </p>
-                </div>
-              )}
+              <p className="text-sm text-muted-foreground">
+                {transcribing ? "Transcribing…" : thinking ? "Thinking…" : status}
+              </p>
+              <div className="flex gap-2">
+                {paused ? (
+                  <Button onClick={handleResume} size="lg" className="rounded-full">
+                    <Play className="w-4 h-4 mr-2" /> Resume
+                  </Button>
+                ) : (
+                  <Button onClick={handlePause} size="lg" variant="outline" className="rounded-full">
+                    <Pause className="w-4 h-4 mr-2" /> Pause
+                  </Button>
+                )}
+              </div>
             </>
           )}
         </div>

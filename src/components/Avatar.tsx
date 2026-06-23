@@ -45,12 +45,19 @@ export function useAudioPlayback() {
     const audio = new Audio(url);
     audioRef.current = audio;
     setPlaying(true);
-    audio.onended = () => {
-      setPlaying(false);
-      URL.revokeObjectURL(url);
-    };
-    audio.onerror = () => setPlaying(false);
-    await audio.play();
+    await new Promise<void>((resolve, reject) => {
+      audio.onended = () => {
+        setPlaying(false);
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      audio.onerror = () => {
+        setPlaying(false);
+        URL.revokeObjectURL(url);
+        reject(new Error("Audio playback error"));
+      };
+      audio.play().catch(reject);
+    });
   };
 
   const stop = () => {
