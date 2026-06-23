@@ -89,6 +89,9 @@ function SessionDetail() {
           )}
         </div>
 
+        <LenderExampleCard sessionId={sessionId} />
+
+
         {(session as { summary?: string | null }).summary && (
           <div className="rounded-2xl border bg-card p-5">
             <h3 className="font-semibold mb-2">AI summary for the advisor</h3>
