@@ -139,6 +139,7 @@ function InterviewPage() {
         setStatus("All done");
         return;
       }
+      currentRef.current = data;
       setCurrent(data);
       if (data.sayText) {
         setStatus("Speaking…");
@@ -353,7 +354,7 @@ function InterviewPage() {
   const playLocal = (sayText: string, section: Section, index: number) => {
     const secDef = findSection(section);
     const q = getQuestion(section, index);
-    setCurrent({
+    const localStep = {
       done: false,
       section,
       sectionTitle: secDef?.title ?? section,
@@ -363,7 +364,9 @@ function InterviewPage() {
       fieldLabel: q?.label,
       prompt: q?.prompt,
       sayText,
-    });
+    };
+    currentRef.current = localStep;
+    setCurrent(localStep);
     setStatus("Speaking…");
     play(sayText)
       .then(() => {
