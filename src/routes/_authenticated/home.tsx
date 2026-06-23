@@ -1,18 +1,73 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { listMySessions, createSession, getMyRole, listAllSessionsForAdvisor } from "@/lib/sessions.functions";
+import { listMySessions, createSession, getMyRole, listAllSessionsForAdvisor, deleteSession } from "@/lib/sessions.functions";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
-import { Mic, FileText, ArrowRight } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Mic, FileText, ArrowRight, Trash2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 export const Route = createFileRoute("/_authenticated/home")({
   component: Home,
 });
 
+function DeleteButton({ sessionId, onDeleted }: { sessionId: string; onDeleted: () => void }) {
+  const deleteFn = useServerFn(deleteSession);
+  const del = useMutation({
+    mutationFn: () => deleteFn({ data: { sessionId } }),
+    onSuccess: () => onDeleted(),
+  });
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground hover:text-destructive"
+          onClick={(e) => e.stopPropagation()}
+          aria-label="Delete fact-find"
+        >
+          <Trash2 className="w-4 h-4" />
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete this fact-find?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This permanently removes the session, all answers, messages and notes. This cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={del.isPending}
+            onClick={(e) => {
+              e.preventDefault();
+              del.mutate();
+            }}
+          >
+            {del.isPending ? "Deleting…" : "Delete"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 function Home() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const roleFn = useServerFn(getMyRole);
   const sessionsFn = useServerFn(listMySessions);
   const allFn = useServerFn(listAllSessionsForAdvisor);
@@ -50,23 +105,25 @@ function Home() {
         <div className="rounded-2xl border bg-card divide-y">
           {sessions.length === 0 && <div className="p-6 text-muted-foreground text-sm">No fact-finds yet.</div>}
           {sessions.map((s) => (
-            <Link
-              key={s.id}
-              to="/sessions/$sessionId"
-              params={{ sessionId: s.id }}
-              className="flex items-center justify-between p-4 hover:bg-muted/40 transition"
-            >
-              <div>
-                <div className="font-medium">{s.customer?.full_name || s.customer?.email || "Unnamed customer"}</div>
-                <div className="text-xs text-muted-foreground">
-                  {s.status === "submitted" ? "Submitted" : "In progress"} ·{" "}
-                  {formatDistanceToNow(new Date(s.started_at), { addSuffix: true })}
+            <div key={s.id} className="flex items-center gap-2 p-4 hover:bg-muted/40 transition">
+              <Link
+                to="/sessions/$sessionId"
+                params={{ sessionId: s.id }}
+                className="flex-1 flex items-center justify-between"
+              >
+                <div>
+                  <div className="font-medium">{s.customer?.full_name || s.customer?.email || "Unnamed customer"}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {s.status === "submitted" ? "Submitted" : "In progress"} ·{" "}
+                    {formatDistanceToNow(new Date(s.started_at), { addSuffix: true })}
+                  </div>
                 </div>
-              </div>
-              <span className={`text-xs px-2 py-1 rounded-full ${s.status === "submitted" ? "bg-accent/30" : "bg-muted"}`}>
-                {s.status === "submitted" ? "Ready to review" : "In progress"}
-              </span>
-            </Link>
+                <span className={`text-xs px-2 py-1 rounded-full mr-2 ${s.status === "submitted" ? "bg-accent/30" : "bg-muted"}`}>
+                  {s.status === "submitted" ? "Ready to review" : "In progress"}
+                </span>
+              </Link>
+              <DeleteButton sessionId={s.id} onDeleted={() => qc.invalidateQueries({ queryKey: ["all-sessions"] })} />
+            </div>
           ))}
         </div>
       </AppShell>
@@ -96,22 +153,24 @@ function Home() {
           </div>
         )}
         {sessions.map((s) => (
-          <Link
-            key={s.id}
-            to={s.status === "in_progress" ? "/interview/$sessionId" : "/sessions/$sessionId"}
-            params={{ sessionId: s.id }}
-            className="flex items-center justify-between p-4 hover:bg-muted/40 transition"
-          >
-            <div>
-              <div className="font-medium">
-                {s.status === "submitted" ? "Submitted fact-find" : "In progress"}
+          <div key={s.id} className="flex items-center gap-2 p-4 hover:bg-muted/40 transition">
+            <Link
+              to={s.status === "in_progress" ? "/interview/$sessionId" : "/sessions/$sessionId"}
+              params={{ sessionId: s.id }}
+              className="flex-1 flex items-center justify-between"
+            >
+              <div>
+                <div className="font-medium">
+                  {s.status === "submitted" ? "Submitted fact-find" : "In progress"}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Started {formatDistanceToNow(new Date(s.started_at), { addSuffix: true })}
+                </div>
               </div>
-              <div className="text-xs text-muted-foreground">
-                Started {formatDistanceToNow(new Date(s.started_at), { addSuffix: true })}
-              </div>
-            </div>
-            <ArrowRight className="w-4 h-4 text-muted-foreground" />
-          </Link>
+              <ArrowRight className="w-4 h-4 text-muted-foreground mr-2" />
+            </Link>
+            <DeleteButton sessionId={s.id} onDeleted={() => qc.invalidateQueries({ queryKey: ["my-sessions"] })} />
+          </div>
         ))}
       </div>
     </AppShell>

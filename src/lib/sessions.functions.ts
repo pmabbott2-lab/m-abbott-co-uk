@@ -59,6 +59,34 @@ export const submitSession = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const deleteSession = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    // Authorize: must be advisor OR the owning customer
+    const { data: roleRows } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    const isAdvisor = (roleRows ?? []).some((r) => r.role === "advisor");
+    const { data: session, error: sErr } = await context.supabase
+      .from("interview_sessions")
+      .select("id, customer_id")
+      .eq("id", data.sessionId)
+      .maybeSingle();
+    if (sErr) throw new Error(sErr.message);
+    if (!session) throw new Error("Not found");
+    if (!isAdvisor && session.customer_id !== context.userId) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await supabaseAdmin.from("interview_answers").delete().eq("session_id", data.sessionId);
+    await supabaseAdmin.from("interview_messages").delete().eq("session_id", data.sessionId);
+    await supabaseAdmin.from("advisor_notes").delete().eq("session_id", data.sessionId);
+    const { error } = await supabaseAdmin.from("interview_sessions").delete().eq("id", data.sessionId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
 export const setSessionPosition = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
