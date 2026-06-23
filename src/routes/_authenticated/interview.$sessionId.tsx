@@ -11,6 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { Pause, Play, ArrowLeft, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { totalQuestions, questionIndexGlobal, getQuestion, findSection, prevStep, type Section, type AnswersMap } from "@/lib/interview-script";
+import { QuestionInput } from "@/components/QuestionInput";
 
 export const Route = createFileRoute("/_authenticated/interview/$sessionId")({
   component: InterviewPage,
