@@ -1,7 +1,7 @@
 // Server-only OpenAI-driven evaluator for interview answers.
 // OpenAI tidies the notes, but this deterministic fact gate decides whether
 // the interview is allowed to move on.
-import { openAIFetch } from "./openai.server";
+import { chatCompletion } from "./ai-gateway.server";
 
 export interface EvaluateInput {
   fieldKey: string;
@@ -29,7 +29,7 @@ type MissingFact = {
   followup: (firstName?: string) => string;
 };
 
-const MODEL = "gpt-4o-mini";
+const MODEL = "google/gemini-3-flash-preview";
 const MAX_FOLLOWUPS = 20;
 const NUMBER_WORDS = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty";
 const TENS_WORDS = "twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety";
@@ -119,16 +119,142 @@ function hasFullName(text: string): boolean {
   return words.length >= 2;
 }
 
+const MONTHS: Record<string, number> = {
+  jan: 1, january: 1,
+  feb: 2, february: 2,
+  mar: 3, march: 3,
+  apr: 4, april: 4,
+  may: 5,
+  jun: 6, june: 6,
+  jul: 7, july: 7,
+  aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12,
+};
+
+const DAY_WORDS: Record<string, number> = {
+  first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7,
+  eighth: 8, ninth: 9, tenth: 10, eleventh: 11, twelfth: 12,
+  thirteenth: 13, fourteenth: 14, fifteenth: 15, sixteenth: 16,
+  seventeenth: 17, eighteenth: 18, nineteenth: 19, twentieth: 20,
+  "twenty first": 21, "twenty second": 22, "twenty third": 23,
+  "twenty fourth": 24, "twenty fifth": 25, "twenty sixth": 26,
+  "twenty seventh": 27, "twenty eighth": 28, "twenty ninth": 29,
+  thirtieth: 30, "thirty first": 31,
+};
+
+const YEAR_WORDS: Record<string, number> = {
+  zero: 0, oh: 0, o: 0, one: 1, two: 2, three: 3, four: 4, five: 5,
+  six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
+  eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40,
+  fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+};
+
+function normaliseTwoDigitDobYear(year: number): number {
+  if (year >= 100) return year;
+  const currentYear = new Date().getUTCFullYear();
+  const candidate = 2000 + year;
+  return candidate > currentYear ? candidate - 100 : candidate;
+}
+
+function isValidDob(day: number, month: number, year: number): boolean {
+  const currentYear = new Date().getUTCFullYear();
+  if (!Number.isInteger(day) || !Number.isInteger(month) || !Number.isInteger(year)) return false;
+  if (year < 1900 || year > currentYear || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+}
+
+function wordsUnderHundred(tokens: string[]): number | null {
+  if (tokens.length === 0) return 0;
+  let total = 0;
+  for (const token of tokens) {
+    const n = YEAR_WORDS[token];
+    if (n == null || token === "hundred" || token === "thousand") return null;
+    total += n;
+  }
+  return total >= 0 && total < 100 ? total : null;
+}
+
+function parseYearWords(phrase: string): number | null {
+  const value = phrase
+    .toLowerCase()
+    .replace(/-/g, " ")
+    .replace(/\band\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!value) return null;
+  if (/^\d{2,4}$/.test(value)) return normaliseTwoDigitDobYear(Number(value));
+
+  const tokens = value.split(" ").filter(Boolean);
+  if (tokens.some((token) => !(token in YEAR_WORDS) && token !== "hundred" && token !== "thousand")) return null;
+  if (tokens[0] === "nineteen" && tokens.length >= 2) {
+    const tail = wordsUnderHundred(tokens.slice(1));
+    if (tail != null) return 1900 + tail;
+  }
+  if (tokens[0] === "twenty" && tokens.length >= 2 && tokens[1] !== "hundred") {
+    const tail = wordsUnderHundred(tokens.slice(1));
+    if (tail != null) return 2000 + tail;
+  }
+  if (tokens[0] === "two" && tokens[1] === "thousand") {
+    const tail = wordsUnderHundred(tokens.slice(2));
+    return 2000 + (tail ?? 0);
+  }
+  if (tokens.length <= 2 && YEAR_WORDS[tokens[0]] >= 30) {
+    const tail = wordsUnderHundred(tokens);
+    if (tail != null) return 1900 + tail;
+  }
+  return null;
+}
+
+function parseDayWords(phrase: string): number | null {
+  const value = phrase.toLowerCase().replace(/-/g, " ").replace(/\s+/g, " ").trim();
+  return DAY_WORDS[value] ?? null;
+}
+
 function hasDob(text: string): boolean {
-  const monthNames = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
-  const ordinalDayWords = "first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|twenty\\s+first|twenty\\s+second|twenty\\s+third|twenty\\s+fourth|twenty\\s+fifth|twenty\\s+sixth|twenty\\s+seventh|twenty\\s+eighth|twenty\\s+ninth|thirtieth|thirty\\s+first";
-  const fullYear = "(?:19|20)\\d{2}";
-  return (
-    /\b\d{1,2}[\/.-]\d{1,2}[\/.-](?:\d{2}|\d{4})\b/.test(text) ||
-    /\b\d{1,2}\s+\d{1,2}\s+(?:(?:19|20)?\d{2})\b/.test(text) ||
-    new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:${monthNames})\\s+${fullYear}\\b`, "i").test(text) ||
-    new RegExp(`\\b(?:the\\s+)?(?:${ordinalDayWords})\\s+(?:of\\s+)?(?:${monthNames})\\s+${fullYear}\\b`, "i").test(text)
-  );
+  const normalised = text.toLowerCase().replace(/\bthe\b/g, " ").replace(/,/g, " ").replace(/\s+/g, " ").trim();
+
+  const numericDate = normalised.match(/\b(\d{1,2})[\/\.\-\s](\d{1,2})[\/\.\-\s](\d{2,4})\b/);
+  if (numericDate) {
+    const day = Number(numericDate[1]);
+    const month = Number(numericDate[2]);
+    const year = normaliseTwoDigitDobYear(Number(numericDate[3]));
+    if (isValidDob(day, month, year)) return true;
+  }
+
+  const isoDate = normalised.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+  if (isoDate && isValidDob(Number(isoDate[3]), Number(isoDate[2]), Number(isoDate[1]))) return true;
+
+  const monthNames = Object.keys(MONTHS).join("|");
+  const dayWordPattern = Object.keys(DAY_WORDS)
+    .sort((a, b) => b.length - a.length)
+    .map((day) => day.replace(/\s+/g, "\\s+"))
+    .join("|");
+  const yearWordPattern = "(?:nineteen|twenty)\\s+(?:oh|o|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:\\s+(?:one|two|three|four|five|six|seven|eight|nine))?|two\\s+thousand(?:\\s+(?:and\\s+)?(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twenty\\s+one|twenty\\s+two|twenty\\s+three|twenty\\s+four|twenty\\s+five|twenty\\s+six))?|(?:thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:\\s+(?:one|two|three|four|five|six|seven|eight|nine))?";
+  const yearPattern = `(?:\\d{2,4}|${yearWordPattern})`;
+  const check = (day: number | null, monthName: string, yearPhrase: string) => {
+    const month = MONTHS[monthName.toLowerCase()];
+    const year = parseYearWords(yearPhrase);
+    return day != null && month != null && year != null && isValidDob(day, month, year);
+  };
+
+  for (const match of normalised.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${monthNames})\\s+(${yearPattern})\\b`, "gi"))) {
+    if (check(Number(match[1]), match[2], match[3])) return true;
+  }
+  for (const match of normalised.matchAll(new RegExp(`\\b(${dayWordPattern})\\s+(?:of\\s+)?(${monthNames})\\s+(${yearPattern})\\b`, "gi"))) {
+    if (check(parseDayWords(match[1]), match[2], match[3])) return true;
+  }
+  for (const match of normalised.matchAll(new RegExp(`\\b(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s+(${yearPattern})\\b`, "gi"))) {
+    if (check(Number(match[2]), match[1], match[3])) return true;
+  }
+  for (const match of normalised.matchAll(new RegExp(`\\b(${monthNames})\\s+(${dayWordPattern})\\s+(${yearPattern})\\b`, "gi"))) {
+    if (check(parseDayWords(match[2]), match[1], match[3])) return true;
+  }
+  return false;
 }
 
 function hasStreetAddress(text: string): boolean {
@@ -434,24 +560,15 @@ Missing facts the deterministic gate still requires: ${hardMissing.map((f) => f.
 Remember: if a fact is still missing, ask only the first specific missing fact. A meta reply like "what do you need to know?" is not an answer.`;
 
   try {
-    const res = await openAIFetch("/chat/completions", {
-      method: "POST",
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0.2,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: sys },
-          { role: "user", content: user },
-        ],
-      }),
+    const content = await chatCompletion({
+      model: MODEL,
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: user },
+      ],
     });
-    if (!res.ok) {
-      console.error("evaluateAnswer non-ok", res.status, await res.text().catch(() => ""));
-      return fallback;
-    }
-    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const content = json.choices?.[0]?.message?.content ?? "{}";
     const parsed = JSON.parse(content) as Partial<EvaluateResult>;
     const aiCleanedValue = (parsed.cleanedValue ?? fallback.cleanedValue).trim();
     const missingAfterAi = missingFacts(input, [fallback.cleanedValue, aiCleanedValue].filter(Boolean).join(" "));
