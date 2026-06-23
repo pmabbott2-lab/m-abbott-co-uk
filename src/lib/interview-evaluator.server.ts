@@ -32,6 +32,8 @@ type MissingFact = {
 const MODEL = "gpt-4o-mini";
 const MAX_FOLLOWUPS = 20;
 const NUMBER_WORDS = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty";
+const TENS_WORDS = "twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety";
+const MONEY_WORDS = `(?:${NUMBER_WORDS}|${TENS_WORDS}|hundred|thousand|million|and|a)`;
 const NUMBER_WORD_TO_DIGIT: Record<string, string> = {
   zero: "0",
   oh: "0",
@@ -78,7 +80,7 @@ function hasStandaloneYes(text: string): boolean {
 }
 
 function hasAnyNumber(text: string): boolean {
-  return new RegExp(`\\b(?:\\d+|${NUMBER_WORDS})\\b`, "i").test(text);
+  return new RegExp(`\\b(?:\\d+|${NUMBER_WORDS}|${TENS_WORDS})\\b`, "i").test(text);
 }
 
 function isShortMeaningfulAnswer(text: string): boolean {
@@ -89,6 +91,11 @@ function isShortMeaningfulAnswer(text: string): boolean {
     .split(/\s+/)
     .filter(Boolean);
   return words.length >= 1 && words.length <= 8;
+}
+
+function hasUsableDetailAnswer(text: string): boolean {
+  if (!text.trim() || isMetaReply(text) || hasExplicitDecline(text) || isUnsureOnly(text)) return false;
+  return /[\p{L}\d]/u.test(text);
 }
 
 function hasCapturedFact(text: string, id: string): boolean {
@@ -218,7 +225,13 @@ function hasMoneyLike(text: string): boolean {
   return hasMoneyAmount(text) ||
     /\b\d[\d,]{2,}(?:\.\d+)?\b/.test(text) ||
     /\b\d+(?:\.\d+)?\s*(?:pounds?|quid|grand|thousand|k)\b/i.test(text) ||
-    new RegExp(`\\b(?:${NUMBER_WORDS}|thirty|forty|fifty|sixty|seventy|eighty|ninety)\\s+(?:thousand|grand|k|pounds?)\\b`, "i").test(text);
+    new RegExp(`\\b${MONEY_WORDS}(?:[\\s-]+${MONEY_WORDS}){0,7}\\s+(?:pounds?|quid|grand|thousand|million|k)\\b`, "i").test(text) ||
+    new RegExp(`\\b(?:${NUMBER_WORDS}|${TENS_WORDS})[\\s-]+hundred(?:\\s+and)?(?:[\\s-]+(?:${NUMBER_WORDS}|${TENS_WORDS}))?\\b`, "i").test(text);
+}
+
+function hasPercentLike(text: string): boolean {
+  return /\b\d{1,2}\s?(?:%|percent|per\s+cent)\b/i.test(text) ||
+    new RegExp(`\\b(?:${NUMBER_WORDS}|${TENS_WORDS})(?:[\\s-]+(?:${NUMBER_WORDS}))?\\s+(?:percent|per\\s+cent)\\b`, "i").test(text);
 }
 
 function hasIncome(text: string): boolean {
@@ -270,7 +283,7 @@ function hasPropertyPrice(text: string): boolean {
 }
 
 function hasDeposit(text: string): boolean {
-  return /\b(deposit)\b/i.test(text) && (hasMoneyLike(text) || /\b\d{1,2}\s?%\b/.test(text));
+  return /\b(deposit)\b/i.test(text) && (hasMoneyLike(text) || hasPercentLike(text));
 }
 
 function hasMortgageTerm(text: string): boolean {
@@ -278,7 +291,7 @@ function hasMortgageTerm(text: string): boolean {
 }
 
 function hasPropertyType(text: string): boolean {
-  return /\b(flat|apartment|terraced|terrace|semi[-\s]?detached|detached|bungalow|maisonette|house)\b/i.test(text);
+  return /\b(flat|apartment|terraced|terrace|semi|semi[-\s]?detached|detached|bungalow|maisonette|house)\b/i.test(text);
 }
 
 function missingFactsFor(input: EvaluateInput, text: string, latest = "", target?: string): MissingFact[] {
@@ -343,7 +356,7 @@ function missingFactsFor(input: EvaluateInput, text: string, latest = "", target
       const noAdverseKnown = hasCapturedNo(text, "adverse") || hasNoAdverseCredit(text) || (target === "adverse" && hasStandaloneNo(latest)) || (targetDeclined && target === "adverse");
       const adverseKnown = hasCapturedYes(text, "adverse") || hasAdverseCredit(text) || hasAdverseSubject(text) || (target === "adverse" && hasStandaloneYes(latest)) || noAdverseKnown;
       if (!adverseKnown) missing.push({ id: "adverse", followup: () => "Any missed payments, defaults, CCJs or bankruptcy in the last six years?" });
-      if (adverseKnown && !noAdverseKnown && !captured("adverse_details") && !(target === "adverse_details" && isShortMeaningfulAnswer(latest)) && !(targetDeclined && target === "adverse_details")) {
+      if (adverseKnown && !noAdverseKnown && !captured("adverse_details") && !(target === "adverse_details" && hasUsableDetailAnswer(latest)) && !(targetDeclined && target === "adverse_details")) {
         missing.push({ id: "adverse_details", followup: () => "Could you briefly tell me what happened and when?" });
       }
       return missing;
@@ -352,7 +365,7 @@ function missingFactsFor(input: EvaluateInput, text: string, latest = "", target
       const missing: MissingFact[] = [];
       if (!captured("purpose") && !hasMortgagePurpose(text) && !targetAnsweredShortly("purpose") && !(targetDeclined && target === "purpose")) missing.push({ id: "purpose", followup: () => "Is this a purchase, remortgage, next home, or buy-to-let?" });
       if (!captured("price") && !hasPropertyPrice(text) && !(target === "price" && hasMoneyLike(latest)) && !(targetDeclined && target === "price")) missing.push({ id: "price", followup: () => "What is the property price or current value?" });
-      if (!captured("deposit") && !hasDeposit(text) && !(target === "deposit" && (hasMoneyLike(latest) || /\b\d{1,2}\s?%\b/.test(latest))) && !(targetDeclined && target === "deposit")) missing.push({ id: "deposit", followup: () => "How much deposit do you have?" });
+      if (!captured("deposit") && !hasDeposit(text) && !(target === "deposit" && (hasMoneyLike(latest) || hasPercentLike(latest))) && !(targetDeclined && target === "deposit")) missing.push({ id: "deposit", followup: () => "How much deposit do you have?" });
       if (!captured("term") && !hasMortgageTerm(text) && !(target === "term" && hasAnyNumber(latest)) && !(targetDeclined && target === "term")) missing.push({ id: "term", followup: () => "What mortgage term would you like, in years?" });
       if (!captured("type") && !hasPropertyType(text) && !targetAnsweredShortly("type") && !(targetDeclined && target === "type")) missing.push({ id: "type", followup: () => "What type of property is it — flat, terraced, semi or detached?" });
       return missing;
