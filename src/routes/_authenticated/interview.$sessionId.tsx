@@ -73,6 +73,7 @@ function InterviewPage() {
   const [paused, setPaused] = useState(false);
   const [started, setStarted] = useState(false);
   const [status, setStatus] = useState<string>("Starting…");
+  const [needsGesture, setNeedsGesture] = useState(false);
 
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
