@@ -4,7 +4,7 @@ The **voice fact-find app is unchanged**. These features are separate routes tha
 
 | Route | Who uses it |
 |-------|-------------|
-| `/home`, `/interview`, `/sessions` | Customers & advisors (unchanged) |
+| `/home`, `/interview`, `/text`, `/sessions`, `/booking` | Customers & advisors |
 | `/introducer` | Introducers |
 | `/diary` | Advisors (appointments only) |
 | `/book/:slug` | Public direct booking |

@@ -15,7 +15,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Mic, FileText, ArrowRight, Trash2 } from "lucide-react";
+import { Mic, FileText, ArrowRight, Trash2, MessageSquare, CalendarCheck } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 export const Route = createFileRoute("/_authenticated/home")({
@@ -88,9 +88,14 @@ function Home() {
     enabled: !roleQ.isLoading && isAdvisor,
   });
 
-  const create = useMutation({
-    mutationFn: () => createFn(),
+  const createVoice = useMutation({
+    mutationFn: () => createFn({ data: { channel: "voice" } }),
     onSuccess: (s) => navigate({ to: "/interview/$sessionId", params: { sessionId: s.id } }),
+  });
+
+  const createText = useMutation({
+    mutationFn: () => createFn({ data: { channel: "text" } }),
+    onSuccess: (s) => navigate({ to: "/text/$sessionId", params: { sessionId: s.id } }),
   });
 
   if (roleQ.isLoading) {
@@ -131,47 +136,95 @@ function Home() {
   }
 
   const sessions = sessionsQ.data ?? [];
+  const creating = createVoice.isPending || createText.isPending;
+
   return (
     <AppShell title="Your fact-finds">
-      <div className="rounded-3xl bg-card border p-6 sm:p-8 mb-6">
-        <div className="flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-2xl font-semibold">Start a new fact-find</h2>
-            <p className="text-muted-foreground text-sm mt-1">Talk to your guide. It takes around 5–10 minutes.</p>
-          </div>
-          <Button size="lg" onClick={() => create.mutate()} disabled={create.isPending}>
-            <Mic className="w-4 h-4 mr-2" />
-            {create.isPending ? "Starting…" : "Start interview"}
-          </Button>
-        </div>
+      <div className="mb-6">
+        <h2 className="text-2xl font-semibold mb-1">Start a new fact-find</h2>
+        <p className="text-muted-foreground text-sm">Choose how you&apos;d like to complete your mortgage fact-find.</p>
       </div>
+
+      <div className="grid sm:grid-cols-3 gap-4 mb-8">
+        <button
+          type="button"
+          onClick={() => createVoice.mutate()}
+          disabled={creating}
+          className="rounded-2xl border bg-card p-6 text-left hover:border-accent/50 hover:bg-accent/5 transition disabled:opacity-50"
+        >
+          <Mic className="w-8 h-8 mb-3 text-accent" />
+          <h3 className="font-semibold">Verbal interview</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            Talk to Susan, your guide. Takes around 5–10 minutes.
+          </p>
+          <span className="inline-block mt-4 text-sm font-medium text-accent">
+            {createVoice.isPending ? "Starting…" : "Start verbal →"}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => createText.mutate()}
+          disabled={creating}
+          className="rounded-2xl border bg-card p-6 text-left hover:border-accent/50 hover:bg-accent/5 transition disabled:opacity-50"
+        >
+          <MessageSquare className="w-8 h-8 mb-3 text-accent" />
+          <h3 className="font-semibold">Text interview</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            Type your answers at your own pace — same questions, no microphone needed.
+          </p>
+          <span className="inline-block mt-4 text-sm font-medium text-accent">
+            {createText.isPending ? "Starting…" : "Start text →"}
+          </span>
+        </button>
+
+        <Link
+          to="/booking"
+          className="rounded-2xl border bg-card p-6 text-left hover:border-accent/50 hover:bg-accent/5 transition block"
+        >
+          <CalendarCheck className="w-8 h-8 mb-3 text-accent" />
+          <h3 className="font-semibold">Direct booking</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            Skip the fact-find for now and book an appointment straight away.
+          </p>
+          <span className="inline-block mt-4 text-sm font-medium text-accent">Book appointment →</span>
+        </Link>
+      </div>
+
       <h3 className="text-sm font-medium text-muted-foreground mb-3">Previous sessions</h3>
       <div className="rounded-2xl border bg-card divide-y">
         {sessions.length === 0 && (
           <div className="p-6 text-sm text-muted-foreground flex items-center gap-2">
-            <FileText className="w-4 h-4" /> No sessions yet — start your first interview above.
+            <FileText className="w-4 h-4" /> No sessions yet — start your first fact-find above.
           </div>
         )}
-        {sessions.map((s) => (
-          <div key={s.id} className="flex items-center gap-2 p-4 hover:bg-muted/40 transition">
-            <Link
-              to={s.status === "in_progress" ? "/interview/$sessionId" : "/sessions/$sessionId"}
-              params={{ sessionId: s.id }}
-              className="flex-1 flex items-center justify-between"
-            >
-              <div>
-                <div className="font-medium">
-                  {s.status === "submitted" ? "Submitted fact-find" : "In progress"}
+        {sessions.map((s) => {
+          const channel = (s as { channel?: string }).channel ?? "voice";
+          const resumeRoute = channel === "text" ? "/text/$sessionId" : "/interview/$sessionId";
+          return (
+            <div key={s.id} className="flex items-center gap-2 p-4 hover:bg-muted/40 transition">
+              <Link
+                to={s.status === "in_progress" ? resumeRoute : "/sessions/$sessionId"}
+                params={{ sessionId: s.id }}
+                className="flex-1 flex items-center justify-between"
+              >
+                <div>
+                  <div className="font-medium">
+                    {s.status === "submitted" ? "Submitted fact-find" : "In progress"}
+                    <span className="text-xs text-muted-foreground font-normal ml-2">
+                      · {channel === "text" ? "Text" : "Verbal"}
+                    </span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Started {formatDistanceToNow(new Date(s.started_at), { addSuffix: true })}
+                  </div>
                 </div>
-                <div className="text-xs text-muted-foreground">
-                  Started {formatDistanceToNow(new Date(s.started_at), { addSuffix: true })}
-                </div>
-              </div>
-              <ArrowRight className="w-4 h-4 text-muted-foreground mr-2" />
-            </Link>
-            <DeleteButton sessionId={s.id} onDeleted={() => qc.invalidateQueries({ queryKey: ["my-sessions"] })} />
-          </div>
-        ))}
+                <ArrowRight className="w-4 h-4 text-muted-foreground mr-2" />
+              </Link>
+              <DeleteButton sessionId={s.id} onDeleted={() => qc.invalidateQueries({ queryKey: ["my-sessions"] })} />
+            </div>
+          );
+        })}
       </div>
     </AppShell>
   );

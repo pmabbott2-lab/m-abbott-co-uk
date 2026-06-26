@@ -9,6 +9,7 @@ import { Avatar, useAudioPlayback } from "@/components/Avatar";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Pause, Play, ArrowLeft, Undo2 } from "lucide-react";
+import { PostCompletionBooking } from "@/components/PostCompletionBooking";
 import { toast } from "sonner";
 import { totalQuestions, questionIndexGlobal, getQuestion, findSection, prevStep, type Section, type AnswersMap } from "@/lib/interview-script";
 
@@ -470,9 +471,12 @@ function InterviewPage() {
       await submitFn({ data: { sessionId } });
       navigate({ to: "/sessions/$sessionId", params: { sessionId } });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to submit");
+      toast.error(e instanceof Error ? e.message : "Failed to continue");
     }
   };
+
+  const defaultName = answersMap["personal:full_name"] ?? "";
+  const defaultEmail = answersMap["personal:email"] ?? "";
 
   if (sessionQ.isLoading) {
     return <AppShell title="Interview"><div className="py-16 text-center text-muted-foreground">Loading…</div></AppShell>;
@@ -501,13 +505,15 @@ function InterviewPage() {
         </div>
 
         <div className="flex flex-col items-center text-center gap-6 bg-card rounded-3xl border p-6 sm:p-10">
-          <Avatar speaking={playing} listening={listening} />
+          {!done && <Avatar speaking={playing} listening={listening} />}
           {done ? (
-            <>
-              <h2 className="text-2xl font-semibold">All done!</h2>
-              <p className="text-muted-foreground">Review your answers, edit anything, and submit to your advisor.</p>
-              <Button size="lg" onClick={handleFinish}>Review & submit</Button>
-            </>
+            <PostCompletionBooking
+              sessionId={sessionId}
+              channel="voice"
+              defaultName={defaultName}
+              defaultEmail={defaultEmail}
+              onComplete={handleFinish}
+            />
           ) : (
             <>
               <p className="text-lg font-medium leading-snug min-h-[3rem]">

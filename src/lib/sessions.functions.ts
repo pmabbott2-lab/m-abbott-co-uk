@@ -246,14 +246,17 @@ export const listMySessions = createServerFn({ method: "GET" })
 
 export const createSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+  .inputValidator((d: unknown) =>
+    z.object({ channel: z.enum(["voice", "text"]).optional() }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: row, error } = await context.supabase
       .from("interview_sessions")
-      .insert({ customer_id: context.userId })
+      .insert({ customer_id: context.userId, channel: data.channel ?? "voice" })
       .select()
       .single();
     if (error) throw new Error(error.message);
-    return data;
+    return row;
   });
 
 export const getSession = createServerFn({ method: "POST" })

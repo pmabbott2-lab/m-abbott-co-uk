@@ -121,6 +121,7 @@ export type Database = {
       }
       interview_sessions: {
         Row: {
+          channel: string
           current_question_index: number
           current_section: string
           customer_id: string
@@ -133,6 +134,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          channel?: string
           current_question_index?: number
           current_section?: string
           customer_id: string
@@ -145,6 +147,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          channel?: string
           current_question_index?: number
           current_section?: string
           customer_id?: string

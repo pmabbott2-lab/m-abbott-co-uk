@@ -137,6 +137,8 @@ export const getAvailableSlots = createServerFn({ method: "GET" })
 const appointmentInput = z.object({
   slug: z.string().min(1).optional(),
   leadId: z.string().uuid().optional(),
+  sessionId: z.string().uuid().optional(),
+  channel: z.enum(["voice", "text", "direct_booking"]).optional(),
   customerName: z.string().min(2),
   customerPhone: z.string().min(7),
   customerEmail: z.string().email().optional().or(z.literal("")),
@@ -167,7 +169,8 @@ async function bookAppointment(
 
   const introducer = await resolveIntroducer(data.slug);
   let leadSource: "referral_link" | "introducer_portal" | "web" = "web";
-  let referralChannel: "direct_booking" | "manual" = "direct_booking";
+  let referralChannel: "voice" | "text" | "direct_booking" | "manual" =
+    data.channel ?? "direct_booking";
   let introducerId: string | null = introducer?.id ?? null;
   const leadId: string | null = data.leadId ?? null;
 
@@ -213,6 +216,7 @@ async function bookAppointment(
       advisor_id: advisorId,
       introducer_id: introducerId,
       lead_id: leadId,
+      session_id: data.sessionId ?? null,
       customer_name: data.customerName,
       customer_phone: data.customerPhone,
       customer_email: data.customerEmail || null,
@@ -265,7 +269,73 @@ export const createAppointment = createServerFn({ method: "POST" })
 export const createAppointmentAuth = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => appointmentInput.parse(d))
-  .handler(async ({ data, context }) => bookAppointment(data, context.userId));
+  .handler(async ({ data, context }) => bookAppointment({ ...data, channel: data.channel ?? "direct_booking" }, context.userId));
+
+export const bookSessionAppointment = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        sessionId: z.string().uuid(),
+        channel: z.enum(["voice", "text"]),
+        customerName: z.string().min(2),
+        customerPhone: z.string().min(7),
+        customerEmail: z.string().email().optional().or(z.literal("")),
+        startsAt: z.string().datetime(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: session, error } = await context.supabase
+      .from("interview_sessions")
+      .select("id, customer_id")
+      .eq("id", data.sessionId)
+      .single();
+    if (error) throw new Error(error.message);
+    if (session.customer_id !== context.userId) throw new Error("Forbidden");
+
+    return bookAppointment(
+      {
+        sessionId: data.sessionId,
+        channel: data.channel,
+        customerName: data.customerName,
+        customerPhone: data.customerPhone,
+        customerEmail: data.customerEmail,
+        startsAt: data.startsAt,
+      },
+      context.userId,
+    );
+  });
+
+export const getAppointmentForSession = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { data: session, error: sErr } = await context.supabase
+      .from("interview_sessions")
+      .select("id, customer_id")
+      .eq("id", data.sessionId)
+      .single();
+    if (sErr) throw new Error(sErr.message);
+
+    const { data: roles } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    const isAdvisor = (roles ?? []).some((r) => r.role === "advisor");
+    if (!isAdvisor && session.customer_id !== context.userId) throw new Error("Forbidden");
+
+    const { data: appointment, error } = await context.supabase
+      .from("appointments")
+      .select("*")
+      .eq("session_id", data.sessionId)
+      .eq("status", "confirmed")
+      .order("starts_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return appointment;
+  });
 
 export const listAdvisorAppointments = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
