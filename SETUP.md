@@ -31,6 +31,7 @@ Open [Supabase Dashboard](https://supabase.com/dashboard) → your project → *
 
 1. `supabase/migrations/20260626220000_introducer_portal.sql`
 2. `supabase/migrations/20260626230000_diary_sms_booking.sql`
+3. `supabase/migrations/20260626240000_session_channel_and_appointment_rls.sql`
 
 Or, if you use the Supabase CLI locally:
 
