@@ -13,11 +13,14 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as GoSlugRouteImport } from './routes/go.$slug'
+import { Route as BookSlugRouteImport } from './routes/book.$slug'
 import { Route as ApiTtsRouteImport } from './routes/api/tts'
 import { Route as ApiSttRouteImport } from './routes/api/stt'
 import { Route as ApiInterviewStepRouteImport } from './routes/api/interview-step'
 import { Route as AuthenticatedIntroducerRouteImport } from './routes/_authenticated/introducer'
 import { Route as AuthenticatedHomeRouteImport } from './routes/_authenticated/home'
+import { Route as AuthenticatedDiaryRouteImport } from './routes/_authenticated/diary'
+import { Route as ApiSmsInboundRouteImport } from './routes/api/sms/inbound'
 import { Route as AuthenticatedSessionsSessionIdRouteImport } from './routes/_authenticated/sessions.$sessionId'
 import { Route as AuthenticatedInterviewSessionIdRouteImport } from './routes/_authenticated/interview.$sessionId'
 
@@ -38,6 +41,11 @@ const IndexRoute = IndexRouteImport.update({
 const GoSlugRoute = GoSlugRouteImport.update({
   id: '/go/$slug',
   path: '/go/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BookSlugRoute = BookSlugRouteImport.update({
+  id: '/book/$slug',
+  path: '/book/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTtsRoute = ApiTtsRouteImport.update({
@@ -65,6 +73,16 @@ const AuthenticatedHomeRoute = AuthenticatedHomeRouteImport.update({
   path: '/home',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedDiaryRoute = AuthenticatedDiaryRouteImport.update({
+  id: '/diary',
+  path: '/diary',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const ApiSmsInboundRoute = ApiSmsInboundRouteImport.update({
+  id: '/api/sms/inbound',
+  path: '/api/sms/inbound',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedSessionsSessionIdRoute =
   AuthenticatedSessionsSessionIdRouteImport.update({
     id: '/sessions/$sessionId',
@@ -81,79 +99,97 @@ const AuthenticatedInterviewSessionIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/diary': typeof AuthenticatedDiaryRoute
   '/home': typeof AuthenticatedHomeRoute
   '/introducer': typeof AuthenticatedIntroducerRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
   '/api/tts': typeof ApiTtsRoute
+  '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
+  '/api/sms/inbound': typeof ApiSmsInboundRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/diary': typeof AuthenticatedDiaryRoute
   '/home': typeof AuthenticatedHomeRoute
   '/introducer': typeof AuthenticatedIntroducerRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
   '/api/tts': typeof ApiTtsRoute
+  '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
+  '/api/sms/inbound': typeof ApiSmsInboundRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/_authenticated/diary': typeof AuthenticatedDiaryRoute
   '/_authenticated/home': typeof AuthenticatedHomeRoute
   '/_authenticated/introducer': typeof AuthenticatedIntroducerRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
   '/api/tts': typeof ApiTtsRoute
+  '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
   '/_authenticated/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/_authenticated/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
+  '/api/sms/inbound': typeof ApiSmsInboundRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/auth'
+    | '/diary'
     | '/home'
     | '/introducer'
     | '/api/interview-step'
     | '/api/stt'
     | '/api/tts'
+    | '/book/$slug'
     | '/go/$slug'
     | '/interview/$sessionId'
     | '/sessions/$sessionId'
+    | '/api/sms/inbound'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/auth'
+    | '/diary'
     | '/home'
     | '/introducer'
     | '/api/interview-step'
     | '/api/stt'
     | '/api/tts'
+    | '/book/$slug'
     | '/go/$slug'
     | '/interview/$sessionId'
     | '/sessions/$sessionId'
+    | '/api/sms/inbound'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/_authenticated/diary'
     | '/_authenticated/home'
     | '/_authenticated/introducer'
     | '/api/interview-step'
     | '/api/stt'
     | '/api/tts'
+    | '/book/$slug'
     | '/go/$slug'
     | '/_authenticated/interview/$sessionId'
     | '/_authenticated/sessions/$sessionId'
+    | '/api/sms/inbound'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -163,7 +199,9 @@ export interface RootRouteChildren {
   ApiInterviewStepRoute: typeof ApiInterviewStepRoute
   ApiSttRoute: typeof ApiSttRoute
   ApiTtsRoute: typeof ApiTtsRoute
+  BookSlugRoute: typeof BookSlugRoute
   GoSlugRoute: typeof GoSlugRoute
+  ApiSmsInboundRoute: typeof ApiSmsInboundRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -194,6 +232,13 @@ declare module '@tanstack/react-router' {
       path: '/go/$slug'
       fullPath: '/go/$slug'
       preLoaderRoute: typeof GoSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/book/$slug': {
+      id: '/book/$slug'
+      path: '/book/$slug'
+      fullPath: '/book/$slug'
+      preLoaderRoute: typeof BookSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/tts': {
@@ -231,6 +276,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedHomeRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/diary': {
+      id: '/_authenticated/diary'
+      path: '/diary'
+      fullPath: '/diary'
+      preLoaderRoute: typeof AuthenticatedDiaryRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/api/sms/inbound': {
+      id: '/api/sms/inbound'
+      path: '/api/sms/inbound'
+      fullPath: '/api/sms/inbound'
+      preLoaderRoute: typeof ApiSmsInboundRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/sessions/$sessionId': {
       id: '/_authenticated/sessions/$sessionId'
       path: '/sessions/$sessionId'
@@ -249,6 +308,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedDiaryRoute: typeof AuthenticatedDiaryRoute
   AuthenticatedHomeRoute: typeof AuthenticatedHomeRoute
   AuthenticatedIntroducerRoute: typeof AuthenticatedIntroducerRoute
   AuthenticatedInterviewSessionIdRoute: typeof AuthenticatedInterviewSessionIdRoute
@@ -256,6 +316,7 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedDiaryRoute: AuthenticatedDiaryRoute,
   AuthenticatedHomeRoute: AuthenticatedHomeRoute,
   AuthenticatedIntroducerRoute: AuthenticatedIntroducerRoute,
   AuthenticatedInterviewSessionIdRoute: AuthenticatedInterviewSessionIdRoute,
@@ -272,7 +333,9 @@ const rootRouteChildren: RootRouteChildren = {
   ApiInterviewStepRoute: ApiInterviewStepRoute,
   ApiSttRoute: ApiSttRoute,
   ApiTtsRoute: ApiTtsRoute,
+  BookSlugRoute: BookSlugRoute,
   GoSlugRoute: GoSlugRoute,
+  ApiSmsInboundRoute: ApiSmsInboundRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

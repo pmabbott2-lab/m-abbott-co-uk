@@ -4,14 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import avatarImg from "@/assets/avatar.png";
 
-type LandingSearch = {
-  ref?: string;
-};
-
 export const Route = createFileRoute("/")({
-  validateSearch: (search: Record<string, unknown>): LandingSearch => ({
-    ref: typeof search.ref === "string" ? search.ref : undefined,
-  }),
   head: () => ({
     meta: [
       { title: "Mortgage Fact-Find — Voice Interview" },
@@ -23,7 +16,6 @@ export const Route = createFileRoute("/")({
 
 function Landing() {
   const navigate = useNavigate();
-  const { ref } = Route.useSearch();
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
@@ -46,11 +38,6 @@ function Landing() {
       </header>
       <main className="max-w-6xl mx-auto px-6 pt-12 pb-24 grid md:grid-cols-2 gap-12 items-center">
         <div className="space-y-6">
-          {ref && (
-            <div className="rounded-xl border bg-accent/10 px-4 py-3 text-sm">
-              Referred by <span className="font-medium">{ref}</span>
-            </div>
-          )}
           <h1 className="text-4xl md:text-5xl font-semibold tracking-tight text-foreground leading-[1.1]">
             A voice interview that gets your mortgage advisor up to speed — before you even meet.
           </h1>

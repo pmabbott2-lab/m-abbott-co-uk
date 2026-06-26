@@ -37,6 +37,16 @@ export const resolveReferralSlug = createServerFn({ method: "GET" })
     return introducer;
   });
 
+export const checkIsIntroducer = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data: roles } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    return { isIntroducer: (roles ?? []).some((r) => r.role === "introducer") };
+  });
+
 export const getIntroducerProfile = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -156,20 +166,20 @@ export const listIntroducerReferrals = createServerFn({ method: "GET" })
       .single();
     if (introErr) throw new Error(introErr.message);
 
-    const [{ data: leads, error: leadsErr }, { data: sessions, error: sessionsErr }] = await Promise.all([
+    const [{ data: leads, error: leadsErr }, { data: appointments, error: apptErr }] = await Promise.all([
       context.supabase
         .from("introducer_leads")
         .select("*")
         .eq("introducer_id", introducer.id)
         .order("created_at", { ascending: false }),
       context.supabase
-        .from("interview_sessions")
-        .select("id, status, lead_source, referral_channel, started_at, submitted_at")
+        .from("appointments")
+        .select("id, status, lead_source, referral_channel, starts_at, customer_name, customer_phone")
         .eq("introducer_id", introducer.id)
-        .order("started_at", { ascending: false }),
+        .order("starts_at", { ascending: false }),
     ]);
     if (leadsErr) throw new Error(leadsErr.message);
-    if (sessionsErr) throw new Error(sessionsErr.message);
+    if (apptErr) throw new Error(apptErr.message);
 
-    return { leads: leads ?? [], sessions: sessions ?? [] };
+    return { leads: leads ?? [], appointments: appointments ?? [] };
   });

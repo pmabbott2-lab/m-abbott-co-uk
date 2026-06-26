@@ -25,7 +25,7 @@ function ReferralRedirect() {
           return;
         }
         setReferralCookie(introducer.slug);
-        navigate({ to: "/", search: { ref: introducer.company_name } });
+        navigate({ to: "/book/$slug", params: { slug: introducer.slug } });
       } catch {
         if (!cancelled) setError("Something went wrong. Please try again later.");
       }

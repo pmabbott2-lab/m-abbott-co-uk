@@ -70,20 +70,5 @@ CREATE POLICY "Introducers manage own leads" ON public.introducer_leads
     OR public.has_role(auth.uid(), 'advisor')
   );
 
-ALTER TABLE public.interview_sessions
-  ADD COLUMN introducer_id UUID REFERENCES public.introducers(id) ON DELETE SET NULL,
-  ADD COLUMN lead_source public.lead_source,
-  ADD COLUMN referral_channel public.referral_channel;
-
 CREATE INDEX ON public.introducers (slug) WHERE active = true;
 CREATE INDEX ON public.introducer_leads (introducer_id, created_at DESC);
-CREATE INDEX ON public.interview_sessions (introducer_id, started_at DESC);
-
-CREATE POLICY "Introducers view attributed sessions" ON public.interview_sessions
-  FOR SELECT TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.introducers i
-      WHERE i.id = introducer_id AND i.user_id = auth.uid()
-    )
-  );

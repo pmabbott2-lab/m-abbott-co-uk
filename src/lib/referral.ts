@@ -27,3 +27,9 @@ export function referralLinkForSlug(slug: string, origin?: string) {
   const base = origin ?? (typeof window !== "undefined" ? window.location.origin : "");
   return `${base}/go/${slug}`;
 }
+
+export function bookingLinkForSlug(slug: string, origin?: string, leadId?: string) {
+  const base = origin ?? (typeof window !== "undefined" ? window.location.origin : "");
+  const url = `${base}/book/${slug}`;
+  return leadId ? `${url}?lead=${leadId}` : url;
+}

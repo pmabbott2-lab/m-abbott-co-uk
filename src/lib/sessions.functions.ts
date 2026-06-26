@@ -246,46 +246,14 @@ export const listMySessions = createServerFn({ method: "GET" })
 
 export const createSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) =>
-    z
-      .object({
-        referralSlug: z.string().min(1).optional(),
-        channel: z.enum(["voice", "text", "direct_booking"]).optional(),
-      })
-      .optional()
-      .parse(d),
-  )
-  .handler(async ({ data, context }) => {
-    let introducerId: string | null = null;
-    let leadSource: "referral_link" | "web" | null = null;
-    const referralChannel = data?.channel ?? "voice";
-
-    if (data?.referralSlug) {
-      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-      const { data: introducer } = await supabaseAdmin
-        .from("introducers")
-        .select("id")
-        .eq("slug", data.referralSlug)
-        .eq("active", true)
-        .maybeSingle();
-      if (introducer) {
-        introducerId = introducer.id;
-        leadSource = "referral_link";
-      }
-    }
-
-    const { data: session, error } = await context.supabase
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase
       .from("interview_sessions")
-      .insert({
-        customer_id: context.userId,
-        introducer_id: introducerId,
-        lead_source: leadSource,
-        referral_channel: referralChannel,
-      })
+      .insert({ customer_id: context.userId })
       .select()
       .single();
     if (error) throw new Error(error.message);
-    return session;
+    return data;
   });
 
 export const getSession = createServerFn({ method: "POST" })
@@ -407,11 +375,7 @@ export const getMyRole = createServerFn({ method: "GET" })
       .select("role")
       .eq("user_id", context.userId);
     const roles = (data ?? []).map((r) => r.role);
-    return {
-      isAdvisor: roles.includes("advisor"),
-      isIntroducer: roles.includes("introducer"),
-      roles,
-    };
+    return { isAdvisor: roles.includes("advisor"), roles };
   });
 
 export const listAllSessionsForAdvisor = createServerFn({ method: "GET" })
