@@ -126,6 +126,9 @@ export type Database = {
           customer_id: string
           followup_count: number
           id: string
+          introducer_id: string | null
+          lead_source: Database["public"]["Enums"]["lead_source"] | null
+          referral_channel: Database["public"]["Enums"]["referral_channel"] | null
           started_at: string
           status: Database["public"]["Enums"]["session_status"]
           submitted_at: string | null
@@ -138,6 +141,9 @@ export type Database = {
           customer_id: string
           followup_count?: number
           id?: string
+          introducer_id?: string | null
+          lead_source?: Database["public"]["Enums"]["lead_source"] | null
+          referral_channel?: Database["public"]["Enums"]["referral_channel"] | null
           started_at?: string
           status?: Database["public"]["Enums"]["session_status"]
           submitted_at?: string | null
@@ -150,11 +156,109 @@ export type Database = {
           customer_id?: string
           followup_count?: number
           id?: string
+          introducer_id?: string | null
+          lead_source?: Database["public"]["Enums"]["lead_source"] | null
+          referral_channel?: Database["public"]["Enums"]["referral_channel"] | null
           started_at?: string
           status?: Database["public"]["Enums"]["session_status"]
           submitted_at?: string | null
           summary?: string | null
           updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "interview_sessions_introducer_id_fkey"
+            columns: ["introducer_id"]
+            isOneToOne: false
+            referencedRelation: "introducers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      introducer_leads: {
+        Row: {
+          channel: Database["public"]["Enums"]["referral_channel"]
+          created_at: string
+          customer_email: string | null
+          customer_name: string
+          customer_phone: string | null
+          id: string
+          introducer_id: string
+          lead_source: Database["public"]["Enums"]["lead_source"]
+          notes: string | null
+          session_id: string | null
+          status: string
+        }
+        Insert: {
+          channel?: Database["public"]["Enums"]["referral_channel"]
+          created_at?: string
+          customer_email?: string | null
+          customer_name: string
+          customer_phone?: string | null
+          id?: string
+          introducer_id: string
+          lead_source?: Database["public"]["Enums"]["lead_source"]
+          notes?: string | null
+          session_id?: string | null
+          status?: string
+        }
+        Update: {
+          channel?: Database["public"]["Enums"]["referral_channel"]
+          created_at?: string
+          customer_email?: string | null
+          customer_name?: string
+          customer_phone?: string | null
+          id?: string
+          introducer_id?: string
+          lead_source?: Database["public"]["Enums"]["lead_source"]
+          notes?: string | null
+          session_id?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "introducer_leads_introducer_id_fkey"
+            columns: ["introducer_id"]
+            isOneToOne: false
+            referencedRelation: "introducers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "introducer_leads_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "interview_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      introducers: {
+        Row: {
+          active: boolean
+          company_name: string
+          contact_email: string | null
+          created_at: string
+          id: string
+          slug: string
+          user_id: string
+        }
+        Insert: {
+          active?: boolean
+          company_name: string
+          contact_email?: string | null
+          created_at?: string
+          id?: string
+          slug: string
+          user_id: string
+        }
+        Update: {
+          active?: boolean
+          company_name?: string
+          contact_email?: string | null
+          created_at?: string
+          id?: string
+          slug?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -211,7 +315,9 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "customer" | "advisor"
+      app_role: "customer" | "advisor" | "introducer"
+      lead_source: "web" | "telephone" | "mobile" | "introducer_portal" | "referral_link"
+      referral_channel: "voice" | "text" | "direct_booking" | "manual"
       session_status: "in_progress" | "submitted"
     }
     CompositeTypes: {
@@ -340,7 +446,9 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["customer", "advisor"],
+      app_role: ["customer", "advisor", "introducer"],
+      lead_source: ["web", "telephone", "mobile", "introducer_portal", "referral_link"],
+      referral_channel: ["voice", "text", "direct_booking", "manual"],
       session_status: ["in_progress", "submitted"],
     },
   },

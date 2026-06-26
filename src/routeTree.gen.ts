@@ -12,9 +12,11 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as GoSlugRouteImport } from './routes/go.$slug'
 import { Route as ApiTtsRouteImport } from './routes/api/tts'
 import { Route as ApiSttRouteImport } from './routes/api/stt'
 import { Route as ApiInterviewStepRouteImport } from './routes/api/interview-step'
+import { Route as AuthenticatedIntroducerRouteImport } from './routes/_authenticated/introducer'
 import { Route as AuthenticatedHomeRouteImport } from './routes/_authenticated/home'
 import { Route as AuthenticatedSessionsSessionIdRouteImport } from './routes/_authenticated/sessions.$sessionId'
 import { Route as AuthenticatedInterviewSessionIdRouteImport } from './routes/_authenticated/interview.$sessionId'
@@ -33,6 +35,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GoSlugRoute = GoSlugRouteImport.update({
+  id: '/go/$slug',
+  path: '/go/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiTtsRoute = ApiTtsRouteImport.update({
   id: '/api/tts',
   path: '/api/tts',
@@ -47,6 +54,11 @@ const ApiInterviewStepRoute = ApiInterviewStepRouteImport.update({
   id: '/api/interview-step',
   path: '/api/interview-step',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedIntroducerRoute = AuthenticatedIntroducerRouteImport.update({
+  id: '/introducer',
+  path: '/introducer',
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedHomeRoute = AuthenticatedHomeRouteImport.update({
   id: '/home',
@@ -70,9 +82,11 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/home': typeof AuthenticatedHomeRoute
+  '/introducer': typeof AuthenticatedIntroducerRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
   '/api/tts': typeof ApiTtsRoute
+  '/go/$slug': typeof GoSlugRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
 }
@@ -80,9 +94,11 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/home': typeof AuthenticatedHomeRoute
+  '/introducer': typeof AuthenticatedIntroducerRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
   '/api/tts': typeof ApiTtsRoute
+  '/go/$slug': typeof GoSlugRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
 }
@@ -92,9 +108,11 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/_authenticated/home': typeof AuthenticatedHomeRoute
+  '/_authenticated/introducer': typeof AuthenticatedIntroducerRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
   '/api/tts': typeof ApiTtsRoute
+  '/go/$slug': typeof GoSlugRoute
   '/_authenticated/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/_authenticated/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
 }
@@ -104,9 +122,11 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/home'
+    | '/introducer'
     | '/api/interview-step'
     | '/api/stt'
     | '/api/tts'
+    | '/go/$slug'
     | '/interview/$sessionId'
     | '/sessions/$sessionId'
   fileRoutesByTo: FileRoutesByTo
@@ -114,9 +134,11 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/home'
+    | '/introducer'
     | '/api/interview-step'
     | '/api/stt'
     | '/api/tts'
+    | '/go/$slug'
     | '/interview/$sessionId'
     | '/sessions/$sessionId'
   id:
@@ -125,9 +147,11 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/auth'
     | '/_authenticated/home'
+    | '/_authenticated/introducer'
     | '/api/interview-step'
     | '/api/stt'
     | '/api/tts'
+    | '/go/$slug'
     | '/_authenticated/interview/$sessionId'
     | '/_authenticated/sessions/$sessionId'
   fileRoutesById: FileRoutesById
@@ -139,6 +163,7 @@ export interface RootRouteChildren {
   ApiInterviewStepRoute: typeof ApiInterviewStepRoute
   ApiSttRoute: typeof ApiSttRoute
   ApiTtsRoute: typeof ApiTtsRoute
+  GoSlugRoute: typeof GoSlugRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -164,6 +189,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/go/$slug': {
+      id: '/go/$slug'
+      path: '/go/$slug'
+      fullPath: '/go/$slug'
+      preLoaderRoute: typeof GoSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/tts': {
       id: '/api/tts'
       path: '/api/tts'
@@ -184,6 +216,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/interview-step'
       preLoaderRoute: typeof ApiInterviewStepRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/introducer': {
+      id: '/_authenticated/introducer'
+      path: '/introducer'
+      fullPath: '/introducer'
+      preLoaderRoute: typeof AuthenticatedIntroducerRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/home': {
       id: '/_authenticated/home'
@@ -211,12 +250,14 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedHomeRoute: typeof AuthenticatedHomeRoute
+  AuthenticatedIntroducerRoute: typeof AuthenticatedIntroducerRoute
   AuthenticatedInterviewSessionIdRoute: typeof AuthenticatedInterviewSessionIdRoute
   AuthenticatedSessionsSessionIdRoute: typeof AuthenticatedSessionsSessionIdRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedHomeRoute: AuthenticatedHomeRoute,
+  AuthenticatedIntroducerRoute: AuthenticatedIntroducerRoute,
   AuthenticatedInterviewSessionIdRoute: AuthenticatedInterviewSessionIdRoute,
   AuthenticatedSessionsSessionIdRoute: AuthenticatedSessionsSessionIdRoute,
 }
@@ -231,7 +272,18 @@ const rootRouteChildren: RootRouteChildren = {
   ApiInterviewStepRoute: ApiInterviewStepRoute,
   ApiSttRoute: ApiSttRoute,
   ApiTtsRoute: ApiTtsRoute,
+  GoSlugRoute: GoSlugRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

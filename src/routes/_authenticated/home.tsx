@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link, redirect } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listMySessions, createSession, getMyRole, listAllSessionsForAdvisor, deleteSession } from "@/lib/sessions.functions";
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Mic, FileText, ArrowRight, Trash2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { getReferralSlug } from "@/lib/referral";
 
 export const Route = createFileRoute("/_authenticated/home")({
   component: Home,
@@ -75,11 +76,12 @@ function Home() {
 
   const roleQ = useQuery({ queryKey: ["my-role"], queryFn: () => roleFn() });
   const isAdvisor = roleQ.data?.isAdvisor ?? false;
+  const isIntroducer = roleQ.data?.isIntroducer ?? false;
 
   const sessionsQ = useQuery({
     queryKey: ["my-sessions"],
     queryFn: () => sessionsFn(),
-    enabled: !roleQ.isLoading && !isAdvisor,
+    enabled: !roleQ.isLoading && !isAdvisor && !isIntroducer,
   });
 
   const allQ = useQuery({
@@ -89,12 +91,19 @@ function Home() {
   });
 
   const create = useMutation({
-    mutationFn: () => createFn(),
+    mutationFn: () => {
+      const referralSlug = getReferralSlug() ?? undefined;
+      return createFn({ data: referralSlug ? { referralSlug, channel: "voice" } : { channel: "voice" } });
+    },
     onSuccess: (s) => navigate({ to: "/interview/$sessionId", params: { sessionId: s.id } }),
   });
 
   if (roleQ.isLoading) {
     return <AppShell title="Home"><div className="py-16 text-center text-muted-foreground">Loading…</div></AppShell>;
+  }
+
+  if (isIntroducer) {
+    throw redirect({ to: "/introducer" });
   }
 
   if (isAdvisor) {
@@ -116,6 +125,7 @@ function Home() {
                   <div className="text-xs text-muted-foreground">
                     {s.status === "submitted" ? "Submitted" : "In progress"} ·{" "}
                     {formatDistanceToNow(new Date(s.started_at), { addSuffix: true })}
+                    {s.lead_source && ` · ${s.lead_source.replace("_", " ")}`}
                   </div>
                 </div>
                 <span className={`text-xs px-2 py-1 rounded-full mr-2 ${s.status === "submitted" ? "bg-accent/30" : "bg-muted"}`}>
