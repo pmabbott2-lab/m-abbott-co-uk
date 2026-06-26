@@ -123,6 +123,39 @@ npm run preview
 
 Point your domain DNS at the server and set `APP_BASE_URL` to that domain.
 
+### Using ngrok (e.g. `another-selector-ranged.ngrok-free.dev`)
+
+ngrok only forwards to whatever is running **on your laptop**. It does not read from GitHub automatically.
+
+1. **Pull latest code and restart the dev server:**
+
+   ```bash
+   git pull origin main
+   npm install
+   npm run dev
+   ```
+
+2. **Point ngrok at the dev port** (usually 5173):
+
+   ```bash
+   ngrok http 5173
+   ```
+
+3. **Set in `.env`:**
+
+   ```env
+   APP_BASE_URL=https://your-subdomain.ngrok-free.dev
+   ```
+
+4. **Add Supabase redirect URLs** (Authentication → URL configuration):
+
+   ```
+   https://your-subdomain.ngrok-free.dev/home
+   http://localhost:5173/home
+   ```
+
+5. **Confirm you have the new build** — the landing page title should be **"Mortgage Fact-Find & Appointment Booking"**, not "Voice Interview" only. If you still see the old title, your local folder has not been updated or the dev server was not restarted after `git pull`.
+
 ---
 
 ## 6. Verify booking works
