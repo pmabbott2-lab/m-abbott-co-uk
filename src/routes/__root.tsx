@@ -7,10 +7,9 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
 
 function NotFoundComponent() {
   return (
@@ -37,9 +36,6 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
-  useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -77,18 +73,26 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Mortgage Test" },
-      { name: "description", content: "Advisor Ally is a mobile app that collects initial customer information through an avatar-led verbal interview." },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Mortgage Test" },
-      { property: "og:description", content: "Advisor Ally is a mobile app that collects initial customer information through an avatar-led verbal interview." },
+      { title: "Mortgage Fact-Find & Appointment Booking" },
+      {
+        name: "description",
+        content:
+          "Complete your mortgage fact-find by voice or text, or book an appointment with your advisor.",
+      },
+      { property: "og:title", content: "Mortgage Fact-Find & Appointment Booking" },
+      {
+        property: "og:description",
+        content:
+          "Complete your mortgage fact-find by voice or text, or book an appointment with your advisor.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
-      { name: "twitter:title", content: "Mortgage Test" },
-      { name: "twitter:description", content: "Advisor Ally is a mobile app that collects initial customer information through an avatar-led verbal interview." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/f2a7ad01-00fd-4921-9840-75e83f091a2f/id-preview-42c2c7da--9bdb4c55-a92c-41a7-a76d-0321df640d6c.lovable.app-1782213638467.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/f2a7ad01-00fd-4921-9840-75e83f091a2f/id-preview-42c2c7da--9bdb4c55-a92c-41a7-a76d-0321df640d6c.lovable.app-1782213638467.png" },
+      { name: "twitter:title", content: "Mortgage Fact-Find & Appointment Booking" },
+      {
+        name: "twitter:description",
+        content:
+          "Complete your mortgage fact-find by voice or text, or book an appointment with your advisor.",
+      },
     ],
     links: [
       {

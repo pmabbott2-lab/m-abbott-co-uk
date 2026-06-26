@@ -1,7 +1,6 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,8 +10,8 @@ import avatarImg from "@/assets/avatar.png";
 export const Route = createFileRoute("/auth")({
   head: () => ({
     meta: [
-      { title: "Sign in — Mortgage Fact-Find" },
-      { name: "description", content: "Sign in to start your guided mortgage fact-find interview." },
+      { title: "Sign in — Mortgage Fact-Find & Booking" },
+      { name: "description", content: "Sign in to complete your mortgage fact-find or book an appointment with your advisor." },
     ],
   }),
   component: AuthPage,
@@ -28,7 +27,7 @@ function AuthPage() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/" });
+      if (data.session) navigate({ to: "/home" });
     });
   }, [navigate]);
 
@@ -51,7 +50,7 @@ function AuthPage() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       }
-      navigate({ to: "/" });
+      navigate({ to: "/home" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -61,13 +60,14 @@ function AuthPage() {
 
   const onGoogle = async () => {
     setLoading(true);
-    const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin });
-    if (result.error) {
-      toast.error(result.error.message);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: `${window.location.origin}/home` },
+    });
+    if (error) {
+      toast.error(error.message);
       setLoading(false);
-      return;
     }
-    if (!result.redirected) navigate({ to: "/" });
   };
 
   return (
@@ -75,8 +75,10 @@ function AuthPage() {
       <div className="w-full max-w-md space-y-8">
         <div className="text-center space-y-3">
           <img src={avatarImg} alt="Your guide" width={96} height={96} className="mx-auto rounded-full" />
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Your guided fact-find</h1>
-          <p className="text-sm text-muted-foreground">A friendly voice interview that helps your advisor know you faster.</p>
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Fact-find or book an appointment</h1>
+          <p className="text-sm text-muted-foreground">
+            Complete your mortgage fact-find by voice or text, or go straight to booking a call with your advisor.
+          </p>
         </div>
         <div className="bg-card rounded-2xl shadow-sm border p-6 space-y-4">
           <div className="flex gap-2 p-1 bg-muted rounded-lg">

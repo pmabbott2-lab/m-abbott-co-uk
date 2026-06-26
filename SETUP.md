@@ -1,148 +1,148 @@
-# Setup guide — booking, SMS & introducer portal
+# Self-hosted setup — FactFind & booking
 
-The **voice fact-find app is unchanged**. These features are separate routes that sit alongside it.
+Run this app on **your own server or domain**. It does not require Lovable hosting.
 
-| Route | Who uses it |
-|-------|-------------|
-| `/home`, `/interview`, `/text`, `/sessions`, `/booking` | Customers & advisors |
-| `/introducer` | Introducers |
-| `/diary` | Advisors (appointments only) |
-| `/book/:slug` | Public direct booking |
-| `/go/:slug` | Short link → redirects to booking |
+Your code is on GitHub (`main`). Deploy from there to see the latest home page, booking options, and fact-find flows.
 
 ---
 
-## Your action checklist
+## Routes
 
-### 1. Pull the latest code on your laptop
+| Route | Purpose |
+|-------|---------|
+| `/` | Landing — fact-find & booking overview |
+| `/auth` | Sign in / sign up |
+| `/home` | Verbal, text, or direct booking |
+| `/booking` | Book an appointment (logged in) |
+| `/interview/:id` | Verbal fact-find |
+| `/text/:id` | Text fact-find |
+| `/sessions/:id` | Summary + appointment details |
+| `/diary` | Advisor appointments |
+| `/introducer` | Introducer portal |
+| `/book/:slug` | Public booking via referral link |
+
+---
+
+## 1. Clone and install
 
 ```bash
 git clone https://github.com/pmabbott2-lab/m-abbott-co-uk.git
 cd m-abbott-co-uk
-git checkout cursor/diary-sms-booking-4b79
+git checkout main
 npm install
 ```
 
-After merge to `main`, use `git pull origin main` instead.
+---
 
-### 2. Run the database migrations in Supabase
+## 2. Environment variables
 
-Open [Supabase Dashboard](https://supabase.com/dashboard) → your project → **SQL Editor**, and run these files in order:
+Copy `.env.example` to `.env` and fill in values:
+
+```bash
+cp .env.example .env
+```
+
+Required:
+
+| Variable | Purpose |
+|----------|---------|
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_PUBLISHABLE_KEY` | Supabase anon/publishable key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-side Supabase access |
+| `VITE_SUPABASE_URL` | Same URL for browser |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | Same publishable key for browser |
+| `OPENAI_API_KEY` | Voice interview AI, STT, TTS |
+| `APP_BASE_URL` | Your live site URL, e.g. `https://m-abbott.co.uk` |
+
+Optional (SMS booking texts):
+
+| Variable | Purpose |
+|----------|---------|
+| `TWILIO_ACCOUNT_SID` | Twilio account |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token |
+| `TWILIO_PHONE_NUMBER` | Outbound SMS number |
+
+---
+
+## 3. Supabase database
+
+In Supabase **SQL Editor**, run migrations in order:
 
 1. `supabase/migrations/20260626220000_introducer_portal.sql`
 2. `supabase/migrations/20260626230000_diary_sms_booking.sql`
 3. `supabase/migrations/20260626240000_session_channel_and_appointment_rls.sql`
 
-Or, if you use the Supabase CLI locally:
+Or with Supabase CLI: `supabase db push`
+
+### User roles
+
+After users sign up, assign roles in SQL:
+
+```sql
+-- Advisor (required for diary slots)
+INSERT INTO user_roles (user_id, role)
+VALUES ('YOUR-USER-UUID', 'advisor');
+```
+
+Find UUIDs under **Authentication → Users**.
+
+### Google sign-in
+
+In Supabase **Authentication → Providers → Google**, enable Google and add your site URL to **Redirect URLs**:
+
+```
+https://your-domain.com/home
+http://localhost:5173/home
+```
+
+---
+
+## 4. Run locally
 
 ```bash
-supabase db push
+npm run dev
 ```
 
-### 3. Create user roles
+Open http://localhost:5173 — you should see **"Complete your fact-find or book an appointment"** on the landing page, and three options on `/home` after sign-in.
 
-In Supabase SQL Editor, after each person has signed up once:
+---
 
-**Advisor** (needed for diary slots to work):
-
-```sql
-INSERT INTO user_roles (user_id, role)
-VALUES ('PASTE-ADVISOR-USER-UUID', 'advisor');
-```
-
-**Introducer**:
-
-```sql
-INSERT INTO user_roles (user_id, role)
-VALUES ('PASTE-INTRODUCER-USER-UUID', 'introducer');
-```
-
-Find user UUIDs in **Authentication → Users**.
-
-### 4. Set environment variables on your server
-
-Create or update `.env` on whatever hosts the app (VPS, Cloudflare, etc.):
-
-```env
-# Existing (required)
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_PUBLISHABLE_KEY=your-publishable-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
-
-# AI (required for voice fact-find — use OpenAI directly if not on Lovable)
-LOVABLE_API_KEY=your-key
-# OR migrate STT/TTS to OPENAI_API_KEY (see src/lib/openai.server.ts)
-
-# App URL (required for SMS links)
-APP_BASE_URL=https://your-domain.com
-
-# Twilio (required for SMS — skip if you only want booking without texts)
-TWILIO_ACCOUNT_SID=ACxxxxxxxx
-TWILIO_AUTH_TOKEN=your-auth-token
-TWILIO_PHONE_NUMBER=+447xxxxxxxxx
-```
-
-Never commit `.env` to GitHub.
-
-### 5. Set up Twilio (for SMS)
-
-1. Create account at [twilio.com](https://www.twilio.com)
-2. Buy a UK phone number with SMS capability
-3. Copy Account SID, Auth Token, and phone number into `.env`
-4. Set the **inbound webhook** on your Twilio number to:
-   ```
-   https://your-domain.com/api/sms/inbound
-   ```
-   Method: `POST`
-
-### 6. Deploy the app
-
-Build and run on your server:
+## 5. Deploy to production
 
 ```bash
 npm run build
-npm run preview   # test locally first
 ```
 
-For production, use your hosting provider’s process (PM2, Docker, Cloudflare Workers, etc.).
+Serve the built app with your host (VPS + Node, Docker, Cloudflare, etc.). The build outputs a Nitro-compatible server entry at `dist/server/server.js`.
 
-### 7. Test the flows
+Example test after build:
 
-| Test | URL / action |
-|------|----------------|
-| Fact-find (unchanged) | Sign in → `/home` → Start interview |
-| Introducer portal | Sign in as introducer → `/introducer` |
-| Direct booking | `/book/your-slug` |
-| Short link | `/go/your-slug` |
-| Advisor diary | Sign in as advisor → `/diary` |
-| SMS booking link | Introducer portal → save lead → "Text booking link" |
+```bash
+npm run preview
+```
+
+Point your domain DNS at the server and set `APP_BASE_URL` to that domain.
+
+---
+
+## 6. Verify booking works
+
+| Step | Expected |
+|------|----------|
+| Visit `/` | Landing mentions fact-find **and** booking |
+| Sign in → `/home` | Three cards: Verbal · Text · **Book an appointment** |
+| Click **Book an appointment** | Calendar at `/booking` |
+| Complete verbal/text fact-find | "Thank you for completing — book an appointment" step |
+| View session summary | Appointment details shown if booked |
 
 ---
 
 ## Default diary hours
 
-On first booking request, the system creates **Mon–Fri 9:00–17:00** slots (30 minutes) for your first advisor. To change hours later, edit the `advisor_availability` table in Supabase.
+First booking request auto-creates **Mon–Fri 9:00–17:00** (30-min slots) for your first advisor. Edit `advisor_availability` in Supabase to change.
 
 ---
 
-## Backing up to your laptop
+## Why Lovable showed old pages
 
-```bash
-git pull origin main
-```
-
-Keep `.env` backed up separately (password manager or secure note). Use Time Machine or iCloud for an extra copy of the project folder.
-
----
-
-## What was deliberately left unchanged
-
-- Landing page (`/`)
-- Customer home & interview flow
-- Session creation logic
-- Advisor fact-find dashboard on `/home`
-- All voice / STT / TTS / AI interview code
-
-New features only add routes and database tables — they do not modify the core fact-find experience.
+If you were viewing the app on a Lovable URL, it may not have synced from GitHub `main`. Self-hosting from this repo gives you direct control — every `git pull` + redeploy updates what users see.

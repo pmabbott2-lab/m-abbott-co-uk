@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { getLovableApiKey } from "@/lib/ai-gateway.server";
+import { openAIFetch } from "@/lib/openai.server";
 
 export const Route = createFileRoute("/api/stt")({
   server: {
@@ -11,12 +11,11 @@ export const Route = createFileRoute("/api/stt")({
         if (file.size < 800) return Response.json({ text: "" });
 
         const upstream = new FormData();
-        upstream.append("model", "openai/gpt-4o-mini-transcribe");
+        upstream.append("model", "gpt-4o-mini-transcribe");
         upstream.append("file", file, file.name || "recording.webm");
 
-        const res = await fetch("https://ai.gateway.lovable.dev/v1/audio/transcriptions", {
+        const res = await openAIFetch("/audio/transcriptions", {
           method: "POST",
-          headers: { Authorization: `Bearer ${getLovableApiKey()}` },
           body: upstream,
         });
         if (!res.ok) {
