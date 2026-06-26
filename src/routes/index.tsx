@@ -39,14 +39,14 @@ function Landing() {
       <main className="max-w-6xl mx-auto px-6 pt-12 pb-24 grid md:grid-cols-2 gap-12 items-center">
         <div className="space-y-6">
           <h1 className="text-4xl md:text-5xl font-semibold tracking-tight text-foreground leading-[1.1]">
-            A voice interview that gets your mortgage advisor up to speed — before you even meet.
+            Complete your fact-find or book an appointment with your advisor.
           </h1>
           <p className="text-lg text-muted-foreground">
-            Tap start, talk to a friendly avatar, and answer simple questions about you,
-            your job, and the property you want. We'll hand a clean summary to your advisor.
+            Talk to a friendly avatar, type your answers, or pick a time to speak with your advisor.
+            We&apos;ll capture everything needed for your mortgage application.
           </p>
-          <div className="flex gap-3">
-            <Link to="/auth"><Button size="lg">Start your fact-find</Button></Link>
+          <div className="flex flex-wrap gap-3">
+            <Link to="/auth"><Button size="lg">Sign in to get started</Button></Link>
           </div>
         </div>
         <div className="flex items-center justify-center">
