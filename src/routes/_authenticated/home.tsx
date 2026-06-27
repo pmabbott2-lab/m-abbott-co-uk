@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listMySessions, createSession, getMyRole, listAllSessionsForAdvisor, deleteSession, listUsersWithRoles, setAdvisorRole } from "@/lib/sessions.functions";
+import { checkIsIntroducer } from "@/lib/introducer.functions";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,7 +16,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Mic, MessageSquare, FileText, ArrowRight, Trash2, RotateCcw, ShieldCheck, ShieldOff } from "lucide-react";
+import { Mic, MessageSquare, FileText, ArrowRight, Trash2, RotateCcw, ShieldCheck, ShieldOff, CalendarCheck, CalendarDays, Link2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
@@ -144,8 +145,13 @@ function Home() {
   const allFn = useServerFn(listAllSessionsForAdvisor);
   const createFn = useServerFn(createSession);
 
+  const introducerFn = useServerFn(checkIsIntroducer);
+
   const roleQ = useQuery({ queryKey: ["my-role"], queryFn: () => roleFn() });
   const isAdvisor = roleQ.data?.isAdvisor ?? false;
+
+  const introducerQ = useQuery({ queryKey: ["is-introducer"], queryFn: () => introducerFn() });
+  const isIntroducer = introducerQ.data?.isIntroducer ?? false;
 
   const sessionsQ = useQuery({
     queryKey: ["my-sessions"],
@@ -201,6 +207,20 @@ function Home() {
               <MessageSquare className="w-4 h-4 mr-2" />
               {create.isPending && create.variables === "chat" ? "Starting…" : "Type"}
             </Button>
+            <Link to="/diary">
+              <Button variant="secondary">
+                <CalendarDays className="w-4 h-4 mr-2" />
+                Diary
+              </Button>
+            </Link>
+            {isIntroducer && (
+              <Link to="/introducer">
+                <Button variant="secondary">
+                  <Link2 className="w-4 h-4 mr-2" />
+                  Introducer portal
+                </Button>
+              </Link>
+            )}
           </div>
         </div>
         <div className="rounded-2xl border bg-card divide-y">
@@ -251,7 +271,7 @@ function Home() {
                 : "Choose how you'd like to answer Susan's questions. It takes around 5–10 minutes."}
           </p>
         </div>
-        <div className="grid sm:grid-cols-2 gap-3 mt-5">
+        <div className="grid sm:grid-cols-3 gap-3 mt-5">
           <button
             type="button"
             disabled={create.isPending}
@@ -306,8 +326,37 @@ function Home() {
               </div>
             </div>
           </button>
+          <Link
+            to="/booking"
+            className="group text-left rounded-2xl border p-5 hover:border-primary hover:bg-muted/40 transition block"
+          >
+            <div className="flex items-center gap-3">
+              <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <CalendarCheck className="w-5 h-5" />
+              </span>
+              <div>
+                <div className="font-semibold flex items-center gap-1">
+                  Book an appointment
+                  <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition" />
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  Skip the fact-find for now and pick a time to speak with your advisor.
+                </div>
+              </div>
+            </div>
+          </Link>
         </div>
       </div>
+      {isIntroducer && (
+        <div className="mb-6">
+          <Link to="/introducer">
+            <Button variant="outline" size="sm">
+              <Link2 className="w-4 h-4 mr-2" />
+              Introducer portal
+            </Button>
+          </Link>
+        </div>
+      )}
       <h3 className="text-sm font-medium text-muted-foreground mb-3">Previous sessions</h3>
       <div className="rounded-2xl border bg-card divide-y">
         {sessions.length === 0 && (

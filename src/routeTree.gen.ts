@@ -12,11 +12,17 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as GoSlugRouteImport } from './routes/go.$slug'
+import { Route as BookSlugRouteImport } from './routes/book.$slug'
 import { Route as AuthResetRouteImport } from './routes/auth/reset'
 import { Route as ApiTtsRouteImport } from './routes/api/tts'
 import { Route as ApiSttRouteImport } from './routes/api/stt'
 import { Route as ApiInterviewStepRouteImport } from './routes/api/interview-step'
+import { Route as AuthenticatedIntroducerRouteImport } from './routes/_authenticated/introducer'
 import { Route as AuthenticatedHomeRouteImport } from './routes/_authenticated/home'
+import { Route as AuthenticatedDiaryRouteImport } from './routes/_authenticated/diary'
+import { Route as AuthenticatedBookingRouteImport } from './routes/_authenticated/booking'
+import { Route as ApiSmsInboundRouteImport } from './routes/api/sms/inbound'
 import { Route as ApiAuthRequestPasswordResetRouteImport } from './routes/api/auth/request-password-reset'
 import { Route as AuthenticatedSessionsSessionIdRouteImport } from './routes/_authenticated/sessions.$sessionId'
 import { Route as AuthenticatedInterviewSessionIdRouteImport } from './routes/_authenticated/interview.$sessionId'
@@ -34,6 +40,16 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GoSlugRoute = GoSlugRouteImport.update({
+  id: '/go/$slug',
+  path: '/go/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BookSlugRoute = BookSlugRouteImport.update({
+  id: '/book/$slug',
+  path: '/book/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthResetRoute = AuthResetRouteImport.update({
@@ -56,10 +72,30 @@ const ApiInterviewStepRoute = ApiInterviewStepRouteImport.update({
   path: '/api/interview-step',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedIntroducerRoute = AuthenticatedIntroducerRouteImport.update({
+  id: '/introducer',
+  path: '/introducer',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedHomeRoute = AuthenticatedHomeRouteImport.update({
   id: '/home',
   path: '/home',
   getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedDiaryRoute = AuthenticatedDiaryRouteImport.update({
+  id: '/diary',
+  path: '/diary',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedBookingRoute = AuthenticatedBookingRouteImport.update({
+  id: '/booking',
+  path: '/booking',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const ApiSmsInboundRoute = ApiSmsInboundRouteImport.update({
+  id: '/api/sms/inbound',
+  path: '/api/sms/inbound',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthRequestPasswordResetRoute =
   ApiAuthRequestPasswordResetRouteImport.update({
@@ -89,85 +125,121 @@ const AuthenticatedChatSessionIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRouteWithChildren
+  '/booking': typeof AuthenticatedBookingRoute
+  '/diary': typeof AuthenticatedDiaryRoute
   '/home': typeof AuthenticatedHomeRoute
+  '/introducer': typeof AuthenticatedIntroducerRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
   '/api/tts': typeof ApiTtsRoute
   '/auth/reset': typeof AuthResetRoute
+  '/book/$slug': typeof BookSlugRoute
+  '/go/$slug': typeof GoSlugRoute
   '/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
+  '/api/sms/inbound': typeof ApiSmsInboundRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRouteWithChildren
+  '/booking': typeof AuthenticatedBookingRoute
+  '/diary': typeof AuthenticatedDiaryRoute
   '/home': typeof AuthenticatedHomeRoute
+  '/introducer': typeof AuthenticatedIntroducerRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
   '/api/tts': typeof ApiTtsRoute
   '/auth/reset': typeof AuthResetRoute
+  '/book/$slug': typeof BookSlugRoute
+  '/go/$slug': typeof GoSlugRoute
   '/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
+  '/api/sms/inbound': typeof ApiSmsInboundRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRouteWithChildren
+  '/_authenticated/booking': typeof AuthenticatedBookingRoute
+  '/_authenticated/diary': typeof AuthenticatedDiaryRoute
   '/_authenticated/home': typeof AuthenticatedHomeRoute
+  '/_authenticated/introducer': typeof AuthenticatedIntroducerRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
   '/api/tts': typeof ApiTtsRoute
   '/auth/reset': typeof AuthResetRoute
+  '/book/$slug': typeof BookSlugRoute
+  '/go/$slug': typeof GoSlugRoute
   '/_authenticated/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/_authenticated/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/_authenticated/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
+  '/api/sms/inbound': typeof ApiSmsInboundRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/auth'
+    | '/booking'
+    | '/diary'
     | '/home'
+    | '/introducer'
     | '/api/interview-step'
     | '/api/stt'
     | '/api/tts'
     | '/auth/reset'
+    | '/book/$slug'
+    | '/go/$slug'
     | '/chat/$sessionId'
     | '/interview/$sessionId'
     | '/sessions/$sessionId'
     | '/api/auth/request-password-reset'
+    | '/api/sms/inbound'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/auth'
+    | '/booking'
+    | '/diary'
     | '/home'
+    | '/introducer'
     | '/api/interview-step'
     | '/api/stt'
     | '/api/tts'
     | '/auth/reset'
+    | '/book/$slug'
+    | '/go/$slug'
     | '/chat/$sessionId'
     | '/interview/$sessionId'
     | '/sessions/$sessionId'
     | '/api/auth/request-password-reset'
+    | '/api/sms/inbound'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/_authenticated/booking'
+    | '/_authenticated/diary'
     | '/_authenticated/home'
+    | '/_authenticated/introducer'
     | '/api/interview-step'
     | '/api/stt'
     | '/api/tts'
     | '/auth/reset'
+    | '/book/$slug'
+    | '/go/$slug'
     | '/_authenticated/chat/$sessionId'
     | '/_authenticated/interview/$sessionId'
     | '/_authenticated/sessions/$sessionId'
     | '/api/auth/request-password-reset'
+    | '/api/sms/inbound'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -177,7 +249,10 @@ export interface RootRouteChildren {
   ApiInterviewStepRoute: typeof ApiInterviewStepRoute
   ApiSttRoute: typeof ApiSttRoute
   ApiTtsRoute: typeof ApiTtsRoute
+  BookSlugRoute: typeof BookSlugRoute
+  GoSlugRoute: typeof GoSlugRoute
   ApiAuthRequestPasswordResetRoute: typeof ApiAuthRequestPasswordResetRoute
+  ApiSmsInboundRoute: typeof ApiSmsInboundRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -201,6 +276,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/go/$slug': {
+      id: '/go/$slug'
+      path: '/go/$slug'
+      fullPath: '/go/$slug'
+      preLoaderRoute: typeof GoSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/book/$slug': {
+      id: '/book/$slug'
+      path: '/book/$slug'
+      fullPath: '/book/$slug'
+      preLoaderRoute: typeof BookSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth/reset': {
@@ -231,12 +320,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiInterviewStepRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/introducer': {
+      id: '/_authenticated/introducer'
+      path: '/introducer'
+      fullPath: '/introducer'
+      preLoaderRoute: typeof AuthenticatedIntroducerRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/home': {
       id: '/_authenticated/home'
       path: '/home'
       fullPath: '/home'
       preLoaderRoute: typeof AuthenticatedHomeRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/diary': {
+      id: '/_authenticated/diary'
+      path: '/diary'
+      fullPath: '/diary'
+      preLoaderRoute: typeof AuthenticatedDiaryRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/booking': {
+      id: '/_authenticated/booking'
+      path: '/booking'
+      fullPath: '/booking'
+      preLoaderRoute: typeof AuthenticatedBookingRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/api/sms/inbound': {
+      id: '/api/sms/inbound'
+      path: '/api/sms/inbound'
+      fullPath: '/api/sms/inbound'
+      preLoaderRoute: typeof ApiSmsInboundRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/auth/request-password-reset': {
       id: '/api/auth/request-password-reset'
@@ -270,14 +387,20 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedBookingRoute: typeof AuthenticatedBookingRoute
+  AuthenticatedDiaryRoute: typeof AuthenticatedDiaryRoute
   AuthenticatedHomeRoute: typeof AuthenticatedHomeRoute
+  AuthenticatedIntroducerRoute: typeof AuthenticatedIntroducerRoute
   AuthenticatedChatSessionIdRoute: typeof AuthenticatedChatSessionIdRoute
   AuthenticatedInterviewSessionIdRoute: typeof AuthenticatedInterviewSessionIdRoute
   AuthenticatedSessionsSessionIdRoute: typeof AuthenticatedSessionsSessionIdRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedBookingRoute: AuthenticatedBookingRoute,
+  AuthenticatedDiaryRoute: AuthenticatedDiaryRoute,
   AuthenticatedHomeRoute: AuthenticatedHomeRoute,
+  AuthenticatedIntroducerRoute: AuthenticatedIntroducerRoute,
   AuthenticatedChatSessionIdRoute: AuthenticatedChatSessionIdRoute,
   AuthenticatedInterviewSessionIdRoute: AuthenticatedInterviewSessionIdRoute,
   AuthenticatedSessionsSessionIdRoute: AuthenticatedSessionsSessionIdRoute,
@@ -303,7 +426,10 @@ const rootRouteChildren: RootRouteChildren = {
   ApiInterviewStepRoute: ApiInterviewStepRoute,
   ApiSttRoute: ApiSttRoute,
   ApiTtsRoute: ApiTtsRoute,
+  BookSlugRoute: BookSlugRoute,
+  GoSlugRoute: GoSlugRoute,
   ApiAuthRequestPasswordResetRoute: ApiAuthRequestPasswordResetRoute,
+  ApiSmsInboundRoute: ApiSmsInboundRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

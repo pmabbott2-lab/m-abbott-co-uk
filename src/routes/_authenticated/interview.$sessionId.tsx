@@ -7,6 +7,7 @@ import { getSession, submitSession, setSessionPosition } from "@/lib/sessions.fu
 import { AppShell } from "@/components/AppShell";
 import { useAudioPlayback } from "@/components/Avatar";
 import { Avatar3D } from "@/components/Avatar3D";
+import { PostCompletionBooking } from "@/components/PostCompletionBooking";
 import {
   getSpeechRecognitionCtor,
   isBrowserSttSupported,
@@ -1068,18 +1069,22 @@ function InterviewPage() {
         </div>
 
         <div className="flex flex-col items-center text-center gap-6 bg-card rounded-3xl border p-6 sm:p-10">
-          <Avatar3D
-            speaking={playing}
-            listening={listening}
-            getAmplitude={getAmplitude}
-            usingBrowserVoice={usingBrowserVoice}
-          />
+          {!done && (
+            <Avatar3D
+              speaking={playing}
+              listening={listening}
+              getAmplitude={getAmplitude}
+              usingBrowserVoice={usingBrowserVoice}
+            />
+          )}
           {done ? (
-            <>
-              <h2 className="text-2xl font-semibold">All done!</h2>
-              <p className="text-muted-foreground">Review your answers, edit anything, and submit to your advisor.</p>
-              <Button size="lg" onClick={handleFinish}>Review & submit</Button>
-            </>
+            <PostCompletionBooking
+              sessionId={sessionId}
+              channel="voice"
+              defaultName={sessionQ.data?.customer?.full_name ?? ""}
+              defaultEmail={sessionQ.data?.customer?.email ?? ""}
+              onComplete={handleFinish}
+            />
           ) : (
             <>
               <p className="text-lg font-medium leading-snug min-h-[3rem]">

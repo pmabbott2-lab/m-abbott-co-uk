@@ -161,6 +161,216 @@ export type Database = {
         }
         Relationships: []
       }
+      advisor_availability: {
+        Row: {
+          active: boolean
+          advisor_id: string
+          day_of_week: number
+          end_time: string
+          id: string
+          slot_minutes: number
+          start_time: string
+        }
+        Insert: {
+          active?: boolean
+          advisor_id: string
+          day_of_week: number
+          end_time: string
+          id?: string
+          slot_minutes?: number
+          start_time: string
+        }
+        Update: {
+          active?: boolean
+          advisor_id?: string
+          day_of_week?: number
+          end_time?: string
+          id?: string
+          slot_minutes?: number
+          start_time?: string
+        }
+        Relationships: []
+      }
+      appointments: {
+        Row: {
+          advisor_id: string
+          created_at: string
+          customer_email: string | null
+          customer_name: string
+          customer_phone: string
+          ends_at: string
+          id: string
+          introducer_id: string | null
+          lead_id: string | null
+          lead_source: Database["public"]["Enums"]["lead_source"] | null
+          notes: string | null
+          referral_channel: Database["public"]["Enums"]["referral_channel"] | null
+          session_id: string | null
+          starts_at: string
+          status: Database["public"]["Enums"]["appointment_status"]
+        }
+        Insert: {
+          advisor_id: string
+          created_at?: string
+          customer_email?: string | null
+          customer_name: string
+          customer_phone: string
+          ends_at: string
+          id?: string
+          introducer_id?: string | null
+          lead_id?: string | null
+          lead_source?: Database["public"]["Enums"]["lead_source"] | null
+          notes?: string | null
+          referral_channel?: Database["public"]["Enums"]["referral_channel"] | null
+          session_id?: string | null
+          starts_at: string
+          status?: Database["public"]["Enums"]["appointment_status"]
+        }
+        Update: {
+          advisor_id?: string
+          created_at?: string
+          customer_email?: string | null
+          customer_name?: string
+          customer_phone?: string
+          ends_at?: string
+          id?: string
+          introducer_id?: string | null
+          lead_id?: string | null
+          lead_source?: Database["public"]["Enums"]["lead_source"] | null
+          notes?: string | null
+          referral_channel?: Database["public"]["Enums"]["referral_channel"] | null
+          session_id?: string | null
+          starts_at?: string
+          status?: Database["public"]["Enums"]["appointment_status"]
+        }
+        Relationships: []
+      }
+      sms_messages: {
+        Row: {
+          appointment_id: string | null
+          body: string
+          created_at: string
+          direction: string
+          from_number: string
+          id: string
+          lead_id: string | null
+          to_number: string
+          twilio_sid: string | null
+        }
+        Insert: {
+          appointment_id?: string | null
+          body: string
+          created_at?: string
+          direction: string
+          from_number: string
+          id?: string
+          lead_id?: string | null
+          to_number: string
+          twilio_sid?: string | null
+        }
+        Update: {
+          appointment_id?: string | null
+          body?: string
+          created_at?: string
+          direction?: string
+          from_number?: string
+          id?: string
+          lead_id?: string | null
+          to_number?: string
+          twilio_sid?: string | null
+        }
+        Relationships: []
+      }
+      introducer_leads: {
+        Row: {
+          appointment_id: string | null
+          channel: Database["public"]["Enums"]["referral_channel"]
+          created_at: string
+          customer_email: string | null
+          customer_name: string
+          customer_phone: string | null
+          id: string
+          introducer_id: string
+          lead_source: Database["public"]["Enums"]["lead_source"]
+          notes: string | null
+          session_id: string | null
+          status: string
+        }
+        Insert: {
+          appointment_id?: string | null
+          channel?: Database["public"]["Enums"]["referral_channel"]
+          created_at?: string
+          customer_email?: string | null
+          customer_name: string
+          customer_phone?: string | null
+          id?: string
+          introducer_id: string
+          lead_source?: Database["public"]["Enums"]["lead_source"]
+          notes?: string | null
+          session_id?: string | null
+          status?: string
+        }
+        Update: {
+          appointment_id?: string | null
+          channel?: Database["public"]["Enums"]["referral_channel"]
+          created_at?: string
+          customer_email?: string | null
+          customer_name?: string
+          customer_phone?: string | null
+          id?: string
+          introducer_id?: string
+          lead_source?: Database["public"]["Enums"]["lead_source"]
+          notes?: string | null
+          session_id?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "introducer_leads_introducer_id_fkey"
+            columns: ["introducer_id"]
+            isOneToOne: false
+            referencedRelation: "introducers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "introducer_leads_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "interview_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      introducers: {
+        Row: {
+          active: boolean
+          company_name: string
+          contact_email: string | null
+          created_at: string
+          id: string
+          slug: string
+          user_id: string
+        }
+        Insert: {
+          active?: boolean
+          company_name: string
+          contact_email?: string | null
+          created_at?: string
+          id?: string
+          slug: string
+          user_id: string
+        }
+        Update: {
+          active?: boolean
+          company_name?: string
+          contact_email?: string | null
+          created_at?: string
+          id?: string
+          slug?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -217,7 +427,10 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "customer" | "advisor"
+      app_role: "customer" | "advisor" | "introducer"
+      appointment_status: "pending" | "confirmed" | "cancelled" | "completed"
+      lead_source: "web" | "telephone" | "mobile" | "introducer_portal" | "referral_link"
+      referral_channel: "voice" | "text" | "direct_booking" | "manual"
       session_status: "in_progress" | "submitted"
     }
     CompositeTypes: {
@@ -346,7 +559,10 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["customer", "advisor"],
+      app_role: ["customer", "advisor", "introducer"],
+      appointment_status: ["pending", "confirmed", "cancelled", "completed"],
+      lead_source: ["web", "telephone", "mobile", "introducer_portal", "referral_link"],
+      referral_channel: ["voice", "text", "direct_booking", "manual"],
       session_status: ["in_progress", "submitted"],
     },
   },

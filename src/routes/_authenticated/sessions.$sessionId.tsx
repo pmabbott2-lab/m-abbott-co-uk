@@ -13,9 +13,11 @@ import {
 } from "@/lib/sessions.functions";
 import { SECTIONS } from "@/lib/interview-script";
 import { mergeKeyFacts, formatGBP as fmtGBP } from "@/lib/structured-answers";
+import { getAppointmentForSession } from "@/lib/booking.functions";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { format } from "date-fns";
+import { CalendarCheck } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/sessions/$sessionId")({
@@ -32,9 +34,12 @@ function SessionDetail() {
   const noteFn = useServerFn(addAdvisorNote);
   const notesFn = useServerFn(listNotes);
 
+  const apptFn = useServerFn(getAppointmentForSession);
+
   const q = useQuery({ queryKey: ["session", sessionId], queryFn: () => getFn({ data: { sessionId } }) });
   const roleQ = useQuery({ queryKey: ["my-role"], queryFn: () => roleFn() });
   const notesQ = useQuery({ queryKey: ["notes", sessionId], queryFn: () => notesFn({ data: { sessionId } }) });
+  const apptQ = useQuery({ queryKey: ["appointment", sessionId], queryFn: () => apptFn({ data: { sessionId } }) });
 
   const [note, setNote] = useState("");
 
@@ -96,6 +101,33 @@ function SessionDetail() {
         <LenderExampleCard sessionId={sessionId} />
 
         <KeyFactsCard facts={keyFacts} />
+
+        {apptQ.data && (
+          <div className="rounded-2xl border bg-card p-5">
+            <div className="flex items-center gap-2 font-semibold mb-2">
+              <CalendarCheck className="w-4 h-4 text-accent" />
+              Appointment booked
+            </div>
+            <dl className="grid sm:grid-cols-2 gap-3 text-sm">
+              <div>
+                <dt className="text-muted-foreground">Date &amp; time</dt>
+                <dd className="font-medium">{format(new Date(apptQ.data.starts_at), "EEE d MMM yyyy, HH:mm")}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Duration</dt>
+                <dd className="font-medium">30 minutes</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Name</dt>
+                <dd className="font-medium">{apptQ.data.customer_name}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Phone</dt>
+                <dd className="font-medium">{apptQ.data.customer_phone}</dd>
+              </div>
+            </dl>
+          </div>
+        )}
 
         {(session as { summary?: string | null }).summary && (
           <div className="rounded-2xl border bg-card p-5">

@@ -5,6 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { getSession, submitSession } from "@/lib/sessions.functions";
 import { AppShell } from "@/components/AppShell";
+import { PostCompletionBooking } from "@/components/PostCompletionBooking";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ArrowLeft, Mic, Send } from "lucide-react";
@@ -627,10 +628,10 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
             )}
 
             {done && (
-              <div className="flex justify-center pt-3">
-                <Button size="lg" onClick={handleFinish} disabled={submitting}>
-                  {submitting ? "Submitting…" : "Review & submit"}
-                </Button>
+              <div className="text-center pt-3 text-sm text-muted-foreground">
+                {submitting
+                  ? "Submitting…"
+                  : "Choose an appointment time below, or skip to review your answers."}
               </div>
             )}
           </div>
@@ -667,6 +668,18 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
             </form>
           </div>
         </div>
+
+        {done && (
+          <div className="mt-6 bg-card rounded-3xl border p-6 sm:p-8">
+            <PostCompletionBooking
+              sessionId={sessionId}
+              channel="text"
+              defaultName={sessionQ.data?.customer?.full_name ?? ""}
+              defaultEmail={sessionQ.data?.customer?.email ?? ""}
+              onComplete={handleFinish}
+            />
+          </div>
+        )}
 
         <p className="text-xs text-muted-foreground text-center mt-3">
           Susan is an AI assistant. Your answers are saved for your mortgage adviser — this is assistive only, not mortgage advice.
