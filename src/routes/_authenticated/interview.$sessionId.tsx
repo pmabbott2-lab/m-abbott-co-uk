@@ -6,7 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getSession, submitSession, setSessionPosition } from "@/lib/sessions.functions";
 import { AppShell } from "@/components/AppShell";
 import { useAudioPlayback } from "@/components/Avatar";
-import { Avatar3D } from "@/components/Avatar3D";
+import { RealtimeAvatar } from "@/components/RealtimeAvatar";
 import { PostCompletionBooking } from "@/components/PostCompletionBooking";
 import {
   getSpeechRecognitionCtor,
@@ -1070,7 +1070,7 @@ function InterviewPage() {
 
         <div className="flex flex-col items-center text-center gap-6 bg-card rounded-3xl border p-6 sm:p-10">
           {!done && (
-            <Avatar3D
+            <RealtimeAvatar
               speaking={playing}
               listening={listening}
               getAmplitude={getAmplitude}

@@ -1,4 +1,4 @@
-import { createFileRoute, redirect, Link } from "@tanstack/react-router";
+import { createFileRoute, redirect, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
@@ -15,9 +15,9 @@ import {
   updateIntroducerProfile,
 } from "@/lib/introducer.functions";
 import { sendLeadBookingSms } from "@/lib/booking.functions";
-import { bookingLinkForSlug, referralLinkForSlug } from "@/lib/referral";
+import { referralLinkForSlug } from "@/lib/referral";
 import { format, formatDistanceToNow } from "date-fns";
-import { Calendar, Check, Copy, Link2, MessageSquare, UserPlus } from "lucide-react";
+import { Calendar, Check, Copy, Hash, Link2, MessageSquare, UserPlus } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/introducer")({
   component: IntroducerPortal,
@@ -43,6 +43,7 @@ function CopyLinkButton({ url, label }: { url: string; label: string }) {
 
 function IntroducerPortal() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const roleFn = useServerFn(checkIsIntroducer);
   const profileFn = useServerFn(getIntroducerProfile);
   const updateFn = useServerFn(updateIntroducerProfile);
@@ -81,17 +82,27 @@ function IntroducerPortal() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["introducer-profile"] }),
   });
 
+  // Book on behalf of a customer: capture their details as a lead, then drop the
+  // introducer straight into the diary to pick a slot. The lead carries the
+  // introducer_id, so the resulting appointment stays attributed to them.
   const createLead = useMutation({
     mutationFn: () =>
       createLeadFn({
         data: { customerName, customerPhone, customerEmail, notes },
       }),
-    onSuccess: () => {
+    onSuccess: (lead) => {
       setCustomerName("");
       setCustomerPhone("");
       setCustomerEmail("");
       setNotes("");
       qc.invalidateQueries({ queryKey: ["introducer-referrals"] });
+      if (profileQ.data) {
+        navigate({
+          to: "/book/$slug",
+          params: { slug: profileQ.data.slug },
+          search: { lead: lead.id },
+        });
+      }
     },
   });
 
@@ -122,7 +133,7 @@ function IntroducerPortal() {
 
   const profile = profileQ.data;
   const referralUrl = referralLinkForSlug(profile.slug);
-  const bookingUrl = bookingLinkForSlug(profile.slug);
+  const companyCode = (profile as { company_code?: string | null }).company_code ?? null;
   const leads = referralsQ.data?.leads ?? [];
   const appointments = referralsQ.data?.appointments ?? [];
 
@@ -132,36 +143,48 @@ function IntroducerPortal() {
         <div>
           <h2 className="text-2xl font-semibold">Introducer portal</h2>
           <p className="text-muted-foreground text-sm mt-1">
-            Separate from the fact-find app. Share links, book appointments, and text customers who
-            prefer not to self-serve.
+            Share your link so customers can self-serve on Mortgage Hub, or book an appointment for a
+            customer yourself. Either way, the referral is recorded against you.
           </p>
         </div>
+
+        {companyCode && (
+          <section className="rounded-2xl border bg-card p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 font-medium">
+                <Hash className="w-4 h-4" />
+                Your company code
+              </div>
+              <p className="text-sm text-muted-foreground mt-1">
+                Share this 4-digit code with colleagues so they join the same company. Referrals from
+                anyone in your company are credited together.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-3xl font-semibold tracking-widest">{companyCode}</span>
+              <CopyLinkButton url={companyCode} label="Copy code" />
+            </div>
+          </section>
+        )}
 
         <section className="rounded-2xl border bg-card p-6 space-y-4">
           <div className="flex items-center gap-2 font-medium">
             <Link2 className="w-4 h-4" />
-            Links for your website
+            Your shareable link
           </div>
-          <div className="space-y-3">
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Direct booking (skips fact-find)</p>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Input readOnly value={bookingUrl} className="font-mono text-sm" />
-                <CopyLinkButton url={bookingUrl} label="Copy booking link" />
-              </div>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Short referral link (redirects to booking)</p>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Input readOnly value={referralUrl} className="font-mono text-sm" />
-                <CopyLinkButton url={referralUrl} label="Copy short link" />
-              </div>
-            </div>
+          <p className="text-sm text-muted-foreground">
+            One link for your website, emails, or socials. It takes customers to Mortgage Hub where
+            they can choose a verbal interview, a text interview, or book a call — all attributed to
+            you.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Input readOnly value={referralUrl} className="font-mono text-sm" />
+            <CopyLinkButton url={referralUrl} label="Copy link" />
           </div>
           <p className="text-xs text-muted-foreground">
             Embed:{" "}
             <code className="bg-muted px-1.5 py-0.5 rounded text-[11px]">
-              {`<a href="${bookingUrl}">Book your mortgage appointment</a>`}
+              {`<a href="${referralUrl}">Start your mortgage journey</a>`}
             </code>
           </p>
         </section>
@@ -186,10 +209,11 @@ function IntroducerPortal() {
         <section className="rounded-2xl border bg-card p-6 space-y-4">
           <div className="flex items-center gap-2 font-medium">
             <UserPlus className="w-4 h-4" />
-            Log a lead manually
+            Book an appointment for a customer
           </div>
           <p className="text-sm text-muted-foreground">
-            For customers who won&apos;t self-serve. Book them into the diary or text them a booking link.
+            For customers who&apos;d rather not self-serve. Enter their details and we&apos;ll take you
+            straight to the diary to pick a time — booked under your name.
           </p>
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -210,8 +234,12 @@ function IntroducerPortal() {
             </div>
           </div>
           <Button disabled={createLead.isPending || !customerName || !customerPhone} onClick={() => createLead.mutate()}>
-            {createLead.isPending ? "Saving…" : "Save lead"}
+            <Calendar className="w-4 h-4 mr-2" />
+            {createLead.isPending ? "Opening diary…" : "Book an appointment for a customer"}
           </Button>
+          {createLead.isError && (
+            <p className="text-sm text-destructive">{(createLead.error as Error).message}</p>
+          )}
         </section>
 
         <section className="space-y-3">

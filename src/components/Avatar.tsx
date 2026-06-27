@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import avatarImg from "@/assets/avatar.png";
+import avatarImg from "@/assets/susan.png";
 import {
   isOpenAIQuotaError,
   pickBritishFemaleVoice,
@@ -7,6 +7,12 @@ import {
   preloadBrowserVoices,
   speakWithBrowser,
 } from "@/lib/browser-speech";
+import {
+  REALTIME_AVATAR_ENABLED,
+  encodePcm16kMono,
+  getRealtimeAvatarSink,
+  type RealtimeAvatarSink,
+} from "@/lib/realtime-avatar-bridge";
 
 type TtsMode = "openai" | "browser";
 
@@ -32,7 +38,7 @@ export function Avatar({ speaking, listening, size = 220 }: { speaking?: boolean
         alt="Interview guide"
         width={size}
         height={size}
-        className="rounded-full relative"
+        className="rounded-full object-cover object-top relative"
         style={{ transform: speaking ? "scale(1.02)" : "scale(1)", transition: "transform 200ms" }}
       />
       {speaking && (
@@ -330,8 +336,70 @@ export function useAudioPlayback(getAuthToken?: () => Promise<string | null>) {
     }
   };
 
+  /**
+   * Realtime-avatar (Simli) playback. Decodes the MP3 to PCM, hands it to the
+   * avatar to play + lip-sync (so we do NOT play it locally — avoids double
+   * audio), and drives the karaoke reveal from the decoded buffer's known
+   * duration instead of the analyser. Only ever called when the flag is on.
+   */
+  const playViaRealtimeAvatar = async (blob: Blob, sink: RealtimeAvatarSink, opts?: PlayOpts) => {
+    const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AC) throw new Error("Web audio is unavailable");
+    const ctx = audioCtxRef.current ?? new AC();
+    audioCtxRef.current = ctx;
+    if (ctx.state === "suspended") await ctx.resume();
+    const arrayBuffer = await blob.arrayBuffer();
+    const buffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+    const pcm = encodePcm16kMono(buffer);
+    await sink.speak(pcm);
+
+    const report = (v: number) => { if (!opts?.noReveal) setProgress(v); };
+    setProgress(0);
+    const dur = buffer.duration;
+    const leadSec = (opts?.leadMs ?? 1000) / 1000;
+    await new Promise<void>((resolve) => {
+      const startMs = performance.now();
+      let nearEndFired = false;
+      const tick = () => {
+        const elapsed = (performance.now() - startMs) / 1000;
+        const p = dur ? Math.min(1, elapsed / dur) : 1;
+        report(p);
+        if (!nearEndFired && opts?.onNearEnd && dur - elapsed <= leadSec) {
+          nearEndFired = true;
+          opts.onNearEnd();
+        }
+        if (p < 1) {
+          progressRafRef.current = requestAnimationFrame(tick);
+        } else {
+          report(1);
+          setPlaying(false);
+          resolve();
+        }
+      };
+      setPlaying(true);
+      progressRafRef.current = requestAnimationFrame(tick);
+    });
+  };
+
   const playWithOpenAi = async (text: string, token: string | null, opts?: PlayOpts) => {
     const blob = await fetchTtsBlob(text, token);
+
+    // Flag-gated realtime-avatar path. When VITE_REALTIME_AVATAR is off,
+    // getRealtimeAvatarSink() always returns null, so this block is inert and
+    // the default local-audio path below is byte-for-byte unchanged.
+    if (REALTIME_AVATAR_ENABLED) {
+      const sink = getRealtimeAvatarSink();
+      if (sink?.isReady()) {
+        try {
+          await playViaRealtimeAvatar(blob, sink, opts);
+          return;
+        } catch (avatarError) {
+          console.warn("Realtime avatar playback failed — using local audio", avatarError);
+          // fall through to normal local playback
+        }
+      }
+    }
+
     try {
       await playWithHtmlAudio(blob, opts);
     } catch (htmlError) {
@@ -381,6 +449,8 @@ export function useAudioPlayback(getAuthToken?: () => Promise<string | null>) {
     sourceRef.current = null;
     if (progressRafRef.current) cancelAnimationFrame(progressRafRef.current);
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    // Inert when the flag is off (getRealtimeAvatarSink() returns null).
+    if (REALTIME_AVATAR_ENABLED) getRealtimeAvatarSink()?.clear();
     setProgress(1);
     setPlaying(false);
   };

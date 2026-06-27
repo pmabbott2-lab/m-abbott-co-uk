@@ -74,13 +74,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Mortgage Test" },
+      { title: "Mortgage Hub" },
       { name: "description", content: "Advisor Ally is a mobile app that collects initial customer information through an avatar-led verbal interview." },
-      { property: "og:title", content: "Mortgage Test" },
+      { property: "og:title", content: "Mortgage Hub" },
       { property: "og:description", content: "Advisor Ally is a mobile app that collects initial customer information through an avatar-led verbal interview." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:title", content: "Mortgage Test" },
+      { name: "twitter:title", content: "Mortgage Hub" },
       { name: "twitter:description", content: "Advisor Ally is a mobile app that collects initial customer information through an avatar-led verbal interview." },
     ],
     links: [

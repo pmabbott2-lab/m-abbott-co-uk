@@ -9,15 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as RegisterRouteImport } from './routes/register'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as RafCodeRouteImport } from './routes/raf.$code'
 import { Route as GoSlugRouteImport } from './routes/go.$slug'
 import { Route as BookSlugRouteImport } from './routes/book.$slug'
 import { Route as AuthResetRouteImport } from './routes/auth/reset'
 import { Route as ApiTtsRouteImport } from './routes/api/tts'
 import { Route as ApiSttRouteImport } from './routes/api/stt'
 import { Route as ApiInterviewStepRouteImport } from './routes/api/interview-step'
+import { Route as ApiAvatarTokenRouteImport } from './routes/api/avatar-token'
 import { Route as AuthenticatedIntroducerRouteImport } from './routes/_authenticated/introducer'
 import { Route as AuthenticatedHomeRouteImport } from './routes/_authenticated/home'
 import { Route as AuthenticatedDiaryRouteImport } from './routes/_authenticated/diary'
@@ -28,6 +31,11 @@ import { Route as AuthenticatedSessionsSessionIdRouteImport } from './routes/_au
 import { Route as AuthenticatedInterviewSessionIdRouteImport } from './routes/_authenticated/interview.$sessionId'
 import { Route as AuthenticatedChatSessionIdRouteImport } from './routes/_authenticated/chat.$sessionId'
 
+const RegisterRoute = RegisterRouteImport.update({
+  id: '/register',
+  path: '/register',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
@@ -40,6 +48,11 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RafCodeRoute = RafCodeRouteImport.update({
+  id: '/raf/$code',
+  path: '/raf/$code',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GoSlugRoute = GoSlugRouteImport.update({
@@ -70,6 +83,11 @@ const ApiSttRoute = ApiSttRouteImport.update({
 const ApiInterviewStepRoute = ApiInterviewStepRouteImport.update({
   id: '/api/interview-step',
   path: '/api/interview-step',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAvatarTokenRoute = ApiAvatarTokenRouteImport.update({
+  id: '/api/avatar-token',
+  path: '/api/avatar-token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedIntroducerRoute = AuthenticatedIntroducerRouteImport.update({
@@ -125,16 +143,19 @@ const AuthenticatedChatSessionIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRouteWithChildren
+  '/register': typeof RegisterRoute
   '/booking': typeof AuthenticatedBookingRoute
   '/diary': typeof AuthenticatedDiaryRoute
   '/home': typeof AuthenticatedHomeRoute
   '/introducer': typeof AuthenticatedIntroducerRoute
+  '/api/avatar-token': typeof ApiAvatarTokenRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
   '/api/tts': typeof ApiTtsRoute
   '/auth/reset': typeof AuthResetRoute
   '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
+  '/raf/$code': typeof RafCodeRoute
   '/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
@@ -144,16 +165,19 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRouteWithChildren
+  '/register': typeof RegisterRoute
   '/booking': typeof AuthenticatedBookingRoute
   '/diary': typeof AuthenticatedDiaryRoute
   '/home': typeof AuthenticatedHomeRoute
   '/introducer': typeof AuthenticatedIntroducerRoute
+  '/api/avatar-token': typeof ApiAvatarTokenRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
   '/api/tts': typeof ApiTtsRoute
   '/auth/reset': typeof AuthResetRoute
   '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
+  '/raf/$code': typeof RafCodeRoute
   '/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
@@ -165,16 +189,19 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRouteWithChildren
+  '/register': typeof RegisterRoute
   '/_authenticated/booking': typeof AuthenticatedBookingRoute
   '/_authenticated/diary': typeof AuthenticatedDiaryRoute
   '/_authenticated/home': typeof AuthenticatedHomeRoute
   '/_authenticated/introducer': typeof AuthenticatedIntroducerRoute
+  '/api/avatar-token': typeof ApiAvatarTokenRoute
   '/api/interview-step': typeof ApiInterviewStepRoute
   '/api/stt': typeof ApiSttRoute
   '/api/tts': typeof ApiTtsRoute
   '/auth/reset': typeof AuthResetRoute
   '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
+  '/raf/$code': typeof RafCodeRoute
   '/_authenticated/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/_authenticated/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/_authenticated/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
@@ -186,16 +213,19 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/register'
     | '/booking'
     | '/diary'
     | '/home'
     | '/introducer'
+    | '/api/avatar-token'
     | '/api/interview-step'
     | '/api/stt'
     | '/api/tts'
     | '/auth/reset'
     | '/book/$slug'
     | '/go/$slug'
+    | '/raf/$code'
     | '/chat/$sessionId'
     | '/interview/$sessionId'
     | '/sessions/$sessionId'
@@ -205,16 +235,19 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/register'
     | '/booking'
     | '/diary'
     | '/home'
     | '/introducer'
+    | '/api/avatar-token'
     | '/api/interview-step'
     | '/api/stt'
     | '/api/tts'
     | '/auth/reset'
     | '/book/$slug'
     | '/go/$slug'
+    | '/raf/$code'
     | '/chat/$sessionId'
     | '/interview/$sessionId'
     | '/sessions/$sessionId'
@@ -225,16 +258,19 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/register'
     | '/_authenticated/booking'
     | '/_authenticated/diary'
     | '/_authenticated/home'
     | '/_authenticated/introducer'
+    | '/api/avatar-token'
     | '/api/interview-step'
     | '/api/stt'
     | '/api/tts'
     | '/auth/reset'
     | '/book/$slug'
     | '/go/$slug'
+    | '/raf/$code'
     | '/_authenticated/chat/$sessionId'
     | '/_authenticated/interview/$sessionId'
     | '/_authenticated/sessions/$sessionId'
@@ -246,17 +282,27 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRouteWithChildren
+  RegisterRoute: typeof RegisterRoute
+  ApiAvatarTokenRoute: typeof ApiAvatarTokenRoute
   ApiInterviewStepRoute: typeof ApiInterviewStepRoute
   ApiSttRoute: typeof ApiSttRoute
   ApiTtsRoute: typeof ApiTtsRoute
   BookSlugRoute: typeof BookSlugRoute
   GoSlugRoute: typeof GoSlugRoute
+  RafCodeRoute: typeof RafCodeRoute
   ApiAuthRequestPasswordResetRoute: typeof ApiAuthRequestPasswordResetRoute
   ApiSmsInboundRoute: typeof ApiSmsInboundRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/register': {
+      id: '/register'
+      path: '/register'
+      fullPath: '/register'
+      preLoaderRoute: typeof RegisterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth': {
       id: '/auth'
       path: '/auth'
@@ -276,6 +322,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/raf/$code': {
+      id: '/raf/$code'
+      path: '/raf/$code'
+      fullPath: '/raf/$code'
+      preLoaderRoute: typeof RafCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/go/$slug': {
@@ -318,6 +371,13 @@ declare module '@tanstack/react-router' {
       path: '/api/interview-step'
       fullPath: '/api/interview-step'
       preLoaderRoute: typeof ApiInterviewStepRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/avatar-token': {
+      id: '/api/avatar-token'
+      path: '/api/avatar-token'
+      fullPath: '/api/avatar-token'
+      preLoaderRoute: typeof ApiAvatarTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/introducer': {
@@ -423,11 +483,14 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRouteWithChildren,
+  RegisterRoute: RegisterRoute,
+  ApiAvatarTokenRoute: ApiAvatarTokenRoute,
   ApiInterviewStepRoute: ApiInterviewStepRoute,
   ApiSttRoute: ApiSttRoute,
   ApiTtsRoute: ApiTtsRoute,
   BookSlugRoute: BookSlugRoute,
   GoSlugRoute: GoSlugRoute,
+  RafCodeRoute: RafCodeRoute,
   ApiAuthRequestPasswordResetRoute: ApiAuthRequestPasswordResetRoute,
   ApiSmsInboundRoute: ApiSmsInboundRoute,
 }

@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { chatCompletion } from "@/lib/ai-gateway.server";
 import { extractStructuredFields, parseMoneyFromText, computeLoanAmount, formatGBP } from "@/lib/structured-answers";
 import { resolveAddress, isLikelyPostcode } from "@/lib/address-lookup.server";
+import { ageFromText } from "@/lib/dob-parse";
 import { getQuestion, nextStep, findSection, SECTIONS, ACKNOWLEDGEMENTS, ackClip, firstGreeting, firstNameFromFullName, type Section, type AnswersMap } from "@/lib/interview-script";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
@@ -283,7 +284,7 @@ export const Route = createFileRoute("/api/interview-step")({
           // Interview complete — generate a written summary for the advisor
           const { data: allAnswers } = await supabase
             .from("interview_answers")
-            .select("section, field_label, value")
+            .select("section, field_key, field_label, value")
             .eq("session_id", body.sessionId);
 
           const grouped: Record<string, string[]> = {};
@@ -296,6 +297,15 @@ export const Route = createFileRoute("/api/interview-step")({
             .map(([s, lines]) => `## ${s}\n${lines.join("\n")}`)
             .join("\n\n");
 
+          // Compute the customer's age deterministically from their DOB so the
+          // model never has to (and never gets) the arithmetic wrong.
+          const dobAnswer = (allAnswers ?? []).find((a) => a.field_key === "date_of_birth");
+          const age = dobAnswer?.value ? ageFromText(dobAnswer.value) : null;
+          const ageNote =
+            age != null
+              ? `\n\nThe customer's current age is ${age} (already calculated accurately from their date of birth). Use this exact figure; do not recalculate the age yourself.`
+              : "";
+
           let summary = "";
           try {
             summary = await chatCompletion({
@@ -303,9 +313,9 @@ export const Route = createFileRoute("/api/interview-step")({
                 {
                   role: "system",
                   content:
-                    "You are a UK mortgage advisor's assistant. Write a concise, professional client summary in plain English suitable for the advisor's file. Use short paragraphs grouped by Personal, Employment & income, Outgoings & credit, and Property & mortgage need. Do not invent details — use only what the customer provided. End with a one-line 'Recommended next step' if obvious.",
+                    "You are a UK mortgage advisor's assistant. Write a concise, professional client summary in plain English suitable for the advisor's file. Use short paragraphs grouped by Personal, Employment & income, Outgoings & credit, and Property & mortgage need. Do not invent details — use only what the customer provided. If an age is supplied, use it verbatim and never compute ages yourself. End with a one-line 'Recommended next step' if obvious.",
                 },
-                { role: "user", content: `Customer fact-find answers:\n\n${factsText}` },
+                { role: "user", content: `Customer fact-find answers:\n\n${factsText}${ageNote}` },
               ],
               temperature: 0.2,
             });

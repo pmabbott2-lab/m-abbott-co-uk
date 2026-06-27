@@ -10,6 +10,43 @@ function slugify(value: string): string {
     .slice(0, 40);
 }
 
+// The introducers.company_code column only exists once the company/advisor codes
+// migration has been applied. Treat "missing column/table" errors as "no code"
+// so the portal keeps working before the user runs APPLY_NEW_FEATURES.sql.
+function isMissingColumnOrTable(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const code = error.code ?? "";
+  const msg = (error.message ?? "").toLowerCase();
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    code === "PGRST204" ||
+    code === "PGRST205" ||
+    msg.includes("does not exist") ||
+    msg.includes("schema cache") ||
+    msg.includes("company_code")
+  );
+}
+
+// A company code is a shared 4-digit number: multiple introducer user accounts
+// can belong to the same company by carrying the same code. Codes are shared, so
+// generation only needs to avoid clashing with a DIFFERENT existing company.
+export async function generateUniqueCompanyCode(): Promise<string> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  for (let i = 0; i < 200; i += 1) {
+    const code = Math.floor(Math.random() * 10000).toString().padStart(4, "0");
+    const { data, error } = await supabaseAdmin
+      .from("introducers")
+      .select("id")
+      .eq("company_code", code)
+      .limit(1)
+      .maybeSingle();
+    if (error && !isMissingColumnOrTable(error)) throw new Error(error.message);
+    if (!data) return code;
+  }
+  return Math.floor(Math.random() * 10000).toString().padStart(4, "0");
+}
+
 async function uniqueSlug(base: string): Promise<string> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   let candidate = slugify(base) || "introducer";
@@ -63,7 +100,21 @@ export const getIntroducerProfile = createServerFn({ method: "GET" })
       .select("*")
       .eq("user_id", context.userId)
       .maybeSingle();
-    if (existing) return existing;
+    if (existing) {
+      // Backfill a company code for introducers created before company codes
+      // existed (e.g. self-created profiles). Shared code → identifies a company.
+      const existingCode = (existing as { company_code?: string | null }).company_code ?? null;
+      if (!existingCode) {
+        const code = await generateUniqueCompanyCode();
+        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        const { error: codeErr } = await supabaseAdmin
+          .from("introducers")
+          .update({ company_code: code })
+          .eq("id", existing.id);
+        if (!codeErr) return { ...existing, company_code: code };
+      }
+      return existing;
+    }
 
     const { data: profile } = await context.supabase
       .from("profiles")
@@ -73,18 +124,32 @@ export const getIntroducerProfile = createServerFn({ method: "GET" })
 
     const companyName = profile?.full_name?.trim() || profile?.email?.split("@")[0] || "Introducer";
     const slug = await uniqueSlug(companyName);
+    const companyCode = await generateUniqueCompanyCode();
 
+    const baseRecord = {
+      user_id: context.userId,
+      company_name: companyName,
+      slug,
+      contact_email: profile?.email ?? null,
+    };
     const { data: created, error } = await context.supabase
       .from("introducers")
-      .insert({
-        user_id: context.userId,
-        company_name: companyName,
-        slug,
-        contact_email: profile?.email ?? null,
-      })
+      .insert({ ...baseRecord, company_code: companyCode })
       .select()
       .single();
-    if (error) throw new Error(error.message);
+    if (error) {
+      // Column not present yet (migration not applied) — create without the code.
+      if (isMissingColumnOrTable(error)) {
+        const { data: fallback, error: fbErr } = await context.supabase
+          .from("introducers")
+          .insert(baseRecord)
+          .select()
+          .single();
+        if (fbErr) throw new Error(fbErr.message);
+        return fallback;
+      }
+      throw new Error(error.message);
+    }
     return created;
   });
 

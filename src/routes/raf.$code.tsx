@@ -1,33 +1,33 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { setReferralCookie } from "@/lib/referral";
-import { resolveReferralSlug } from "@/lib/introducer.functions";
+import { setRafCookie } from "@/lib/referral";
+import { resolveReferralCode } from "@/lib/referrals.functions";
 
-export const Route = createFileRoute("/go/$slug")({
-  component: ReferralRedirect,
+export const Route = createFileRoute("/raf/$code")({
+  component: ReferAFriendRedirect,
 });
 
-function ReferralRedirect() {
-  const { slug } = Route.useParams();
+function ReferAFriendRedirect() {
+  const { code } = Route.useParams();
   const navigate = useNavigate();
-  const resolveFn = useServerFn(resolveReferralSlug);
+  const resolveFn = useServerFn(resolveReferralCode);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const introducer = await resolveFn({ data: { slug } });
+        const link = await resolveFn({ data: { code } });
         if (cancelled) return;
-        if (!introducer) {
+        if (!link) {
           setError("This referral link is not valid or has expired.");
           return;
         }
-        setReferralCookie(introducer.slug);
-        // Send the customer to the public landing page so they can self-serve
-        // (verbal, text, or book). The referral cookie keeps the introducer
-        // attached to whatever session/appointment they create.
+        // Set the RAF cookie (separate from the introducer cookie) so the
+        // referring customer is credited when this friend signs up. Then send
+        // them to the public landing page to self-serve (verbal/text/book).
+        setRafCookie(link.code);
         navigate({ to: "/" });
       } catch {
         if (!cancelled) setError("Something went wrong. Please try again later.");
@@ -36,7 +36,7 @@ function ReferralRedirect() {
     return () => {
       cancelled = true;
     };
-  }, [slug, resolveFn, navigate]);
+  }, [code, resolveFn, navigate]);
 
   if (error) {
     return (

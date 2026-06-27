@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useMatches, Outlet, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import avatarImg from "@/assets/avatar.png";
+import avatarImg from "@/assets/susan.png";
 
 type AuthMode = "signin" | "signup" | "forgot";
 
@@ -22,8 +22,8 @@ export const Route = createFileRoute("/auth")({
   }),
   head: () => ({
     meta: [
-      { title: "Sign in — Mortgage Fact-Find" },
-      { name: "description", content: "Sign in to start your guided mortgage fact-find interview." },
+      { title: "Sign in — Mortgage Hub" },
+      { name: "description", content: "Sign in to get started with Mortgage Hub." },
     ],
   }),
   component: AuthPage,
@@ -31,6 +31,13 @@ export const Route = createFileRoute("/auth")({
 
 function AuthPage() {
   const navigate = useNavigate();
+  // `/auth` is the parent of child routes like `/auth/reset`. Since this
+  // component has no <Outlet/>, render child routes here instead of the
+  // sign-in form (otherwise the reset page never mounts). Derive this from the
+  // matched route tree (consistent across SSR/client) to avoid hydration
+  // mismatches that a window-location check would cause.
+  const matches = useMatches();
+  const isChildRoute = matches.some((m) => m.routeId === "/auth/reset");
   const { recovery } = Route.useSearch();
   const [mode, setMode] = useState<AuthMode>("signin");
   const [email, setEmail] = useState("");
@@ -42,6 +49,7 @@ function AuthPage() {
   const [devResetLink, setDevResetLink] = useState<string | null>(null);
 
   useEffect(() => {
+    if (isChildRoute) return;
     if (recovery || isPasswordRecoveryUrl() || isPasswordRecoveryPending()) {
       goToPasswordRecoveryPage();
       return;
@@ -66,7 +74,7 @@ function AuthPage() {
     });
 
     return () => subscription.unsubscribe();
-  }, [recovery, navigate]);
+  }, [recovery, navigate, isChildRoute]);
 
   const showStatus = (type: "error" | "success", text: string) => {
     setStatus({ type, text });
@@ -208,7 +216,7 @@ function AuthPage() {
   };
 
   const title =
-    mode === "forgot" ? "Reset your password" : "Your guided fact-find";
+    mode === "forgot" ? "Reset your password" : "Get started with Mortgage Hub";
 
   const subtitle =
     mode === "forgot"
@@ -226,11 +234,14 @@ function AuthPage() {
         ? "Create account"
         : "Sign in";
 
+  // Child routes (e.g. /auth/reset) render here via the parent's outlet.
+  if (isChildRoute) return <Outlet />;
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-12 bg-background">
       <div className="w-full max-w-md space-y-8">
         <div className="text-center space-y-3">
-          <img src={avatarImg} alt="Your guide" width={96} height={96} className="mx-auto rounded-full" />
+          <img src={avatarImg} alt="Your guide" width={96} height={96} className="mx-auto rounded-full object-cover object-top" />
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">{title}</h1>
           <p className="text-sm text-muted-foreground">{subtitle}</p>
         </div>
@@ -278,10 +289,22 @@ function AuthPage() {
           {devResetLink && (
             <div className="rounded-lg border border-primary/40 bg-primary/5 px-4 py-4 text-sm space-y-3">
               <p className="font-medium text-foreground">Open this reset link</p>
-              <Button asChild className="w-full">
-                <a href={devResetLink}>Reset password</a>
+              <Button
+                type="button"
+                className="w-full"
+                onClick={() => {
+                  // Force a full navigation to Supabase's verify URL. Supabase
+                  // then redirects back to /auth/reset with the recovery tokens.
+                  window.location.assign(devResetLink);
+                }}
+              >
+                Reset password
               </Button>
-              <p className="text-xs text-muted-foreground break-all">{devResetLink}</p>
+              <p className="text-xs text-muted-foreground break-all">
+                Or copy this link into your browser:
+                <br />
+                <a href={devResetLink} className="underline">{devResetLink}</a>
+              </p>
             </div>
           )}
 
@@ -306,7 +329,7 @@ function AuthPage() {
                   required
                 />
                 <p className="text-xs text-muted-foreground">
-                  Your preferred contact — we can text you a link to pick up your fact-find.
+                  Your preferred contact — we can text you a link to pick up where you left off.
                 </p>
               </div>
             )}

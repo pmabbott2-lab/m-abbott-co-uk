@@ -136,6 +136,83 @@ export function hasCompleteDob(text: string): boolean {
   return false;
 }
 
+/** Extract the first valid date of birth from spoken/typed text, if present. */
+export function parseDob(text: string): { day: number; month: number; year: number } | null {
+  const normalised = stripCapturedMarkers(text)
+    .toLowerCase()
+    .replace(/\bthe\b/g, " ")
+    .replace(/,/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalised) return null;
+
+  // Numeric: dd/mm/yyyy, dd-mm-yyyy, dd.mm.yyyy, dd mm yyyy (UK day-first).
+  const numeric = normalised.match(/\b(\d{1,2})[\/\.\-\s](\d{1,2})[\/\.\-\s](\d{2,4})\b/);
+  if (numeric) {
+    const a = Number(numeric[1]);
+    const b = Number(numeric[2]);
+    const year = normaliseTwoDigitYear(Number(numeric[3]));
+    if (isValidDob(a, b, year)) return { day: a, month: b, year };
+    if (isValidDob(b, a, year)) return { day: b, month: a, year };
+  }
+
+  // ISO: yyyy-mm-dd
+  const iso = normalised.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+  if (iso) {
+    const y = Number(iso[1]);
+    const mo = Number(iso[2]);
+    const d = Number(iso[3]);
+    if (isValidDob(d, mo, y)) return { day: d, month: mo, year: y };
+  }
+
+  const monthNames = Object.keys(MONTHS).join("|");
+  const dayWordPattern = Object.keys(DAY_WORDS)
+    .sort((a, b) => b.length - a.length)
+    .map((d) => d.replace(/\s+/g, "\\s+"))
+    .join("|");
+  const yearPattern = "(?:\\d{2,4}|nineteen\\s+[\\w\\s]+|twenty\\s+[\\w\\s]+)";
+
+  const resolve = (dayTok: string, monthName: string, yearPhrase: string) => {
+    const day = /^\d/.test(dayTok) ? Number(dayTok) : parseDayWords(dayTok);
+    const month = MONTHS[monthName.toLowerCase()];
+    const year = /^\d/.test(yearPhrase) ? normaliseTwoDigitYear(Number(yearPhrase)) : parseYearWords(yearPhrase);
+    if (day != null && month != null && year != null && isValidDob(day, month, year)) {
+      return { day, month, year };
+    }
+    return null;
+  };
+
+  const wordPatterns: Array<{ re: RegExp; order: "dmy" | "mdy" }> = [
+    { re: new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${monthNames})\\s+(${yearPattern})\\b`, "i"), order: "dmy" },
+    { re: new RegExp(`\\b(${dayWordPattern})\\s+(?:of\\s+)?(${monthNames})\\s+(${yearPattern})\\b`, "i"), order: "dmy" },
+    { re: new RegExp(`\\b(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s*[,.]?\\s*(${yearPattern})\\b`, "i"), order: "mdy" },
+    { re: new RegExp(`\\b(${monthNames})\\s+(${dayWordPattern})\\s+(${yearPattern})\\b`, "i"), order: "mdy" },
+  ];
+  for (const { re, order } of wordPatterns) {
+    const m = normalised.match(re);
+    if (m) {
+      const res = order === "dmy" ? resolve(m[1], m[2], m[3]) : resolve(m[2], m[1], m[3]);
+      if (res) return res;
+    }
+  }
+
+  return null;
+}
+
+/** Whole-years age from a date of birth, as of `on` (defaults to today). */
+export function ageFromDob(dob: { day: number; month: number; year: number }, on: Date = new Date()): number {
+  let age = on.getFullYear() - dob.year;
+  const monthDiff = on.getMonth() + 1 - dob.month;
+  if (monthDiff < 0 || (monthDiff === 0 && on.getDate() < dob.day)) age -= 1;
+  return age;
+}
+
+/** Convenience: parse free text and return the computed age, or null. */
+export function ageFromText(text: string, on: Date = new Date()): number | null {
+  const dob = parseDob(text);
+  return dob ? ageFromDob(dob, on) : null;
+}
+
 export function hasPartialDob(text: string): boolean {
   const n = stripCapturedMarkers(text).toLowerCase();
   return (

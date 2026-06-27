@@ -15,7 +15,7 @@ export function AppShell({ title, children, action }: { title: string; children:
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           <Link to="/home" className="flex items-center gap-2 font-semibold">
             <span className="inline-block w-6 h-6 rounded-full bg-accent" />
-            FactFind
+            Mortgage Hub
           </Link>
           <h1 className="text-sm font-medium text-muted-foreground hidden sm:block">{title}</h1>
           <div className="flex items-center gap-2">

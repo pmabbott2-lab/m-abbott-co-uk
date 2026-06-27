@@ -231,6 +231,22 @@ async function bookAppointment(
     .single();
   if (error) throw new Error(error.message);
 
+  // Auto-allocate: booking a fact-find with an advisor assigns that session to
+  // them so it shows up on their dashboard. Swallow duplicate / missing-table
+  // errors (the session_advisors table may not exist until the migration runs).
+  if (data.sessionId) {
+    try {
+      await supabaseAdmin
+        .from("session_advisors")
+        .upsert(
+          { session_id: data.sessionId, advisor_id: advisorId, assigned_by: userId ?? null },
+          { onConflict: "session_id,advisor_id" },
+        );
+    } catch (e) {
+      console.error("auto-allocate session failed", e);
+    }
+  }
+
   if (leadId) {
     await supabaseAdmin
       .from("introducer_leads")
@@ -282,6 +298,9 @@ export const bookSessionAppointment = createServerFn({ method: "POST" })
         customerPhone: z.string().min(7),
         customerEmail: z.string().email().optional().or(z.literal("")),
         startsAt: z.string().datetime(),
+        // Referral slug captured from the introducer link (introducer_ref cookie).
+        // Keeps the introducer attached to self-serve bookings.
+        slug: z.string().min(1).optional(),
       })
       .parse(d),
   )
@@ -302,6 +321,7 @@ export const bookSessionAppointment = createServerFn({ method: "POST" })
         customerPhone: data.customerPhone,
         customerEmail: data.customerEmail,
         startsAt: data.startsAt,
+        slug: data.slug,
       },
       context.userId,
     );

@@ -344,32 +344,219 @@ export type Database = {
       introducers: {
         Row: {
           active: boolean
+          company_code: string | null
           company_name: string
           contact_email: string | null
           created_at: string
+          deleted_at: string | null
           id: string
           slug: string
           user_id: string
         }
         Insert: {
           active?: boolean
+          company_code?: string | null
           company_name: string
           contact_email?: string | null
           created_at?: string
+          deleted_at?: string | null
           id?: string
           slug: string
           user_id: string
         }
         Update: {
           active?: boolean
+          company_code?: string | null
           company_name?: string
           contact_email?: string | null
           created_at?: string
+          deleted_at?: string | null
           id?: string
           slug?: string
           user_id?: string
         }
         Relationships: []
+      }
+      advisor_profiles: {
+        Row: {
+          code: string
+          created_at: string
+          deleted_at: string | null
+          user_id: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          deleted_at?: string | null
+          user_id: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          deleted_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      staff_invitations: {
+        Row: {
+          company_code: string | null
+          company_name: string | null
+          create_company: boolean
+          created_at: string
+          created_by: string | null
+          email: string | null
+          expires_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          token: string
+          used_at: string | null
+          used_by: string | null
+        }
+        Insert: {
+          company_code?: string | null
+          company_name?: string | null
+          create_company?: boolean
+          created_at?: string
+          created_by?: string | null
+          email?: string | null
+          expires_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          token?: string
+          used_at?: string | null
+          used_by?: string | null
+        }
+        Update: {
+          company_code?: string | null
+          company_name?: string | null
+          create_company?: boolean
+          created_at?: string
+          created_by?: string | null
+          email?: string | null
+          expires_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          token?: string
+          used_at?: string | null
+          used_by?: string | null
+        }
+        Relationships: []
+      }
+      referral_codes: {
+        Row: {
+          active: boolean
+          code: string
+          created_at: string
+          created_by: string | null
+          id: string
+          referrer_name: string | null
+          referrer_phone: string | null
+          referrer_user_id: string | null
+        }
+        Insert: {
+          active?: boolean
+          code: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          referrer_name?: string | null
+          referrer_phone?: string | null
+          referrer_user_id?: string | null
+        }
+        Update: {
+          active?: boolean
+          code?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          referrer_name?: string | null
+          referrer_phone?: string | null
+          referrer_user_id?: string | null
+        }
+        Relationships: []
+      }
+      referrals: {
+        Row: {
+          bonus_status: string
+          code: string | null
+          created_at: string
+          id: string
+          notes: string | null
+          referral_code_id: string | null
+          referred_email: string | null
+          referred_user_id: string | null
+          referrer_user_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          bonus_status?: string
+          code?: string | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          referral_code_id?: string | null
+          referred_email?: string | null
+          referred_user_id?: string | null
+          referrer_user_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          bonus_status?: string
+          code?: string | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          referral_code_id?: string | null
+          referred_email?: string | null
+          referred_user_id?: string | null
+          referrer_user_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "referrals_referral_code_id_fkey"
+            columns: ["referral_code_id"]
+            isOneToOne: false
+            referencedRelation: "referral_codes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      session_advisors: {
+        Row: {
+          advisor_id: string
+          assigned_by: string | null
+          created_at: string
+          id: string
+          session_id: string
+        }
+        Insert: {
+          advisor_id: string
+          assigned_by?: string | null
+          created_at?: string
+          id?: string
+          session_id: string
+        }
+        Update: {
+          advisor_id?: string
+          assigned_by?: string | null
+          created_at?: string
+          id?: string
+          session_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_advisors_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "interview_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
@@ -427,7 +614,7 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "customer" | "advisor" | "introducer"
+      app_role: "customer" | "advisor" | "introducer" | "admin"
       appointment_status: "pending" | "confirmed" | "cancelled" | "completed"
       lead_source: "web" | "telephone" | "mobile" | "introducer_portal" | "referral_link"
       referral_channel: "voice" | "text" | "direct_booking" | "manual"
@@ -559,7 +746,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["customer", "advisor", "introducer"],
+      app_role: ["customer", "advisor", "introducer", "admin"],
       appointment_status: ["pending", "confirmed", "cancelled", "completed"],
       lead_source: ["web", "telephone", "mobile", "introducer_portal", "referral_link"],
       referral_channel: ["voice", "text", "direct_booking", "manual"],

@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Link } from "@tanstack/react-router";
-import avatarImg from "@/assets/avatar.png";
+import avatarImg from "@/assets/susan.png";
 
 export const Route = createFileRoute("/auth/reset")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -20,7 +20,7 @@ export const Route = createFileRoute("/auth/reset")({
   }),
   head: () => ({
     meta: [
-      { title: "Reset password — Mortgage Fact-Find" },
+      { title: "Reset password — Mortgage Hub" },
       { name: "description", content: "Choose a new password for your account." },
     ],
   }),
@@ -102,7 +102,7 @@ function ResetPasswordPage() {
     <div className="min-h-screen flex items-center justify-center px-4 py-12 bg-background">
       <div className="w-full max-w-md space-y-8">
         <div className="text-center space-y-3">
-          <img src={avatarImg} alt="Your guide" width={96} height={96} className="mx-auto rounded-full" />
+          <img src={avatarImg} alt="Your guide" width={96} height={96} className="mx-auto rounded-full object-cover object-top" />
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">Choose a new password</h1>
           <p className="text-sm text-muted-foreground">
             You opened a secure reset link. Enter your new password below.

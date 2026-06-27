@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AppShell } from "@/components/AppShell";
 import { createAppointmentAuth, getAvailableSlots } from "@/lib/booking.functions";
+import { getReferralSlug } from "@/lib/referral";
 import { supabase } from "@/integrations/supabase/client";
 import { CalendarCheck, CheckCircle2 } from "lucide-react";
 
@@ -60,6 +61,7 @@ function DirectBookingPage() {
           customerPhone,
           customerEmail,
           startsAt: selectedSlot!,
+          slug: getReferralSlug() ?? undefined,
         },
       }),
     onSuccess: () => {

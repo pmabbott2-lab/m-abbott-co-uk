@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CalendarCheck } from "lucide-react";
 import { bookSessionAppointment, getAvailableSlots } from "@/lib/booking.functions";
+import { getReferralSlug } from "@/lib/referral";
 
 type Props = {
   sessionId: string;
@@ -55,6 +56,7 @@ export function PostCompletionBooking({
           customerPhone,
           customerEmail,
           startsAt: selectedSlot!,
+          slug: getReferralSlug() ?? undefined,
         },
       }),
     onSuccess: () => onComplete(),
