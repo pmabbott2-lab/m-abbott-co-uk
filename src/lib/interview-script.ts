@@ -115,16 +115,16 @@ export const SECTIONS: SectionDef[] = [
       {
         key: "date_of_birth",
         label: "Date of birth",
-        prompt: "What's your date of birth? Please say the day, month and year — for example, 15 March 1980.",
+        prompt: "I hope the weather's treating you kindly today. To kick things off — what's your date of birth?",
         expects: "A complete date of birth: day, month, and year.",
-        silenceMs: 1800,
+        silenceMs: 1500,
       },
       {
         key: "home_postcode",
         label: "Current postcode",
         prompt: "What's the postcode of the home you live in now, {firstName}?",
         expects: "A full UK postcode.",
-        silenceMs: 1700,
+        silenceMs: 1400,
       },
       {
         key: "home_house",
@@ -247,7 +247,7 @@ export const SECTIONS: SectionDef[] = [
         prompt: "Now, which of these credit commitments will you still be paying after the mortgage completes? Tap each one that applies below — or tap None of these.",
         expects: "Each ongoing credit commitment (credit cards, loans, hire purchase, car finance, store cards, overdrafts or other), with how many of each and the monthly payment and balance for each — or a clear 'none'.",
         wizard: "credit",
-        silenceMs: 1700,
+        silenceMs: 1400,
       },
       {
         key: "adverse_credit",
@@ -259,7 +259,7 @@ export const SECTIONS: SectionDef[] = [
         otherLabel: "Yes",
         otherPrompt:
           "Okay, no problem. Please tell me what it was — for example a CCJ, default, or bankruptcy — roughly when it happened, and the amount involved.",
-        silenceMs: 1700,
+        silenceMs: 1400,
       },
     ],
   },

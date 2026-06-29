@@ -395,7 +395,7 @@ function missingFactsFor(input: EvaluateInput, text: string, latest = "", target
         : [{
             id: "dob",
             followup: () =>
-              "Please say your full date of birth — day, month and year. For example, 15 March 1980.",
+              "Sorry, could you tell me your date of birth again — including the year?",
           }];
     case "home_postcode":
       return hasPostcode(text) || targetDeclined

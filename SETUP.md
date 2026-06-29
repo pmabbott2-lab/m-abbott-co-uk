@@ -1,6 +1,6 @@
 # Self-hosted setup — FactFind & booking
 
-Run this app on **your own server or domain**. It does not require Lovable hosting.
+Run this app on **your own server or domain**. No third-party hosting platform is required.
 
 Your code is on GitHub (`main`). Deploy from there to see the latest home page, booking options, and fact-find flows.
 
@@ -176,6 +176,6 @@ First booking request auto-creates **Mon–Fri 9:00–17:00** (30-min slots) for
 
 ---
 
-## Why Lovable showed old pages
+## Seeing old pages?
 
-If you were viewing the app on a Lovable URL, it may not have synced from GitHub `main`. Self-hosting from this repo gives you direct control — every `git pull` + redeploy updates what users see.
+If a deployment is showing stale content, it likely hasn't been rebuilt from the latest GitHub `main`. Self-hosting from this repo gives you direct control — every `git pull` + redeploy updates what users see.

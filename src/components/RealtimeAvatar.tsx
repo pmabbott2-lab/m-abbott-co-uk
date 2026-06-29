@@ -164,6 +164,7 @@ function RealtimeAvatarImpl(props: Props) {
     const sink: RealtimeAvatarSink = {
       isReady: () =>
         statusRef.current === "ready" && !!clientRef.current && !usingBrowserVoiceRef.current,
+      isFailed: () => statusRef.current === "failed" || !!usingBrowserVoiceRef.current,
       speak: async (pcm: Int16Array) => {
         const client = clientRef.current;
         if (!client || statusRef.current !== "ready") throw new Error("Avatar not ready");

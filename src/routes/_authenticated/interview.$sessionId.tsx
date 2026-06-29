@@ -7,6 +7,7 @@ import { getSession, submitSession, setSessionPosition } from "@/lib/sessions.fu
 import { AppShell } from "@/components/AppShell";
 import { useAudioPlayback } from "@/components/Avatar";
 import { RealtimeAvatar } from "@/components/RealtimeAvatar";
+import { REALTIME_AVATAR_ENABLED, whenRealtimeAvatarReady } from "@/lib/realtime-avatar-bridge";
 import { PostCompletionBooking } from "@/components/PostCompletionBooking";
 import {
   getSpeechRecognitionCtor,
@@ -54,6 +55,9 @@ const MAX_TURN_MS = 45000; // hard cap per answer
 const NO_SPEECH_TIMEOUT_MS = 12000; // if nothing detected at all, stop
 const MAX_SILENT_RETRIES = 4; // silently re-listen this many times before prompting
 const CALIBRATION_MS = 500; // measure ambient noise floor at start
+// Wait at most this long for the Simli session to connect before speaking the
+// first line, so it lip-syncs — but never hang if the avatar can't connect.
+const AVATAR_READY_TIMEOUT_MS = 6000;
 const SPEECH_ON_MULT = 1.8; // RMS must exceed noiseFloor * this to count as speech
 const SPEECH_OFF_MULT = 1.25; // below noiseFloor * this counts as silence (hysteresis)
 const MIN_SPEECH_RMS = 0.006; // absolute floor for speech-on
@@ -621,7 +625,7 @@ function InterviewPage() {
       let silenceTimer: ReturnType<typeof setTimeout> | null = null;
       const fieldKey = currentRef.current?.fieldKey;
       // Dates need a touch more cushion (people pause between day/month/year).
-      const silenceMs = fieldKey === "date_of_birth" ? 2000 : 1400;
+      const silenceMs = fieldKey === "date_of_birth" ? 1500 : 1200;
 
       const clearSilence = () => {
         if (silenceTimer) window.clearTimeout(silenceTimer);
@@ -689,7 +693,7 @@ function InterviewPage() {
       setLastHeard("");
       setStatus(
         fieldKey === "date_of_birth"
-          ? "Listening… say day, month and year (e.g. 15 March 1980)"
+          ? "Listening… say your date of birth"
           : "Listening… speak your answer",
       );
       rec.start();
@@ -943,6 +947,14 @@ function InterviewPage() {
       return;
     }
     bootedRef.current = true;
+    // Let the Simli session connect first so the FIRST line is lip-synced (and
+    // spoken exactly once, via Simli). The timeout guarantees we still speak if
+    // the avatar never connects; browser-voice sessions skip the wait entirely.
+    if (REALTIME_AVATAR_ENABLED && !usingBrowserVoice) {
+      setStatus("Connecting Susan…");
+      await whenRealtimeAvatarReady(AVATAR_READY_TIMEOUT_MS);
+      if (pausedRef.current || doneRef.current) return;
+    }
     const messages = sessionQ.data.messages;
     const lastAvatar = [...messages].reverse().find((m) => m.role === "avatar");
     const lastCustomer = [...messages].reverse().find((m) => m.role === "customer");

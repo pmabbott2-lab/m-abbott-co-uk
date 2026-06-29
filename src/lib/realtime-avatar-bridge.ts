@@ -26,6 +26,12 @@ export type RealtimeAvatarSink = {
   /** True only when a Simli session is live and ready to receive audio. */
   isReady: () => boolean;
   /**
+   * True once the session has reached a terminal state where it will never
+   * become ready (WebRTC failure, depleted minutes, or a browser-voice
+   * fallback). Used by `whenRealtimeAvatarReady` to stop waiting early.
+   */
+  isFailed: () => boolean;
+  /**
    * Hand off one spoken line as 16 kHz mono Int16 PCM. The avatar plays the
    * audio itself (single source of truth — we must NOT also play it locally,
    * to avoid double audio). Resolves once the audio has been fully streamed.
@@ -55,6 +61,32 @@ export function registerRealtimeAvatarSink(sink: RealtimeAvatarSink): () => void
 export function getRealtimeAvatarSink(): RealtimeAvatarSink | null {
   if (!REALTIME_AVATAR_ENABLED) return null;
   return activeSink;
+}
+
+/**
+ * Resolve once the realtime avatar is ready to receive audio (so the very first
+ * spoken line is lip-synced), or `false` if the flag is off, the session never
+ * connects within `timeoutMs`, or it fails / falls back to the browser voice.
+ *
+ * Callers gate their first utterance on this so it routes through Simli — but
+ * the timeout guarantees the interview never hangs waiting for an avatar that
+ * isn't coming.
+ */
+export function whenRealtimeAvatarReady(timeoutMs = 6000): Promise<boolean> {
+  if (!REALTIME_AVATAR_ENABLED) return Promise.resolve(false);
+  if (activeSink?.isReady()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const id = setInterval(() => {
+      if (activeSink?.isReady()) {
+        clearInterval(id);
+        resolve(true);
+      } else if (activeSink?.isFailed() || Date.now() - start >= timeoutMs) {
+        clearInterval(id);
+        resolve(false);
+      }
+    }, 100);
+  });
 }
 
 /**
