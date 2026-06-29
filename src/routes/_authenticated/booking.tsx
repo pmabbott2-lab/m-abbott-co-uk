@@ -36,11 +36,13 @@ function DirectBookingPage() {
       if (!user) return null;
       const { data: profile } = await supabase
         .from("profiles")
-        .select("full_name, email")
+        .select("full_name, email, phone")
         .eq("id", user.id)
         .maybeSingle();
       if (profile?.full_name) setCustomerName(profile.full_name);
       if (profile?.email) setCustomerEmail(profile.email);
+      const phone = profile?.phone ?? (user.user_metadata?.phone as string | undefined);
+      if (phone) setCustomerPhone(phone);
       return profile;
     },
   });

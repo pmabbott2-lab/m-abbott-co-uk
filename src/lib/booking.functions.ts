@@ -259,6 +259,7 @@ async function bookAppointment(
       const message = bookingConfirmationMessage({
         customerName: data.customerName,
         startsAt,
+        bookingUrl: data.sessionId ? `${getAppBaseUrl()}/sessions/${data.sessionId}` : undefined,
       });
       const { sid } = await sendSms({ to: data.customerPhone, body: message });
       await logSms({

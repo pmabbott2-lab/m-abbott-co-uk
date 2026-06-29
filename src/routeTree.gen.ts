@@ -27,6 +27,7 @@ import { Route as AuthenticatedDiaryRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedBookingRouteImport } from './routes/_authenticated/booking'
 import { Route as ApiSmsInboundRouteImport } from './routes/api/sms/inbound'
 import { Route as ApiAuthRequestPasswordResetRouteImport } from './routes/api/auth/request-password-reset'
+import { Route as AuthenticatedTextSessionIdRouteImport } from './routes/_authenticated/text.$sessionId'
 import { Route as AuthenticatedSessionsSessionIdRouteImport } from './routes/_authenticated/sessions.$sessionId'
 import { Route as AuthenticatedInterviewSessionIdRouteImport } from './routes/_authenticated/interview.$sessionId'
 import { Route as AuthenticatedChatSessionIdRouteImport } from './routes/_authenticated/chat.$sessionId'
@@ -121,6 +122,12 @@ const ApiAuthRequestPasswordResetRoute =
     path: '/api/auth/request-password-reset',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AuthenticatedTextSessionIdRoute =
+  AuthenticatedTextSessionIdRouteImport.update({
+    id: '/text/$sessionId',
+    path: '/text/$sessionId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedSessionsSessionIdRoute =
   AuthenticatedSessionsSessionIdRouteImport.update({
     id: '/sessions/$sessionId',
@@ -159,6 +166,7 @@ export interface FileRoutesByFullPath {
   '/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
+  '/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
 }
@@ -181,6 +189,7 @@ export interface FileRoutesByTo {
   '/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
+  '/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
 }
@@ -205,6 +214,7 @@ export interface FileRoutesById {
   '/_authenticated/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/_authenticated/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/_authenticated/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
+  '/_authenticated/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
 }
@@ -229,6 +239,7 @@ export interface FileRouteTypes {
     | '/chat/$sessionId'
     | '/interview/$sessionId'
     | '/sessions/$sessionId'
+    | '/text/$sessionId'
     | '/api/auth/request-password-reset'
     | '/api/sms/inbound'
   fileRoutesByTo: FileRoutesByTo
@@ -251,6 +262,7 @@ export interface FileRouteTypes {
     | '/chat/$sessionId'
     | '/interview/$sessionId'
     | '/sessions/$sessionId'
+    | '/text/$sessionId'
     | '/api/auth/request-password-reset'
     | '/api/sms/inbound'
   id:
@@ -274,6 +286,7 @@ export interface FileRouteTypes {
     | '/_authenticated/chat/$sessionId'
     | '/_authenticated/interview/$sessionId'
     | '/_authenticated/sessions/$sessionId'
+    | '/_authenticated/text/$sessionId'
     | '/api/auth/request-password-reset'
     | '/api/sms/inbound'
   fileRoutesById: FileRoutesById
@@ -422,6 +435,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthRequestPasswordResetRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/text/$sessionId': {
+      id: '/_authenticated/text/$sessionId'
+      path: '/text/$sessionId'
+      fullPath: '/text/$sessionId'
+      preLoaderRoute: typeof AuthenticatedTextSessionIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/sessions/$sessionId': {
       id: '/_authenticated/sessions/$sessionId'
       path: '/sessions/$sessionId'
@@ -454,6 +474,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedChatSessionIdRoute: typeof AuthenticatedChatSessionIdRoute
   AuthenticatedInterviewSessionIdRoute: typeof AuthenticatedInterviewSessionIdRoute
   AuthenticatedSessionsSessionIdRoute: typeof AuthenticatedSessionsSessionIdRoute
+  AuthenticatedTextSessionIdRoute: typeof AuthenticatedTextSessionIdRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -464,6 +485,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedChatSessionIdRoute: AuthenticatedChatSessionIdRoute,
   AuthenticatedInterviewSessionIdRoute: AuthenticatedInterviewSessionIdRoute,
   AuthenticatedSessionsSessionIdRoute: AuthenticatedSessionsSessionIdRoute,
+  AuthenticatedTextSessionIdRoute: AuthenticatedTextSessionIdRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =

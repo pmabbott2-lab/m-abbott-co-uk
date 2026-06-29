@@ -66,6 +66,12 @@ function RealtimeAvatarImpl(props: Props) {
   const statusRef = useRef<SessionStatus>(status);
   statusRef.current = status;
 
+  // True only once the streamed <video> has actually PRESENTED a frame. We gate
+  // the still→live crossfade on this (not merely on the WebRTC session being
+  // "ready") so we never flip the portrait to a blank/frozen video frame — that
+  // pop was the "clunky flip" on the first question.
+  const [videoReady, setVideoReady] = useState(false);
+
   const usingBrowserVoiceRef = useRef(usingBrowserVoice);
   usingBrowserVoiceRef.current = usingBrowserVoice;
 
@@ -79,6 +85,7 @@ function RealtimeAvatarImpl(props: Props) {
         .then(() => client.stop())
         .catch(() => {});
     }
+    setVideoReady(false);
     setStatus(next);
   }, []);
 
@@ -181,6 +188,40 @@ function RealtimeAvatarImpl(props: Props) {
     };
   }, []);
 
+  // Reveal the live video only once it has genuinely painted a frame. We prefer
+  // requestVideoFrameCallback (fires when a frame is actually presented) and
+  // fall back to the "playing"/"loadeddata" media events on browsers without it.
+  // This is what makes the still→live handoff a clean crossfade instead of a pop.
+  useEffect(() => {
+    if (status !== "ready") return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    let cancelled = false;
+    const markReady = () => {
+      if (!cancelled) setVideoReady(true);
+    };
+
+    const vid = video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: () => void) => number;
+      cancelVideoFrameCallback?: (id: number) => void;
+    };
+
+    let rvfcId: number | undefined;
+    if (typeof vid.requestVideoFrameCallback === "function") {
+      rvfcId = vid.requestVideoFrameCallback(markReady);
+    }
+    video.addEventListener("playing", markReady);
+    video.addEventListener("loadeddata", markReady);
+
+    return () => {
+      cancelled = true;
+      if (rvfcId !== undefined) vid.cancelVideoFrameCallback?.(rvfcId);
+      video.removeEventListener("playing", markReady);
+      video.removeEventListener("loadeddata", markReady);
+    };
+  }, [status]);
+
   // If TTS falls back to the browser voice mid-session, there's no PCM to feed
   // Simli — tear the session down and revert to the portrait.
   useEffect(() => {
@@ -204,15 +245,16 @@ function RealtimeAvatarImpl(props: Props) {
           graceful fallback on failure. It also keeps the listening/speaking rings. */}
       <TalkingPhoto {...props} />
 
-      {/* Streamed Simli video, fading in over the portrait once the session is live. */}
+      {/* Streamed Simli video, crossfading in over the portrait only once it has
+          actually presented a frame (status "ready" alone isn't enough). */}
       <div
         className="absolute inset-0 rounded-full overflow-hidden"
         style={{
-          opacity: status === "ready" ? 1 : 0,
-          transition: "opacity 300ms ease",
+          opacity: status === "ready" && videoReady ? 1 : 0,
+          transition: "opacity 450ms ease-in-out",
           pointerEvents: "none",
         }}
-        aria-hidden={status !== "ready"}
+        aria-hidden={!(status === "ready" && videoReady)}
       >
         <video
           ref={videoRef}

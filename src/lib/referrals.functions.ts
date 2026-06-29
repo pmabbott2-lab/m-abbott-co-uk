@@ -129,7 +129,7 @@ export const resolveReferralCode = createServerFn({ method: "GET" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: row, error } = await supabaseAdmin
       .from("referral_codes")
-      .select("id, code, referrer_name")
+      .select("id, code, referrer_name, referrer_user_id")
       .eq("code", data.code)
       .eq("active", true)
       .maybeSingle();
@@ -137,7 +137,26 @@ export const resolveReferralCode = createServerFn({ method: "GET" })
       if (isMissingTableError(error)) return null;
       throw new Error(error.message);
     }
-    return row;
+    if (!row) return null;
+
+    // Resolve a display name for the referrer. `referrer_name` is normally
+    // populated at link-creation time, but it can be blank (e.g. a link minted
+    // for an existing user whose profile had no full_name, or a row created
+    // outside the admin flow). In that case fall back to the linked user's
+    // profile so the landing page can greet the friend with a real name. This
+    // runs through the service-role client, so anon visitors aren't blocked by
+    // RLS. We only ever expose the display name — nothing else from the profile.
+    let referrerName = row.referrer_name?.trim() || null;
+    if (!referrerName && row.referrer_user_id) {
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", row.referrer_user_id)
+        .maybeSingle();
+      referrerName = profile?.full_name?.trim() || profile?.email?.split("@")[0] || null;
+    }
+
+    return { id: row.id, code: row.code, referrer_name: referrerName };
   });
 
 // ---------------------------------------------------------------------------

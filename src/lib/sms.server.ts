@@ -79,6 +79,17 @@ export function bookingConfirmationMessage(opts: {
   return lines.join("\n");
 }
 
+export function interviewCompleteMessage(opts: {
+  name: string;
+  summaryUrl: string;
+}): string {
+  return [
+    `Hi ${opts.name}, thanks for completing your mortgage fact-find.`,
+    `View your summary here: ${opts.summaryUrl}`,
+    "Reply HELP for assistance.",
+  ].join("\n");
+}
+
 export function textChannelInviteMessage(opts: {
   customerName: string;
   bookUrl: string;

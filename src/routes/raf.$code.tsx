@@ -1,57 +1,170 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
+import { supabase } from "@/integrations/supabase/client";
 import { setRafCookie } from "@/lib/referral";
 import { resolveReferralCode } from "@/lib/referrals.functions";
+import { Button } from "@/components/ui/button";
+import { Gift, CalendarCheck, MessageSquare, Mic, ShieldCheck } from "lucide-react";
+import avatarImg from "@/assets/susan.png";
 
 export const Route = createFileRoute("/raf/$code")({
-  component: ReferAFriendRedirect,
+  head: () => ({
+    meta: [
+      { title: "A friend invited you — Mortgage Hub" },
+      {
+        name: "description",
+        content:
+          "A friend has invited you to Mortgage Hub — a friendly, guided way to get your mortgage advisor everything they need before you even meet.",
+      },
+    ],
+  }),
+  component: ReferAFriendLanding,
 });
 
-function ReferAFriendRedirect() {
+function ReferAFriendLanding() {
   const { code } = Route.useParams();
   const navigate = useNavigate();
   const resolveFn = useServerFn(resolveReferralCode);
-  const [error, setError] = useState<string | null>(null);
+  const [referrerName, setReferrerName] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+
+    // If the friend is already signed in, send them into the app. We still set
+    // the RAF cookie first (below) so attribution is recorded on /home.
+    supabase.auth.getSession().then(({ data }) => {
+      if (!cancelled && data.session) navigate({ to: "/home" });
+    });
+
     (async () => {
       try {
         const link = await resolveFn({ data: { code } });
         if (cancelled) return;
-        if (!link) {
-          setError("This referral link is not valid or has expired.");
-          return;
+        if (link) {
+          // PRESERVE ATTRIBUTION: set the RAF cookie (separate from the
+          // introducer cookie) so the referring customer is credited when this
+          // friend signs up. This is read later on the authenticated /home load
+          // by claimReferral(). The landing page + CTA carry this forward — the
+          // cookie persists across navigation to /auth and into /home.
+          setRafCookie(link.code);
+          setReferrerName(link.referrer_name ?? null);
         }
-        // Set the RAF cookie (separate from the introducer cookie) so the
-        // referring customer is credited when this friend signs up. Then send
-        // them to the public landing page to self-serve (verbal/text/book).
-        setRafCookie(link.code);
-        navigate({ to: "/" });
+        // An invalid/expired/empty code simply falls through to a warm, generic
+        // welcome rather than an error screen.
       } catch {
-        if (!cancelled) setError("Something went wrong. Please try again later.");
+        // Network/server hiccup — still show the welcoming page so the visitor
+        // can get started; attribution just won't be captured this time.
+      } finally {
+        if (!cancelled) setReady(true);
       }
     })();
+
     return () => {
       cancelled = true;
     };
   }, [code, resolveFn, navigate]);
 
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-4">
-        <div className="max-w-md text-center space-y-3">
-          <h1 className="text-xl font-semibold">Link not found</h1>
-          <p className="text-sm text-muted-foreground">{error}</p>
-        </div>
-      </div>
-    );
-  }
+  if (!ready) return <div className="min-h-screen bg-background" />;
+
+  // Greet the friend with the referrer's real name when we can resolve it; fall
+  // back to the generic wording only for invalid/expired codes or a truly
+  // missing name.
+  const headline = referrerName
+    ? `${referrerName} has invited you to Mortgage Hub`
+    : "A friend has invited you to Mortgage Hub";
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
-      <p className="text-sm text-muted-foreground">Taking you to Mortgage Hub…</p>
+    <div className="min-h-screen bg-background">
+      <header className="px-6 py-5 flex items-center justify-between max-w-6xl mx-auto">
+        <div className="flex items-center gap-2 font-semibold">
+          <span className="inline-block w-7 h-7 rounded-full bg-accent" />
+          Mortgage Hub
+        </div>
+        <Link to="/auth" search={{ recovery: false }}>
+          <Button variant="ghost">Sign in</Button>
+        </Link>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-6 pt-10 pb-24 space-y-16">
+        <section className="grid md:grid-cols-2 gap-12 items-center">
+          <div className="space-y-6">
+            <div className="inline-flex items-center gap-1.5 rounded-full border bg-muted px-3 py-1 text-sm text-muted-foreground">
+              <Gift className="w-3.5 h-3.5 text-accent" />
+              A friend invited you
+            </div>
+            <h1 className="text-4xl md:text-5xl font-semibold tracking-tight text-foreground leading-[1.1]">
+              {headline}
+            </h1>
+            <p className="text-lg text-muted-foreground">
+              They&apos;ve sent you this link so you can get the same friendly, guided start they
+              did. Mortgage Hub helps you answer the questions a mortgage advisor needs — at your
+              own pace — and hands them a clean summary so your first conversation is faster and
+              easier.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Link to="/auth" search={{ recovery: false }}>
+                <Button size="lg">Start your mortgage journey</Button>
+              </Link>
+              <Link to="/auth" search={{ recovery: false }}>
+                <Button size="lg" variant="outline">
+                  I already have an account
+                </Button>
+              </Link>
+            </div>
+            <p className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+              <ShieldCheck className="w-4 h-4 text-accent" />
+              Free to start · your details stay private until you&apos;re ready.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-center">
+            <div className="rounded-3xl bg-card border shadow-sm p-8">
+              <img
+                src={avatarImg}
+                alt="Susan, your Mortgage Hub interview guide"
+                width={320}
+                height={320}
+                className="w-80 h-80 rounded-full object-cover object-top"
+              />
+              <p className="mt-4 text-center text-sm text-muted-foreground">
+                Susan can speak each question aloud — or chat by text.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="text-xl font-semibold mb-1">What you can do</h2>
+          <p className="text-sm text-muted-foreground mb-4">
+            Pick whatever feels most comfortable — you choose after you sign up.
+          </p>
+          <div className="grid sm:grid-cols-3 gap-4">
+            <div className="rounded-2xl border bg-card p-5">
+              <Mic className="w-7 h-7 mb-3 text-accent" />
+              <h3 className="font-semibold">Verbal interview</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Talk through your details with Susan, our avatar-led spoken assistant.
+              </p>
+            </div>
+            <div className="rounded-2xl border bg-card p-5">
+              <MessageSquare className="w-7 h-7 mb-3 text-accent" />
+              <h3 className="font-semibold">Text interview</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Prefer to type? Answer the same questions in a quiet, typed chat.
+              </p>
+            </div>
+            <div className="rounded-2xl border bg-card p-5">
+              <CalendarCheck className="w-7 h-7 mb-3 text-accent" />
+              <h3 className="font-semibold">Book an appointment</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Skip ahead and pick a time to speak with a mortgage advisor.
+              </p>
+            </div>
+          </div>
+        </section>
+      </main>
     </div>
   );
 }

@@ -4,6 +4,12 @@ import { z } from "zod";
 import { chatCompletion } from "@/lib/ai-gateway.server";
 import { extractStructuredFields } from "@/lib/structured-answers";
 import { generateUniqueCompanyCode } from "@/lib/introducer.functions";
+import {
+  getAppBaseUrl,
+  interviewCompleteMessage,
+  isTwilioConfigured,
+  sendSms,
+} from "@/lib/sms.server";
 
 // Each customer file (session) can be allocated to at most this many advisors.
 const MAX_ADVISORS_PER_SESSION = 3;
@@ -461,10 +467,56 @@ export const getSession = createServerFn({ method: "POST" })
     return { session, messages: messages ?? [], answers: answers ?? [], customer };
   });
 
+// Best-effort SMS confirming the fact-find is complete, with a direct link to
+// the summary page. Never throws into the caller's happy path: skips silently if
+// Twilio is unconfigured or the customer has no phone, and logs on failure.
+async function sendInterviewCompleteSms(customerId: string, sessionId: string): Promise<void> {
+  try {
+    if (!isTwilioConfigured()) return;
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("full_name, phone")
+      .eq("id", customerId)
+      .maybeSingle();
+    const phone = (profile as { phone?: string | null } | null)?.phone?.trim();
+    if (!phone) return;
+
+    const firstName = profile?.full_name?.trim().split(/\s+/)[0] || "there";
+    const summaryUrl = `${getAppBaseUrl()}/sessions/${sessionId}`;
+    const body = interviewCompleteMessage({ name: firstName, summaryUrl });
+
+    const { sid } = await sendSms({ to: phone, body });
+    try {
+      await supabaseAdmin.from("sms_messages").insert({
+        direction: "outbound",
+        from_number: process.env.TWILIO_PHONE_NUMBER!,
+        to_number: phone,
+        body,
+        twilio_sid: sid,
+      });
+    } catch (e) {
+      console.error("log interview-complete sms failed", e);
+    }
+  } catch (e) {
+    console.error("interview completion SMS failed:", e);
+  }
+}
+
 export const submitSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
+    // Read the current status first so the completion side-effects only fire on a
+    // real transition into "submitted" (submit can be retried from the summary).
+    const { data: existing, error: readErr } = await context.supabase
+      .from("interview_sessions")
+      .select("id, status, customer_id")
+      .eq("id", data.sessionId)
+      .single();
+    if (readErr) throw new Error(readErr.message);
+    const alreadySubmitted = existing.status === "submitted";
+
     const { error } = await context.supabase
       .from("interview_sessions")
       .update({ status: "submitted", submitted_at: new Date().toISOString() })
@@ -474,6 +526,10 @@ export const submitSession = createServerFn({ method: "POST" })
     // so the referrer's bonus becomes reviewable. Best-effort, never blocks.
     const { markReferralQualified } = await import("@/lib/referrals.functions");
     await markReferralQualified(context.userId);
+
+    if (!alreadySubmitted) {
+      await sendInterviewCompleteSms(existing.customer_id, data.sessionId);
+    }
     return { ok: true };
   });
 

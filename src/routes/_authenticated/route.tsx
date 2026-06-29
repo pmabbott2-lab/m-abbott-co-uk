@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { shouldBlockAuthenticatedApp } from "@/lib/auth-recovery";
+import { PhoneCaptureGate } from "@/components/PhoneCaptureGate";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -16,5 +17,9 @@ export const Route = createFileRoute("/_authenticated")({
     if (error || !data.user) throw redirect({ to: "/auth" });
     return { user: data.user };
   },
-  component: () => <Outlet />,
+  component: () => (
+    <PhoneCaptureGate>
+      <Outlet />
+    </PhoneCaptureGate>
+  ),
 });

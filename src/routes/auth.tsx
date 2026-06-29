@@ -8,13 +8,14 @@ import {
   isPasswordRecoveryUrl,
 } from "@/lib/auth-recovery";
 import { getAuthCallbackUrl, getPasswordResetUrl, isLocalDev } from "@/lib/app-url";
+import { isValidUkMobile, normaliseUkPhone } from "@/lib/phone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import avatarImg from "@/assets/susan.png";
 
-type AuthMode = "signin" | "signup" | "forgot";
+type AuthMode = "signin" | "signup" | "forgot" | "phone";
 
 export const Route = createFileRoute("/auth")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -47,6 +48,10 @@ function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<{ type: "error" | "success"; text: string } | null>(null);
   const [devResetLink, setDevResetLink] = useState<string | null>(null);
+  // SMS OTP login: once a code is sent we remember the E.164 number we sent it
+  // to and switch to the code-entry step.
+  const [otpSentTo, setOtpSentTo] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState("");
 
   useEffect(() => {
     if (isChildRoute) return;
@@ -88,6 +93,8 @@ function AuthPage() {
     setDevResetLink(null);
     setPassword("");
     setPhone("");
+    setOtpSentTo(null);
+    setOtpCode("");
     if (typeof window !== "undefined") {
       window.history.replaceState({}, "", "/auth");
     }
@@ -215,15 +222,87 @@ function AuthPage() {
     }
   };
 
+  const sendOtp = async (resend = false) => {
+    const e164 = normaliseUkPhone(phone);
+    if (!isValidUkMobile(phone)) {
+      showStatus("error", "Enter a valid UK mobile number (e.g. 07123 456789).");
+      return;
+    }
+    setStatus(null);
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({ phone: e164 });
+      if (error) throw error;
+      setOtpSentTo(e164);
+      setOtpCode("");
+      showStatus("success", `We've texted a 6-digit code to ${e164}.${resend ? " (resent)" : ""}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not send the code";
+      if (/signups not allowed|otp.*disabled|phone.*provider|not enabled/i.test(msg)) {
+        showStatus(
+          "error",
+          "Phone sign-in isn't enabled yet. An admin must turn on the Phone provider and an SMS provider in Supabase.",
+        );
+      } else {
+        showStatus("error", msg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verifyOtpCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpSentTo) return;
+    const token = otpCode.trim();
+    if (!/^\d{6}$/.test(token)) {
+      showStatus("error", "Enter the 6-digit code from the text message.");
+      return;
+    }
+    setStatus(null);
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        phone: otpSentTo,
+        token,
+        type: "sms",
+      });
+      if (error) throw error;
+      if (!data.session) {
+        showStatus("error", "Sign-in did not complete. Please try again.");
+        return;
+      }
+      clearPasswordRecoveryPending();
+      navigate({ to: "/home" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Something went wrong";
+      if (/expired|invalid|incorrect|token/i.test(msg)) {
+        showStatus("error", "That code is invalid or expired. Request a new one.");
+      } else {
+        showStatus("error", msg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const title =
-    mode === "forgot" ? "Reset your password" : "Get started with Mortgage Hub";
+    mode === "forgot"
+      ? "Reset your password"
+      : mode === "phone"
+        ? "Sign in with your phone"
+        : "Get started with Mortgage Hub";
 
   const subtitle =
     mode === "forgot"
       ? isLocalDev()
         ? "We'll create a direct reset link for localhost (no email required)."
         : "Enter your email and we'll send you a reset link."
-      : "A friendly voice interview that helps your advisor know you faster.";
+      : mode === "phone"
+        ? otpSentTo
+          ? "Enter the 6-digit code we just texted you."
+          : "We'll text you a one-time code to sign in — no password needed."
+        : "A friendly voice interview that helps your advisor know you faster.";
 
   const submitLabel =
     mode === "forgot"
@@ -308,6 +387,7 @@ function AuthPage() {
             </div>
           )}
 
+          {mode !== "phone" && (
           <form onSubmit={onSubmit} className="space-y-3">
             {mode === "signup" && (
               <div className="space-y-1.5">
@@ -373,6 +453,86 @@ function AuthPage() {
               {loading ? "Please wait…" : submitLabel}
             </Button>
           </form>
+          )}
+
+          {mode === "phone" && !otpSentTo && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void sendOtp(false);
+              }}
+              className="space-y-3"
+            >
+              <div className="space-y-1.5">
+                <Label htmlFor="otp-phone">Mobile number</Label>
+                <Input
+                  id="otp-phone"
+                  type="tel"
+                  autoComplete="tel"
+                  inputMode="tel"
+                  placeholder="07123 456789"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  required
+                  autoFocus
+                />
+                <p className="text-xs text-muted-foreground">
+                  UK mobile only. Standard message rates may apply.
+                </p>
+              </div>
+              <Button type="submit" disabled={loading} className="w-full">
+                {loading ? "Sending code…" : "Text me a code"}
+              </Button>
+            </form>
+          )}
+
+          {mode === "phone" && otpSentTo && (
+            <form onSubmit={verifyOtpCode} className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="otp-code">6-digit code</Label>
+                <Input
+                  id="otp-code"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  placeholder="123456"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                  required
+                  autoFocus
+                />
+                <p className="text-xs text-muted-foreground">
+                  Sent to {otpSentTo}.
+                </p>
+              </div>
+              <Button type="submit" disabled={loading} className="w-full">
+                {loading ? "Verifying…" : "Verify & sign in"}
+              </Button>
+              <div className="flex items-center justify-between text-xs">
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => {
+                    setOtpSentTo(null);
+                    setOtpCode("");
+                    setStatus(null);
+                  }}
+                  className="text-muted-foreground hover:text-foreground hover:underline disabled:opacity-50"
+                >
+                  ← Use a different number
+                </button>
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => void sendOtp(true)}
+                  className="text-muted-foreground hover:text-foreground hover:underline disabled:opacity-50"
+                >
+                  Resend code
+                </button>
+              </div>
+            </form>
+          )}
 
           {(mode === "signin" || mode === "signup") && (
             <>
@@ -382,6 +542,15 @@ function AuthPage() {
               </div>
               <Button variant="outline" className="w-full" onClick={onGoogle} disabled={loading} type="button">
                 Continue with Google
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => switchMode("phone")}
+                disabled={loading}
+                type="button"
+              >
+                Sign in with phone (SMS code)
               </Button>
             </>
           )}

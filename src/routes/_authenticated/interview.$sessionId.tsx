@@ -1041,10 +1041,11 @@ function InterviewPage() {
     <AppShell
       title="Interview"
       action={
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="ghost"
             size="sm"
+            className="shrink-0"
             onClick={() => {
               handlePause();
               navigate({ to: "/chat/$sessionId", params: { sessionId } });
@@ -1053,7 +1054,7 @@ function InterviewPage() {
           >
             <MessageSquare className="w-4 h-4 mr-2" /> Switch to typing
           </Button>
-          <Button variant="outline" size="sm" onClick={() => navigate({ to: "/home" })}>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={() => navigate({ to: "/home" })}>
             <ArrowLeft className="w-4 h-4 mr-2" /> Back
           </Button>
         </div>

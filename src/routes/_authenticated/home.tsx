@@ -185,13 +185,32 @@ function AdvisorAccessCard() {
 
   const users = usersQ.data ?? [];
 
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+  const filteredUsers = users.filter((u) => {
+    if (!q) return true;
+    return [u.full_name, u.email].filter(Boolean).join(" ").toLowerCase().includes(q);
+  });
+
   return (
     <div className="mt-10">
       <h3 className="text-sm font-medium text-muted-foreground mb-3">Team access</h3>
-      <div className="rounded-2xl border bg-card divide-y">
-        <div className="p-4 text-xs text-muted-foreground">
+      <div className="rounded-2xl border bg-card overflow-hidden">
+        <div className="p-4 text-xs text-muted-foreground border-b">
           Advisors can view every customer&apos;s fact-find. Grant access to colleagues below.
         </div>
+        <div className="p-3 border-b">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Search people by name or email…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+        </div>
+        <div className="max-h-[640px] overflow-y-auto divide-y">
         {usersQ.isLoading && <div className="p-4 text-sm text-muted-foreground">Loading people…</div>}
         {usersQ.isError && (
           <div className="p-4 text-sm text-muted-foreground">Couldn&apos;t load the people list.</div>
@@ -199,7 +218,10 @@ function AdvisorAccessCard() {
         {!usersQ.isLoading && users.length === 0 && (
           <div className="p-4 text-sm text-muted-foreground">No accounts yet.</div>
         )}
-        {users.map((u) => (
+        {!usersQ.isLoading && users.length > 0 && filteredUsers.length === 0 && (
+          <div className="p-4 text-sm text-muted-foreground">No matches.</div>
+        )}
+        {filteredUsers.map((u) => (
           <div key={u.id} className="flex items-center gap-3 p-4">
             <div className="flex-1 min-w-0">
               <div className="font-medium truncate">{u.full_name || u.email || "Unnamed user"}</div>
@@ -248,6 +270,7 @@ function AdvisorAccessCard() {
             )}
           </div>
         ))}
+        </div>
       </div>
     </div>
   );
@@ -383,14 +406,33 @@ function IntroducerAccessCard() {
 
   const users = usersQ.data ?? [];
 
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+  const filteredUsers = users.filter((u) => {
+    if (!q) return true;
+    return [u.full_name, u.email].filter(Boolean).join(" ").toLowerCase().includes(q);
+  });
+
   return (
     <div className="mt-10">
       <h3 className="text-sm font-medium text-muted-foreground mb-3">Introducer access</h3>
-      <div className="rounded-2xl border bg-card divide-y">
-        <div className="p-4 text-xs text-muted-foreground">
+      <div className="rounded-2xl border bg-card overflow-hidden">
+        <div className="p-4 text-xs text-muted-foreground border-b">
           Introducers get a referral portal with shareable links and lead tracking. Multiple
           introducers can share a company via its 4-digit code so referrals credit the company.
         </div>
+        <div className="p-3 border-b">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Search people by name or email…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+        </div>
+        <div className="max-h-[640px] overflow-y-auto divide-y">
         {usersQ.isLoading && <div className="p-4 text-sm text-muted-foreground">Loading people…</div>}
         {usersQ.isError && (
           <div className="p-4 text-sm text-muted-foreground">Couldn&apos;t load the people list.</div>
@@ -398,7 +440,10 @@ function IntroducerAccessCard() {
         {!usersQ.isLoading && users.length === 0 && (
           <div className="p-4 text-sm text-muted-foreground">No accounts yet.</div>
         )}
-        {users.map((u) => (
+        {!usersQ.isLoading && users.length > 0 && filteredUsers.length === 0 && (
+          <div className="p-4 text-sm text-muted-foreground">No matches.</div>
+        )}
+        {filteredUsers.map((u) => (
           <div key={u.id} className="flex items-center gap-3 p-4">
             <div className="flex-1 min-w-0">
               <div className="font-medium truncate">{u.full_name || u.email || "Unnamed user"}</div>
@@ -442,6 +487,7 @@ function IntroducerAccessCard() {
             )}
           </div>
         ))}
+        </div>
       </div>
     </div>
   );
