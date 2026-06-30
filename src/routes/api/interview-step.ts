@@ -4,7 +4,9 @@ import { extractStructuredFields, parseMoneyFromText, computeLoanAmount, formatG
 import { resolveAddress, isLikelyPostcode } from "@/lib/address-lookup.server";
 import { ageFromText } from "@/lib/dob-parse";
 import { getQuestion, nextStep, findSection, SECTIONS, ACKNOWLEDGEMENTS, ackClip, firstGreeting, firstNameFromFullName, type Section, type AnswersMap } from "@/lib/interview-script";
+import { smalltalkEnabled, isAsideMoment, generateAside } from "@/lib/interview-smalltalk.server";
 import { createClient } from "@supabase/supabase-js";
+import { sendInterviewCompleteSms } from "@/lib/sms.server";
 import type { Database } from "@/integrations/supabase/types";
 
 interface Body {
@@ -190,19 +192,40 @@ export const Route = createFileRoute("/api/interview-step")({
             );
           };
 
-          // After the house number/name, look up and store the full address.
+          // After the house number/name, normalise the spoken postcode, look it
+          // up, and store the resolved address. We never store the raw phonetic
+          // postcode — if it can't be resolved we leave the address unset so the
+          // confirmation step asks the customer to repeat it.
           if (currentQ.key === "home_house") {
             const pc = priorMap["personal:home_postcode"] ?? "";
             try {
               const resolved = await resolveAddress(pc, rawValue);
-              await saveAddress(resolved.formatted, {
-                address: resolved.formatted,
-                postcode: resolved.postcode,
-                provider: resolved.provider,
-              });
+              if (resolved.ok || resolved.postcode) {
+                await saveAddress(resolved.formatted, {
+                  address: resolved.formatted,
+                  postcode: resolved.postcode,
+                  provider: resolved.provider,
+                });
+                // Keep the stored postcode answer canonical so the advisor's
+                // summary and small-talk context use the real value, not the
+                // phonetic transcription.
+                if (resolved.postcode) {
+                  await supabase.from("interview_answers").upsert(
+                    {
+                      session_id: body.sessionId,
+                      section,
+                      field_key: "home_postcode",
+                      field_label: "Current postcode",
+                      value: resolved.postcode,
+                      structured_value: { postcode: resolved.postcode } as never,
+                      updated_at: new Date().toISOString(),
+                    },
+                    { onConflict: "session_id,section,field_key" },
+                  );
+                }
+              }
             } catch (e) {
               console.error("address lookup failed", e);
-              await saveAddress([rawValue, pc].filter(Boolean).join(", "), { address: rawValue });
             }
           }
 
@@ -330,7 +353,26 @@ export const Route = createFileRoute("/api/interview-step")({
               updated_at: new Date().toISOString(),
             })
             .eq("id", body.sessionId);
-          return Response.json({ done: true, summary });
+
+          // Mark the fact-find submitted and fire the completion SMS exactly
+          // once. The conditional update (status != "submitted") is the
+          // single-send gate: only the request that genuinely flips the status
+          // sends the text, so re-completing — or the later explicit
+          // submitSession() — never re-texts the customer.
+          const { data: transitioned } = await supabase
+            .from("interview_sessions")
+            .update({ status: "submitted", submitted_at: new Date().toISOString() })
+            .eq("id", body.sessionId)
+            .neq("status", "submitted")
+            .select("id");
+          if ((transitioned?.length ?? 0) > 0 && session.customer_id) {
+            await sendInterviewCompleteSms(session.customer_id, body.sessionId);
+          }
+
+          const closing = profileFirstName
+            ? `Thank you for providing all that information, ${profileFirstName}. You can now arrange an appointment or request a call back.`
+            : "Thank you for providing all that information. You can now arrange an appointment or request a call back.";
+          return Response.json({ done: true, summary, closing });
         }
 
         const nextQ = getQuestion(step.section, step.index)!;
@@ -340,6 +382,18 @@ export const Route = createFileRoute("/api/interview-step")({
         const firstName = profileFirstName;
         const personalise = (text: string) =>
           firstName ? text.replace(/\{firstName\}/g, firstName) : text.replace(/,?\s*\{firstName\}/g, "");
+
+        // Contextual small talk: a brief, optional aside referencing what the
+        // customer already shared, woven in before the next scripted question.
+        const smalltalk = smalltalkEnabled();
+        let aside = "";
+        if (smalltalk && !isFirst && !stayOnSameQuestion && body.transcript.trim() && isAsideMoment(currentQ?.key)) {
+          aside = await generateAside({
+            answers: answersMap,
+            justAnsweredKey: currentQ!.key,
+            firstName: firstName || undefined,
+          });
+        }
 
         const intro = !isFirst && (step.section !== section || step.index === 0) && step.index === 0 ? sec.intro + " " : "";
         // The acknowledgement is spoken separately (pre-cached on the client for
@@ -378,11 +432,17 @@ export const Route = createFileRoute("/api/interview-step")({
           if (loan != null) borrowNote = `So you're looking to borrow about ${formatGBP(loan)}. `;
         }
 
-        const sayText = personalise(
+        // When small talk is on, the rigid scripted DOB opener becomes dynamic:
+        // drop the fixed weather line so asides drive the warmth instead.
+        const firstPrompt =
+          isFirst && smalltalk
+            ? nextQ.prompt.replace("I hope the weather's treating you kindly today. ", "")
+            : nextQ.prompt;
+        const scriptedSay =
           followupPrompt ||
-            confirmPrompt ||
-            (isFirst ? firstGreeting(firstName, nextQ.prompt) : intro + borrowNote + nextQ.prompt),
-        );
+          confirmPrompt ||
+          (isFirst ? firstGreeting(firstName, firstPrompt) : intro + borrowNote + nextQ.prompt);
+        const sayText = personalise(aside ? `${aside} ${scriptedSay}` : scriptedSay);
         // The ack is only spoken when advancing to a new question, not on follow-ups.
         const ack = stayOnSameQuestion ? "" : ackText;
 

@@ -46,8 +46,13 @@ interface StepResp {
   prompt?: string;
   ack?: string;
   sayText?: string;
+  closing?: string;
   wizard?: "credit" | "dependants";
 }
+
+// Hard cap on the spoken closing line so a stalled avatar/TTS never blocks the
+// transition to the booking options.
+const CLOSING_MAX_MS = 12000;
 
 // Voice-activity detection thresholds (tuned for snappier turn-taking)
 const SILENCE_MS = 1100;
@@ -501,8 +506,29 @@ function InterviewPage() {
       if (!res.ok) throw new Error(await res.text());
       const data = normaliseStep((await res.json()) as StepResp);
       if (data.done) {
-        setDone(true);
+        setOptionsActive(false);
+        const closing = (data.closing ?? "").trim();
+        if (closing && !pausedRef.current) {
+          // Speak the closing line once, lip-synced via the same avatar/TTS
+          // path as every question, while the avatar is still mounted (done is
+          // kept false until she finishes). Falls back gracefully — the guard
+          // timeout ensures the booking options always appear even if the
+          // avatar/audio stalls or fails.
+          const closingStep: StepResp = { done: false, sayText: closing };
+          currentRef.current = closingStep;
+          setCurrent(closingStep);
+          setStatus("Susan is speaking…");
+          const spoke = play(closing).catch((e) => {
+            console.error("closing TTS failed", e);
+          });
+          await Promise.race([
+            spoke,
+            new Promise<void>((resolve) => setTimeout(resolve, CLOSING_MAX_MS)),
+          ]);
+        }
+        currentRef.current = null;
         setCurrent(null);
+        setDone(true);
         setStatus("All done");
         return;
       }

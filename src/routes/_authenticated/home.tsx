@@ -4,6 +4,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { listMySessions, createSession, getMyRole, listAllSessionsForAdvisor, deleteSession, listUsersWithRoles, setAdvisorRole, setIntroducerRole, listAdvisors, listAdvisorCustomers, allocateSession, unallocateSession, bulkAllocateSessions, softDeleteAdvisor, restoreAdvisor, softDeleteIntroducer, restoreIntroducer, listBinnedStaff, createStaffInvite, listStaffInvites, revokeStaffInvite } from "@/lib/sessions.functions";
 import type { AdvisorCustomerRow } from "@/lib/sessions.functions";
+import { listAdvisorContacts, markContactOpened } from "@/lib/booking.functions";
+import type { AdvisorContact } from "@/lib/booking.functions";
 import { checkIsIntroducer } from "@/lib/introducer.functions";
 import { claimReferral, createReferralLink, textReferralLink, listReferralLinks, listAllReferrals, updateReferralBonusStatus, searchCustomers } from "@/lib/referrals.functions";
 import { getRafCode, clearRafCookie, rafLinkForCode } from "@/lib/referral";
@@ -33,8 +35,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Mic, MessageSquare, FileText, ArrowRight, Trash2, RotateCcw, ShieldCheck, ShieldOff, CalendarCheck, CalendarDays, Link2, UserPlus, UserMinus, Users, UserCog, Search, Hash, KeyRound, Copy, Check, Clock, Mail, Gift, Send, Phone, Briefcase, ChevronRight } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { Mic, MessageSquare, FileText, ArrowRight, Trash2, RotateCcw, ShieldCheck, ShieldOff, CalendarCheck, CalendarDays, Link2, UserPlus, UserMinus, Users, UserCog, Search, Hash, KeyRound, Copy, Check, Clock, Mail, Gift, Send, Phone, Briefcase, ChevronRight, PhoneCall, Inbox } from "lucide-react";
+import { formatDistanceToNow, format } from "date-fns";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/home")({
@@ -1737,6 +1739,111 @@ function AdvisorsCard() {
   );
 }
 
+const CALLBACK_WINDOW_LABELS: Record<string, string> = {
+  "9-12": "9am – 12pm",
+  "12-4": "12pm – 4pm",
+  "4-8": "4pm – 8pm",
+};
+
+// Advisor Contacts tab: appointments + call-back requests for the signed-in
+// advisor, with NEW / unopened ones highlighted. Opening one (or following the
+// link to the customer) marks it seen for this advisor.
+function ContactsCard() {
+  const qc = useQueryClient();
+  const contactsFn = useServerFn(listAdvisorContacts);
+  const openFn = useServerFn(markContactOpened);
+
+  const contactsQ = useQuery({ queryKey: ["advisor-contacts"], queryFn: () => contactsFn() });
+  const contacts = (contactsQ.data ?? []) as AdvisorContact[];
+
+  const open = useMutation({
+    mutationFn: (vars: { contactType: "appointment" | "callback"; contactId: string }) =>
+      openFn({ data: vars }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["advisor-contacts"] }),
+  });
+
+  const unopenedCount = contacts.filter((c) => !c.opened).length;
+
+  return (
+    <div className="mt-2">
+      <div className="flex items-center gap-2 mb-3">
+        <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+          <Inbox className="w-4 h-4" />
+          Appointments &amp; call-backs
+        </h3>
+        {unopenedCount > 0 && (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-primary/15 text-primary font-medium">
+            {unopenedCount} new
+          </span>
+        )}
+      </div>
+      <div className="rounded-2xl border bg-card divide-y overflow-hidden">
+        <div className="p-4 text-xs text-muted-foreground">
+          Your booked appointments and customer call-back requests. New items you haven&apos;t opened
+          are highlighted — opening one marks it as seen.
+        </div>
+        {contactsQ.isLoading && <div className="p-4 text-sm text-muted-foreground">Loading contacts…</div>}
+        {!contactsQ.isLoading && contacts.length === 0 && (
+          <div className="p-4 text-sm text-muted-foreground">No appointments or call-backs yet.</div>
+        )}
+        {contacts.map((c) => {
+          const markSeen = () => {
+            if (!c.opened) open.mutate({ contactType: c.kind, contactId: c.id });
+          };
+          const body = (
+            <div className={`flex items-center gap-3 p-4 transition ${c.opened ? "" : "bg-primary/5"}`}>
+              <span
+                className={`inline-flex w-9 h-9 items-center justify-center rounded-full shrink-0 ${c.kind === "appointment" ? "bg-accent/30" : "bg-primary/10 text-primary"}`}
+              >
+                {c.kind === "appointment" ? <CalendarCheck className="w-4 h-4" /> : <PhoneCall className="w-4 h-4" />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="font-medium truncate flex items-center gap-2">
+                  {c.customerName}
+                  {!c.opened && (
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground">
+                      New
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground truncate">
+                  {c.kind === "appointment"
+                    ? c.startsAt
+                      ? `Appointment · ${format(new Date(c.startsAt), "EEE d MMM, HH:mm")}`
+                      : "Appointment"
+                    : `Call back · ${CALLBACK_WINDOW_LABELS[c.window ?? ""] ?? c.window}`}
+                  {c.customerPhone ? ` · ${c.customerPhone}` : ""}
+                </div>
+              </div>
+              {c.sessionId && <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
+            </div>
+          );
+          return c.sessionId ? (
+            <Link
+              key={`${c.kind}-${c.id}`}
+              to="/sessions/$sessionId"
+              params={{ sessionId: c.sessionId }}
+              onClick={markSeen}
+              className="block hover:bg-muted/40"
+            >
+              {body}
+            </Link>
+          ) : (
+            <button
+              key={`${c.kind}-${c.id}`}
+              type="button"
+              onClick={markSeen}
+              className="block w-full text-left hover:bg-muted/40"
+            >
+              {body}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Home() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -1746,6 +1853,7 @@ function Home() {
   const createFn = useServerFn(createSession);
 
   const introducerFn = useServerFn(checkIsIntroducer);
+  const markOpenedFn = useServerFn(markContactOpened);
 
   const roleQ = useQuery({ queryKey: ["my-role"], queryFn: () => roleFn() });
   const isAdvisor = roleQ.data?.isAdvisor ?? false;
@@ -1757,6 +1865,7 @@ function Home() {
 
   const [unallocatedOnly, setUnallocatedOnly] = useState(false);
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"recent" | "next_contact">("recent");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const sessionsQ = useQuery({
@@ -1769,6 +1878,14 @@ function Home() {
     queryKey: ["all-sessions"],
     queryFn: () => allFn(),
     enabled: !roleQ.isLoading && isAdvisor,
+  });
+
+  // Opening a customer with a pending call-back marks it seen for this advisor,
+  // clearing the highlight (consistent with the Contacts tab).
+  const markCallbackOpened = useMutation({
+    mutationFn: (vars: { contactId: string }) =>
+      markOpenedFn({ data: { contactType: "callback", contactId: vars.contactId } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["all-sessions"] }),
   });
 
   const create = useMutation({
@@ -1823,15 +1940,26 @@ function Home() {
 
   if (isAdvisor) {
     const q = search.trim().toLowerCase();
-    const sessions = (allQ.data ?? []).filter((s) => {
-      if (unallocatedOnly && ((s as { assignedAdvisors?: AssignedAdvisor[] }).assignedAdvisors ?? []).length !== 0) {
-        return false;
-      }
-      if (!q) return true;
-      const c = (s as { customer?: { full_name?: string | null; email?: string | null; phone?: string | null } | null }).customer;
-      const haystack = [c?.full_name, c?.email, c?.phone].filter(Boolean).join(" ").toLowerCase();
-      return haystack.includes(q);
-    });
+    const sessions = (allQ.data ?? [])
+      .filter((s) => {
+        if (unallocatedOnly && ((s as { assignedAdvisors?: AssignedAdvisor[] }).assignedAdvisors ?? []).length !== 0) {
+          return false;
+        }
+        if (!q) return true;
+        const c = (s as { customer?: { full_name?: string | null; email?: string | null; phone?: string | null } | null }).customer;
+        const haystack = [c?.full_name, c?.email, c?.phone].filter(Boolean).join(" ").toLowerCase();
+        return haystack.includes(q);
+      })
+      .sort((a, b) => {
+        if (sortBy !== "next_contact") return 0;
+        // Soonest planned next contact first; sessions without one sink to the bottom.
+        const an = (a as { nextContactAt?: string | null }).nextContactAt;
+        const bn = (b as { nextContactAt?: string | null }).nextContactAt;
+        if (!an && !bn) return 0;
+        if (!an) return 1;
+        if (!bn) return -1;
+        return new Date(an).getTime() - new Date(bn).getTime();
+      });
 
     const invalidateSessions = () => qc.invalidateQueries({ queryKey: ["all-sessions"] });
 
@@ -1842,7 +1970,7 @@ function Home() {
       setSelectedIds((prev) => (on ? [...new Set([...prev, id])] : prev.filter((x) => x !== id)));
     const clearSelection = () => setSelectedIds([]);
 
-    const tabCount = 1 + (isIntroducer ? 1 : 0) + (isMainAdmin ? 3 : 0);
+    const tabCount = 2 + (isIntroducer ? 1 : 0) + (isMainAdmin ? 3 : 0);
 
     return (
       <AppShell title="Advisor dashboard">
@@ -1889,6 +2017,10 @@ function Home() {
                 <Users className="w-4 h-4 mr-1.5" />
                 Customers
               </TabsTrigger>
+              <TabsTrigger value="contacts">
+                <Inbox className="w-4 h-4 mr-1.5" />
+                Contacts
+              </TabsTrigger>
               {isMainAdmin && (
                 <TabsTrigger value="advisors">
                   <Briefcase className="w-4 h-4 mr-1.5" />
@@ -1932,14 +2064,25 @@ function Home() {
                     Unallocated only
                   </label>
                 </div>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search customers by name, email or phone…"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="pl-9"
-                  />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="relative flex-1 min-w-[220px]">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search customers by name, email or phone…"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="pl-9"
+                    />
+                  </div>
+                  <select
+                    className="rounded-md border bg-background px-3 py-2 text-sm"
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as "recent" | "next_contact")}
+                    aria-label="Sort customers"
+                  >
+                    <option value="recent">Sort: Most recent</option>
+                    <option value="next_contact">Sort: Next contact</option>
+                  </select>
                 </div>
                 <div className="flex items-center justify-between gap-3 flex-wrap rounded-xl border bg-muted/40 px-3 py-2">
                   <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -1983,8 +2126,13 @@ function Home() {
               {sessions.map((s) => {
                 const assigned = ((s as { assignedAdvisors?: AssignedAdvisor[] }).assignedAdvisors ?? []);
                 const phone = (s as { customer?: { phone?: string | null } | null }).customer?.phone;
+                const nextContactAt = (s as { nextContactAt?: string | null }).nextContactAt;
+                const callback = (s as { callback?: { id: string; window: string | null } | null }).callback ?? null;
                 return (
-                  <div key={s.id} className="flex items-center gap-2 p-4 hover:bg-muted/40 transition">
+                  <div
+                    key={s.id}
+                    className={`flex items-center gap-2 p-4 transition ${callback ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-muted/40"}`}
+                  >
                     {isMainAdmin && (
                       <Checkbox
                         className="shrink-0"
@@ -1996,10 +2144,20 @@ function Home() {
                     <Link
                       to="/sessions/$sessionId"
                       params={{ sessionId: s.id }}
+                      onClick={() => {
+                        if (callback) markCallbackOpened.mutate({ contactId: callback.id });
+                      }}
                       className="flex-1 flex items-center justify-between gap-3"
                     >
                       <div className="min-w-0">
-                        <div className="font-medium truncate">{s.customer?.full_name || s.customer?.email || "Unnamed customer"}</div>
+                        <div className="font-medium truncate flex items-center gap-2">
+                          {s.customer?.full_name || s.customer?.email || "Unnamed customer"}
+                          {callback && (
+                            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground shrink-0">
+                              New
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-muted-foreground">
                           {s.status === "submitted" ? "Submitted" : "In progress"} ·{" "}
                           {formatDistanceToNow(new Date(s.started_at), { addSuffix: true })}
@@ -2012,6 +2170,21 @@ function Home() {
                             <span className="text-amber-600 dark:text-amber-500">Unallocated</span>
                           )}
                         </div>
+                        {callback && (
+                          <div className="text-xs mt-0.5 inline-flex items-center gap-1.5 text-primary font-medium">
+                            <PhoneCall className="w-3 h-3" />
+                            Call-back requested
+                            <span className="font-normal">
+                              · {CALLBACK_WINDOW_LABELS[callback.window ?? ""] ?? callback.window}
+                            </span>
+                          </div>
+                        )}
+                        {nextContactAt && (
+                          <div className="text-xs mt-0.5 inline-flex items-center gap-1 text-primary">
+                            <Clock className="w-3 h-3" />
+                            Next contact: {format(new Date(nextContactAt), "EEE d MMM, HH:mm")}
+                          </div>
+                        )}
                       </div>
                       <span className={`text-xs px-2 py-1 rounded-full shrink-0 ${s.status === "submitted" ? "bg-accent/30" : "bg-muted"}`}>
                         {s.status === "submitted" ? "Ready to review" : "In progress"}
@@ -2025,6 +2198,10 @@ function Home() {
                 );
               })}
             </div>
+          </TabsContent>
+
+          <TabsContent value="contacts">
+            <ContactsCard />
           </TabsContent>
 
           {isMainAdmin && (

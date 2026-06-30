@@ -5,10 +5,8 @@ import { chatCompletion } from "@/lib/ai-gateway.server";
 import { extractStructuredFields } from "@/lib/structured-answers";
 import { generateUniqueCompanyCode } from "@/lib/introducer.functions";
 import {
-  getAppBaseUrl,
-  interviewCompleteMessage,
-  isTwilioConfigured,
-  sendSms,
+  normaliseUkPhone,
+  sendInterviewCompleteSms,
 } from "@/lib/sms.server";
 
 // Each customer file (session) can be allocated to at most this many advisors.
@@ -466,42 +464,6 @@ export const getSession = createServerFn({ method: "POST" })
     }
     return { session, messages: messages ?? [], answers: answers ?? [], customer };
   });
-
-// Best-effort SMS confirming the fact-find is complete, with a direct link to
-// the summary page. Never throws into the caller's happy path: skips silently if
-// Twilio is unconfigured or the customer has no phone, and logs on failure.
-async function sendInterviewCompleteSms(customerId: string, sessionId: string): Promise<void> {
-  try {
-    if (!isTwilioConfigured()) return;
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("full_name, phone")
-      .eq("id", customerId)
-      .maybeSingle();
-    const phone = (profile as { phone?: string | null } | null)?.phone?.trim();
-    if (!phone) return;
-
-    const firstName = profile?.full_name?.trim().split(/\s+/)[0] || "there";
-    const summaryUrl = `${getAppBaseUrl()}/sessions/${sessionId}`;
-    const body = interviewCompleteMessage({ name: firstName, summaryUrl });
-
-    const { sid } = await sendSms({ to: phone, body });
-    try {
-      await supabaseAdmin.from("sms_messages").insert({
-        direction: "outbound",
-        from_number: process.env.TWILIO_PHONE_NUMBER!,
-        to_number: phone,
-        body,
-        twilio_sid: sid,
-      });
-    } catch (e) {
-      console.error("log interview-complete sms failed", e);
-    }
-  } catch (e) {
-    console.error("interview completion SMS failed:", e);
-  }
-}
 
 export const submitSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -1043,10 +1005,99 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "GET" })
       allocBySession.set(a.session_id, list);
     }
 
+    // Contact tracking (last/next contact) so the overview can rank/sort/filter
+    // by the planned next contact. Degrades to empty pre-migration.
+    const trackingMap = new Map<string, { last: string | null; next: string | null }>();
+    {
+      const sessionIds = (sessions ?? []).map((s) => s.id);
+      if (sessionIds.length > 0) {
+        const { data: tracking, error: trackErr } = await supabaseAdmin
+          .from("session_contact_tracking")
+          .select("session_id, last_contacted_at, next_contact_at")
+          .in("session_id", sessionIds);
+        if (trackErr && !isMissingTableError(trackErr)) throw new Error(trackErr.message);
+        for (const t of tracking ?? []) {
+          trackingMap.set(t.session_id, { last: t.last_contacted_at, next: t.next_contact_at });
+        }
+      }
+    }
+
+    // Open call-back requests, keyed by session, so the customer row highlights
+    // as "ready to review" until the advisor resolves it. A call-back counts as
+    // ready-to-review while its status is 'new'; an advisor "Spoke to customer"
+    // (status → 'closed') or "Mark contacted" clears it, while "Log attempt"
+    // keeps it open. Any open call-back surfaces (not just ones assigned to this
+    // advisor) and matches either by its session_id OR by the session's owning
+    // customer — so direct "/booking" call-backs (which may have no session
+    // link) still flag the customer. Degrades to empty pre-migration.
+    const callbackBySession = new Map<string, { id: string; window: string | null }>();
+    {
+      const sessionList = sessions ?? [];
+      const sessionIds = sessionList.map((s) => s.id);
+      const customerIds = Array.from(
+        new Set(sessionList.map((s) => s.customer_id).filter(Boolean) as string[]),
+      );
+      if (sessionIds.length > 0) {
+        // Fetch call-backs tied to a visible session, and (separately) any tied
+        // to a visible session's owning customer; merge + dedupe by id.
+        const callbackById = new Map<
+          string,
+          { id: string; session_id: string | null; customer_id: string | null; preferred_window: string | null; status: string | null; created_at: string }
+        >();
+        {
+          const { data, error: cbErr } = await supabaseAdmin
+            .from("callback_requests")
+            .select("id, session_id, customer_id, preferred_window, status, created_at")
+            .in("session_id", sessionIds);
+          if (cbErr && !isMissingTableError(cbErr)) throw new Error(cbErr.message);
+          for (const c of data ?? []) callbackById.set(c.id, c);
+        }
+        if (customerIds.length > 0) {
+          const { data, error: cbErr2 } = await supabaseAdmin
+            .from("callback_requests")
+            .select("id, session_id, customer_id, preferred_window, status, created_at")
+            .in("customer_id", customerIds);
+          if (cbErr2 && !isMissingTableError(cbErr2)) throw new Error(cbErr2.message);
+          for (const c of data ?? []) callbackById.set(c.id, c);
+        }
+
+        // Map each visible customer to their session ids (newest-first, since
+        // `sessions` is ordered by started_at desc).
+        const sessionsByCustomer = new Map<string, string[]>();
+        for (const s of sessionList) {
+          const arr = sessionsByCustomer.get(s.customer_id) ?? [];
+          arr.push(s.id);
+          sessionsByCustomer.set(s.customer_id, arr);
+        }
+        const sessionIdSet = new Set(sessionIds);
+
+        // Newest call-back wins for a given session.
+        const callbacks = Array.from(callbackById.values()).sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+        );
+        for (const c of callbacks) {
+          if ((c.status ?? "new") !== "new") continue;
+          let targetSessionId: string | null = null;
+          if (c.session_id && sessionIdSet.has(c.session_id)) {
+            targetSessionId = c.session_id;
+          } else if (c.customer_id && sessionsByCustomer.has(c.customer_id)) {
+            // No visible session link — flag the customer's most recent session.
+            targetSessionId = sessionsByCustomer.get(c.customer_id)![0];
+          }
+          if (targetSessionId && !callbackBySession.has(targetSessionId)) {
+            callbackBySession.set(targetSessionId, { id: c.id, window: c.preferred_window });
+          }
+        }
+      }
+    }
+
     return (sessions ?? []).map((s) => ({
       ...s,
       customer: profileMap.get(s.customer_id) ?? null,
       assignedAdvisors: allocBySession.get(s.id) ?? [],
+      lastContactedAt: trackingMap.get(s.id)?.last ?? null,
+      nextContactAt: trackingMap.get(s.id)?.next ?? null,
+      callback: callbackBySession.get(s.id) ?? null,
     }));
   });
 
@@ -1357,7 +1408,328 @@ export const addAdvisorNote = createServerFn({ method: "POST" })
       .from("advisor_notes")
       .insert({ session_id: data.sessionId, advisor_id: context.userId, note: data.note });
     if (error) throw new Error(error.message);
+    // Mirror the note into the contact timeline so the History tab shows
+    // notes alongside contact events. Best-effort (pre-migration safe).
+    await appendContactLog(data.sessionId, context.userId, "note", data.note);
     return { ok: true };
+  });
+
+// ── Advisor contact tracking: last/next contact, append-only timeline ───────
+
+// Append a typed entry to the customer contact timeline. Never throws into the
+// caller's path — silently degrades if the table isn't present yet.
+async function appendContactLog(
+  sessionId: string,
+  authorId: string | null,
+  entryType: "contact" | "note" | "next_contact_set" | "appointment" | "callback",
+  body: string | null,
+): Promise<void> {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin
+      .from("customer_contact_log")
+      .insert({ session_id: sessionId, author_id: authorId, entry_type: entryType, body });
+    if (error && !isMissingTableError(error)) throw new Error(error.message);
+  } catch (e) {
+    console.error("append contact log failed", e);
+  }
+}
+
+export const getContactTracking = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const roles = await getRolesForUser(context.userId);
+    if (!roles.includes("advisor")) throw new Error("Forbidden");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: row, error } = await supabaseAdmin
+      .from("session_contact_tracking")
+      .select("last_contacted_at, next_contact_at")
+      .eq("session_id", data.sessionId)
+      .maybeSingle();
+    if (error && !isMissingTableError(error)) throw new Error(error.message);
+    return {
+      lastContactedAt: row?.last_contacted_at ?? null,
+      nextContactAt: row?.next_contact_at ?? null,
+    };
+  });
+
+// Persist last/next contact. The tracking row write is the primary effect of an
+// explicit advisor action, so a genuine failure must surface (NOT be swallowed
+// as "missing table") — otherwise the UI shows a false success and nothing
+// records. Reads the row back so callers can reflect the persisted value.
+async function upsertContactTracking(
+  sessionId: string,
+  userId: string,
+  patch: { last_contacted_at?: string; next_contact_at?: string | null },
+): Promise<{ lastContactedAt: string | null; nextContactAt: string | null }> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin
+    .from("session_contact_tracking")
+    .upsert(
+      { session_id: sessionId, updated_by: userId, updated_at: new Date().toISOString(), ...patch },
+      { onConflict: "session_id" },
+    )
+    .select("last_contacted_at, next_contact_at")
+    .single();
+  if (error) throw new Error(error.message);
+  return {
+    lastContactedAt: data?.last_contacted_at ?? null,
+    nextContactAt: data?.next_contact_at ?? null,
+  };
+}
+
+// "Last contacted" button: stamps now and logs a contact event.
+export const markContacted = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const roles = await getRolesForUser(context.userId);
+    if (!roles.includes("advisor")) throw new Error("Forbidden");
+    const now = new Date().toISOString();
+    const saved = await upsertContactTracking(data.sessionId, context.userId, {
+      last_contacted_at: now,
+    });
+    await appendContactLog(data.sessionId, context.userId, "contact", "Marked as contacted");
+    return { ok: true, lastContactedAt: saved.lastContactedAt ?? now };
+  });
+
+// "Next contact" editable field: records the planned next contact date/time.
+export const setNextContact = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ sessionId: z.string().uuid(), nextContactAt: z.string().datetime().nullable() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const roles = await getRolesForUser(context.userId);
+    if (!roles.includes("advisor")) throw new Error("Forbidden");
+    await upsertContactTracking(data.sessionId, context.userId, {
+      next_contact_at: data.nextContactAt,
+    });
+    if (data.nextContactAt) {
+      const when = new Date(data.nextContactAt).toLocaleString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Europe/London",
+      });
+      await appendContactLog(data.sessionId, context.userId, "next_contact_set", `Next contact set for ${when}`);
+    } else {
+      await appendContactLog(data.sessionId, context.userId, "next_contact_set", "Next contact cleared");
+    }
+    return { ok: true };
+  });
+
+export type ContactHistoryEntry = {
+  id: string;
+  type: "contact" | "note" | "next_contact_set" | "appointment" | "callback" | "sms" | "fact_find";
+  body: string | null;
+  occurredAt: string;
+};
+
+// Candidate string forms a UK number might have been stored as (sms_messages
+// has no session/customer FK, so we match by phone). Covers the raw value, the
+// normalised +44 form and the 0-leading national form, with/without spaces.
+function ukPhoneVariants(phone: string | null | undefined): string[] {
+  const raw = (phone ?? "").trim();
+  if (!raw) return [];
+  const variants = new Set<string>([raw, raw.replace(/\s+/g, "")]);
+  try {
+    const normalised = normaliseUkPhone(raw); // +44...
+    variants.add(normalised);
+    if (normalised.startsWith("+44")) variants.add(`0${normalised.slice(3)}`);
+  } catch {
+    // ignore unparseable numbers
+  }
+  return Array.from(variants).filter(Boolean);
+}
+
+// A short, human label for an SMS row based on its direction + body content.
+function smsHistoryLabel(direction: string, body: string | null): string {
+  const text = (body ?? "").toLowerCase();
+  if (direction === "inbound") return "SMS received from customer";
+  let kind = "message";
+  if (text.includes("appointment is confirmed")) kind = "appointment confirmation";
+  else if (text.includes("give you a call") || text.includes("call between")) kind = "call-back confirmation";
+  else if (text.includes("view your summary") || text.includes("completing your mortgage fact-find")) {
+    kind = "fact-find summary";
+  }
+  return `SMS sent: ${kind}`;
+}
+
+// Chronological customer history (newest-first): contact-log entries merged with
+// that session's appointments, call-backs, sent/received SMS and fact-find
+// milestones. Read-side merge of existing sources — no extra storage. Every
+// source is defensive: a missing table / empty result never breaks the list.
+export const listContactHistory = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<ContactHistoryEntry[]> => {
+    const roles = await getRolesForUser(context.userId);
+    if (!roles.includes("advisor")) throw new Error("Forbidden");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const entries: ContactHistoryEntry[] = [];
+
+    // Fact-find milestones + the customer's phone (used to link SMS below).
+    let customerPhone: string | null = null;
+    {
+      const { data: session, error } = await supabaseAdmin
+        .from("interview_sessions")
+        .select("started_at, submitted_at, customer_id")
+        .eq("id", data.sessionId)
+        .maybeSingle();
+      if (error && !isMissingTableError(error)) throw new Error(error.message);
+      if (session) {
+        if (session.started_at) {
+          entries.push({
+            id: `ff-start-${data.sessionId}`,
+            type: "fact_find",
+            body: "Fact-find started",
+            occurredAt: session.started_at,
+          });
+        }
+        const submittedAt = (session as { submitted_at?: string | null }).submitted_at;
+        if (submittedAt) {
+          entries.push({
+            id: `ff-submit-${data.sessionId}`,
+            type: "fact_find",
+            body: "Fact-find submitted to advisor",
+            occurredAt: submittedAt,
+          });
+        }
+        if (session.customer_id) {
+          const { data: profile } = await supabaseAdmin
+            .from("profiles")
+            .select("phone")
+            .eq("id", session.customer_id)
+            .maybeSingle();
+          customerPhone = (profile as { phone?: string | null } | null)?.phone ?? null;
+        }
+      }
+    }
+
+    {
+      const { data: logs, error } = await supabaseAdmin
+        .from("customer_contact_log")
+        .select("id, entry_type, body, occurred_at")
+        .eq("session_id", data.sessionId);
+      if (error && !isMissingTableError(error)) throw new Error(error.message);
+      for (const l of logs ?? []) {
+        // Call-backs are merged from callback_requests below; skip any legacy
+        // 'callback' contact-log rows so they aren't shown twice in History.
+        if (l.entry_type === "callback") continue;
+        entries.push({
+          id: l.id,
+          type: l.entry_type as ContactHistoryEntry["type"],
+          body: l.body,
+          occurredAt: l.occurred_at,
+        });
+      }
+    }
+
+    const appointmentIds: string[] = [];
+    {
+      const { data: appts, error } = await supabaseAdmin
+        .from("appointments")
+        .select("id, starts_at, created_at")
+        .eq("session_id", data.sessionId);
+      if (error && !isMissingTableError(error)) throw new Error(error.message);
+      for (const a of appts ?? []) {
+        appointmentIds.push(a.id);
+        const when = new Date(a.starts_at).toLocaleString("en-GB", {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: "Europe/London",
+        });
+        entries.push({
+          id: `appt-${a.id}`,
+          type: "appointment",
+          body: `Appointment booked for ${when}`,
+          occurredAt: a.created_at,
+        });
+      }
+    }
+
+    {
+      const { data: callbacks, error } = await supabaseAdmin
+        .from("callback_requests")
+        .select("id, preferred_window, created_at")
+        .eq("session_id", data.sessionId);
+      if (error && !isMissingTableError(error)) throw new Error(error.message);
+      for (const c of callbacks ?? []) {
+        entries.push({
+          id: `cb-${c.id}`,
+          type: "callback",
+          body: `Call-back requested (${c.preferred_window})`,
+          occurredAt: c.created_at,
+        });
+      }
+    }
+
+    // SMS: linked either by appointment (booking confirmations) or by the
+    // customer's phone number (interview-complete + call-back confirmations).
+    {
+      try {
+        const smsById = new Map<
+          string,
+          { id: string; direction: string; body: string | null; created_at: string }
+        >();
+        const collect = (
+          rows:
+            | Array<{ id: string; direction: string; body: string | null; created_at: string }>
+            | null,
+        ) => {
+          for (const r of rows ?? []) smsById.set(r.id, r);
+        };
+
+        if (appointmentIds.length > 0) {
+          const { data: byAppt, error } = await supabaseAdmin
+            .from("sms_messages")
+            .select("id, direction, body, created_at")
+            .in("appointment_id", appointmentIds);
+          if (error && !isMissingTableError(error)) throw new Error(error.message);
+          collect(byAppt);
+        }
+
+        const variants = ukPhoneVariants(customerPhone);
+        if (variants.length > 0) {
+          const byTo = await supabaseAdmin
+            .from("sms_messages")
+            .select("id, direction, body, created_at")
+            .in("to_number", variants);
+          if (byTo.error && !isMissingTableError(byTo.error)) throw new Error(byTo.error.message);
+          collect(byTo.data);
+          const byFrom = await supabaseAdmin
+            .from("sms_messages")
+            .select("id, direction, body, created_at")
+            .in("from_number", variants);
+          if (byFrom.error && !isMissingTableError(byFrom.error)) {
+            throw new Error(byFrom.error.message);
+          }
+          collect(byFrom.data);
+        }
+
+        for (const s of smsById.values()) {
+          entries.push({
+            id: `sms-${s.id}`,
+            type: "sms",
+            body: smsHistoryLabel(s.direction, s.body),
+            occurredAt: s.created_at,
+          });
+        }
+      } catch (e) {
+        console.error("merge sms history failed", e);
+      }
+    }
+
+    entries.sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+    return entries;
   });
 
 export const listNotes = createServerFn({ method: "POST" })

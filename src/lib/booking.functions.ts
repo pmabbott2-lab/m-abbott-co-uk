@@ -3,8 +3,10 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import {
   bookingConfirmationMessage,
+  callbackConfirmationMessage,
   getAppBaseUrl,
   isTwilioConfigured,
+  normaliseUkPhone,
   sendSms,
   textChannelInviteMessage,
 } from "@/lib/sms.server";
@@ -34,6 +36,23 @@ async function getPrimaryAdvisorId(): Promise<string> {
   if (error) throw new Error(error.message);
   if (!data) throw new Error("No advisor configured. Add an advisor role in Supabase first.");
   return data.user_id;
+}
+
+// Resolve a display name for the assigned advisor (used in confirmation SMS).
+// Falls back to "your advisor" when no profile/name is available.
+async function getAdvisorName(advisorId: string): Promise<string> {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data } = await supabaseAdmin
+      .from("profiles")
+      .select("full_name")
+      .eq("id", advisorId)
+      .maybeSingle();
+    const name = data?.full_name?.trim();
+    return name || "your advisor";
+  } catch {
+    return "your advisor";
+  }
 }
 
 async function ensureDefaultAvailability(advisorId: string) {
@@ -256,9 +275,11 @@ async function bookAppointment(
 
   if (data.sendSms !== false && isTwilioConfigured()) {
     try {
+      const advisorName = await getAdvisorName(advisorId);
       const message = bookingConfirmationMessage({
         customerName: data.customerName,
         startsAt,
+        advisorName,
         bookingUrl: data.sessionId ? `${getAppBaseUrl()}/sessions/${data.sessionId}` : undefined,
       });
       const { sid } = await sendSms({ to: data.customerPhone, body: message });
@@ -356,6 +377,587 @@ export const getAppointmentForSession = createServerFn({ method: "GET" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     return appointment;
+  });
+
+// Advisor/admin-only: the appointment + call-back picture for a single session,
+// used by the customer profile "Appointment & call-back" box. Reads via the
+// service-role client (after a role check) and tolerates the callback table not
+// existing yet. The appointment includes the assigned advisor's display name.
+export type SessionBookingDetails = {
+  appointment: {
+    id: string;
+    startsAt: string;
+    status: string;
+    advisorName: string;
+    customerName: string;
+    customerPhone: string;
+  } | null;
+  callback: {
+    id: string;
+    preferredWindow: string;
+    status: string;
+    createdAt: string;
+  } | null;
+};
+
+export const getSessionBooking = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<SessionBookingDetails> => {
+    const { data: roles } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
+    if (!isStaff) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    type ApptRow = {
+      id: string;
+      advisor_id: string | null;
+      starts_at: string;
+      status: string;
+      customer_name: string;
+      customer_phone: string;
+      session_id: string | null;
+    };
+    const apptColumns = "id, advisor_id, starts_at, status, customer_name, customer_phone, session_id";
+
+    let appointment: SessionBookingDetails["appointment"] = null;
+    {
+      // Prefer a session-linked appointment; otherwise fall back to one owned by
+      // this customer (booked via the direct "/booking" link with no session
+      // link) matched on phone/email, and backfill its session_id so it stays
+      // linked and shows in History from then on. Mirrors the call-back fix.
+      let appt: ApptRow | null = null;
+      {
+        const { data: bySession, error } = await supabaseAdmin
+          .from("appointments")
+          .select(apptColumns)
+          .eq("session_id", data.sessionId)
+          .order("starts_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error && !isMissingContactTable(error)) throw new Error(error.message);
+        appt = (bySession as ApptRow | null) ?? null;
+      }
+
+      if (!appt) {
+        const { data: session } = await supabaseAdmin
+          .from("interview_sessions")
+          .select("customer_id")
+          .eq("id", data.sessionId)
+          .maybeSingle();
+        if (session?.customer_id) {
+          const { data: profile } = await supabaseAdmin
+            .from("profiles")
+            .select("phone, email")
+            .eq("id", session.customer_id)
+            .maybeSingle();
+          const phone = (profile as { phone?: string | null } | null)?.phone ?? null;
+          const email = (profile as { email?: string | null } | null)?.email ?? null;
+          const variants = ukPhoneVariants(phone);
+
+          const byId = new Map<string, ApptRow>();
+          if (variants.length > 0) {
+            const { data: byPhone, error } = await supabaseAdmin
+              .from("appointments")
+              .select(apptColumns)
+              .in("customer_phone", variants);
+            if (error && !isMissingContactTable(error)) throw new Error(error.message);
+            for (const a of (byPhone as ApptRow[] | null) ?? []) byId.set(a.id, a);
+          }
+          if (email) {
+            const { data: byEmail, error } = await supabaseAdmin
+              .from("appointments")
+              .select(apptColumns)
+              .eq("customer_email", email);
+            if (error && !isMissingContactTable(error)) throw new Error(error.message);
+            for (const a of (byEmail as ApptRow[] | null) ?? []) byId.set(a.id, a);
+          }
+
+          appt =
+            Array.from(byId.values()).sort(
+              (a, b) => new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime(),
+            )[0] ?? null;
+
+          // Backfill the session link so it surfaces directly (card + History)
+          // going forward. Best-effort — never block the read.
+          if (appt && !appt.session_id) {
+            try {
+              await supabaseAdmin
+                .from("appointments")
+                .update({ session_id: data.sessionId })
+                .eq("id", appt.id);
+            } catch (e) {
+              console.error("backfill appointment session_id failed", e);
+            }
+          }
+        }
+      }
+
+      if (appt) {
+        const advisorName = appt.advisor_id ? await getAdvisorName(appt.advisor_id) : "your advisor";
+        appointment = {
+          id: appt.id,
+          startsAt: appt.starts_at,
+          status: appt.status,
+          advisorName,
+          customerName: appt.customer_name,
+          customerPhone: appt.customer_phone,
+        };
+      }
+    }
+
+    let callback: SessionBookingDetails["callback"] = null;
+    {
+      const { data: cb, error } = await supabaseAdmin
+        .from("callback_requests")
+        .select("id, preferred_window, status, created_at")
+        .eq("session_id", data.sessionId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error && !isMissingContactTable(error)) throw new Error(error.message);
+      if (cb) {
+        callback = {
+          id: cb.id,
+          preferredWindow: cb.preferred_window,
+          status: cb.status,
+          createdAt: cb.created_at,
+        };
+      }
+    }
+
+    return { appointment, callback };
+  });
+
+export const updateCallbackStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        callbackId: z.string().uuid(),
+        status: z.enum(["new", "contacted", "closed"]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: roles } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
+    if (!isStaff) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin
+      .from("callback_requests")
+      .update({ status: data.status })
+      .eq("id", data.callbackId);
+    if (error && !isMissingContactTable(error)) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// Advisor logs a contact ATTEMPT against a call-back (e.g. no answer). The
+// call-back stays open ('new') so it keeps flagging as ready-to-review and the
+// advisor can keep trying. Records a timestamped History entry only.
+export const logCallbackAttempt = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ sessionId: z.string().uuid(), note: z.string().max(200).optional() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: roles } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
+    if (!isStaff) throw new Error("Forbidden");
+
+    await appendContactLog(
+      data.sessionId,
+      context.userId,
+      "contact",
+      data.note?.trim() || "Call attempted — no answer",
+    );
+    return { ok: true };
+  });
+
+// Advisor marks a call-back as handled after speaking to the customer: resolves
+// it ('closed'), marks it opened (so it clears from the advisor's Contacts tab)
+// and records a timestamped History entry. A 'closed' call-back no longer flags
+// as ready-to-review in the advisor Customers list.
+export const resolveCallback = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        callbackId: z.string().uuid(),
+        sessionId: z.string().uuid(),
+        note: z.string().max(200).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: roles } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
+    if (!isStaff) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin
+      .from("callback_requests")
+      .update({ status: "closed" })
+      .eq("id", data.callbackId);
+    if (error && !isMissingContactTable(error)) throw new Error(error.message);
+
+    try {
+      await supabaseAdmin
+        .from("advisor_contact_views")
+        .upsert(
+          { advisor_id: context.userId, contact_type: "callback", contact_id: data.callbackId },
+          { onConflict: "advisor_id,contact_type,contact_id" },
+        );
+    } catch (e) {
+      console.error("mark callback opened on resolve failed", e);
+    }
+
+    await appendContactLog(
+      data.sessionId,
+      context.userId,
+      "contact",
+      data.note?.trim() || "Spoke to customer re: call-back",
+    );
+    return { ok: true };
+  });
+
+// ── Call-back requests ──────────────────────────────────────────────────────
+// An alternative to booking a slot: the customer asks their advisor to call them
+// back within a preferred window. Persists to callback_requests, auto-allocates
+// the session to the advisor, logs a timeline entry and (best-effort) texts a
+// confirmation. Tolerant of the migration not having been applied yet.
+
+const callbackWindowEnum = z.enum(["9-12", "12-4", "4-8"]);
+
+async function createCallbackRequest(
+  data: {
+    sessionId?: string;
+    customerId?: string;
+    customerName: string;
+    customerPhone: string;
+    customerEmail?: string;
+    window: "9-12" | "12-4" | "4-8";
+  },
+): Promise<{ ok: true }> {
+  const advisorId = await getPrimaryAdvisorId();
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+  // Attach the request to a fact-find so it surfaces against the customer's
+  // record in the advisor portal. The direct "/booking" path doesn't pass a
+  // sessionId, so fall back to the customer's most recent fact-find.
+  let sessionId = data.sessionId ?? null;
+  if (!sessionId && data.customerId) {
+    try {
+      const { data: latest } = await supabaseAdmin
+        .from("interview_sessions")
+        .select("id")
+        .eq("customer_id", data.customerId)
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      sessionId = latest?.id ?? null;
+    } catch (e) {
+      console.error("resolve customer session for callback failed", e);
+    }
+  }
+
+  const { data: callback, error } = await supabaseAdmin
+    .from("callback_requests")
+    .insert({
+      session_id: sessionId,
+      customer_id: data.customerId ?? null,
+      advisor_id: advisorId,
+      customer_name: data.customerName,
+      customer_phone: data.customerPhone,
+      customer_email: data.customerEmail || null,
+      preferred_window: data.window,
+      status: "new",
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+
+  // Auto-allocate the fact-find to the advisor so it surfaces on their
+  // dashboard. Best-effort. The call-back itself is the History source (merged
+  // from callback_requests), so we deliberately do NOT also write a
+  // customer_contact_log row here — that double-logged it in History.
+  if (sessionId) {
+    try {
+      await supabaseAdmin
+        .from("session_advisors")
+        .upsert(
+          { session_id: sessionId, advisor_id: advisorId, assigned_by: data.customerId ?? null },
+          { onConflict: "session_id,advisor_id" },
+        );
+    } catch (e) {
+      console.error("auto-allocate session (callback) failed", e);
+    }
+  }
+
+  if (isTwilioConfigured()) {
+    try {
+      const advisorName = await getAdvisorName(advisorId);
+      const message = callbackConfirmationMessage({
+        customerName: data.customerName,
+        window: data.window,
+        advisorName,
+      });
+      const { sid } = await sendSms({ to: data.customerPhone, body: message });
+      await logSms({
+        direction: "outbound",
+        from: process.env.TWILIO_PHONE_NUMBER!,
+        to: data.customerPhone,
+        body: message,
+        twilioSid: sid,
+      });
+    } catch (e) {
+      console.error("callback confirmation SMS failed:", e);
+    }
+  }
+
+  void callback;
+  return { ok: true };
+}
+
+export const requestSessionCallback = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        sessionId: z.string().uuid(),
+        customerName: z.string().min(2),
+        customerPhone: z.string().min(7),
+        customerEmail: z.string().email().optional().or(z.literal("")),
+        window: callbackWindowEnum,
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: session, error } = await context.supabase
+      .from("interview_sessions")
+      .select("id, customer_id")
+      .eq("id", data.sessionId)
+      .single();
+    if (error) throw new Error(error.message);
+    if (session.customer_id !== context.userId) throw new Error("Forbidden");
+
+    return createCallbackRequest({
+      sessionId: data.sessionId,
+      customerId: context.userId,
+      customerName: data.customerName,
+      customerPhone: data.customerPhone,
+      customerEmail: data.customerEmail,
+      window: data.window,
+    });
+  });
+
+export const requestCallbackAuth = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        customerName: z.string().min(2),
+        customerPhone: z.string().min(7),
+        customerEmail: z.string().email().optional().or(z.literal("")),
+        window: callbackWindowEnum,
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) =>
+    createCallbackRequest({
+      customerId: context.userId,
+      customerName: data.customerName,
+      customerPhone: data.customerPhone,
+      customerEmail: data.customerEmail,
+      window: data.window,
+    }),
+  );
+
+// Advisor portal: appointments + call-backs surfaced together, each flagged with
+// whether THIS advisor has opened it yet (so new/unopened contacts highlight).
+// Degrades gracefully if the callback/views tables aren't present yet.
+export type AdvisorContact = {
+  kind: "appointment" | "callback";
+  id: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string | null;
+  sessionId: string | null;
+  startsAt: string | null;
+  window: string | null;
+  status: string | null;
+  createdAt: string;
+  opened: boolean;
+};
+
+function isMissingContactTable(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const code = error.code ?? "";
+  const msg = (error.message ?? "").toLowerCase();
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    code === "PGRST204" ||
+    code === "PGRST205" ||
+    msg.includes("does not exist") ||
+    msg.includes("schema cache")
+  );
+}
+
+// Candidate string forms a UK number might have been stored as. Appointments
+// have no customer FK, so a direct-booking appointment is matched back to the
+// fact-find's owning customer by phone (and email). Covers the raw value, the
+// normalised +44 form and the 0-leading national form, with/without spaces.
+function ukPhoneVariants(phone: string | null | undefined): string[] {
+  const raw = (phone ?? "").trim();
+  if (!raw) return [];
+  const variants = new Set<string>([raw, raw.replace(/\s+/g, "")]);
+  try {
+    const normalised = normaliseUkPhone(raw);
+    variants.add(normalised);
+    if (normalised.startsWith("+44")) variants.add(`0${normalised.slice(3)}`);
+  } catch {
+    // ignore unparseable numbers
+  }
+  return Array.from(variants).filter(Boolean);
+}
+
+// Append a typed entry to the customer contact timeline (advisor-only History).
+// Best-effort: silently degrades if the table isn't present yet.
+async function appendContactLog(
+  sessionId: string,
+  authorId: string | null,
+  entryType: "contact" | "note" | "next_contact_set" | "appointment" | "callback",
+  body: string | null,
+): Promise<void> {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin
+      .from("customer_contact_log")
+      .insert({ session_id: sessionId, author_id: authorId, entry_type: entryType, body });
+    if (error && !isMissingContactTable(error)) throw new Error(error.message);
+  } catch (e) {
+    console.error("append contact log failed", e);
+  }
+}
+
+export const listAdvisorContacts = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<AdvisorContact[]> => {
+    const { data: roles } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    if (!(roles ?? []).some((r) => r.role === "advisor")) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    // Which appointments/callbacks has this advisor already opened?
+    const opened = new Set<string>();
+    {
+      const { data, error } = await supabaseAdmin
+        .from("advisor_contact_views")
+        .select("contact_type, contact_id")
+        .eq("advisor_id", context.userId);
+      if (error && !isMissingContactTable(error)) throw new Error(error.message);
+      for (const v of data ?? []) opened.add(`${v.contact_type}:${v.contact_id}`);
+    }
+
+    const contacts: AdvisorContact[] = [];
+
+    {
+      const { data: appts, error } = await supabaseAdmin
+        .from("appointments")
+        .select("id, customer_name, customer_phone, customer_email, session_id, starts_at, status, created_at")
+        .eq("advisor_id", context.userId)
+        .order("starts_at", { ascending: true });
+      if (error && !isMissingContactTable(error)) throw new Error(error.message);
+      for (const a of appts ?? []) {
+        contacts.push({
+          kind: "appointment",
+          id: a.id,
+          customerName: a.customer_name,
+          customerPhone: a.customer_phone,
+          customerEmail: a.customer_email ?? null,
+          sessionId: a.session_id ?? null,
+          startsAt: a.starts_at,
+          window: null,
+          status: a.status,
+          createdAt: a.created_at,
+          opened: opened.has(`appointment:${a.id}`),
+        });
+      }
+    }
+
+    {
+      const { data: callbacks, error } = await supabaseAdmin
+        .from("callback_requests")
+        .select("id, customer_name, customer_phone, customer_email, session_id, preferred_window, status, created_at")
+        .eq("advisor_id", context.userId)
+        .order("created_at", { ascending: false });
+      if (error && !isMissingContactTable(error)) throw new Error(error.message);
+      for (const c of callbacks ?? []) {
+        contacts.push({
+          kind: "callback",
+          id: c.id,
+          customerName: c.customer_name,
+          customerPhone: c.customer_phone,
+          customerEmail: c.customer_email ?? null,
+          sessionId: c.session_id ?? null,
+          startsAt: null,
+          window: c.preferred_window,
+          status: c.status,
+          createdAt: c.created_at,
+          opened: opened.has(`callback:${c.id}`),
+        });
+      }
+    }
+
+    // Unopened first, then newest first.
+    contacts.sort((a, b) => {
+      if (a.opened !== b.opened) return a.opened ? 1 : -1;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+    return contacts;
+  });
+
+export const markContactOpened = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({ contactType: z.enum(["appointment", "callback"]), contactId: z.string().uuid() })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: roles } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    if (!(roles ?? []).some((r) => r.role === "advisor")) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin
+      .from("advisor_contact_views")
+      .upsert(
+        { advisor_id: context.userId, contact_type: data.contactType, contact_id: data.contactId },
+        { onConflict: "advisor_id,contact_type,contact_id" },
+      );
+    if (error && !isMissingContactTable(error)) throw new Error(error.message);
+    return { ok: true };
   });
 
 export const listAdvisorAppointments = createServerFn({ method: "GET" })

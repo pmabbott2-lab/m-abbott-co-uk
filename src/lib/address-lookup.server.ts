@@ -7,6 +7,8 @@
 //     /district so we can build a sensible address without the street name.
 //  3. manual         — last resort, just "<house>, <postcode>".
 
+import { openAIFetch, OPENAI_CHAT_MODEL } from "@/lib/openai.server";
+
 export interface ResolvedAddress {
   ok: boolean;
   formatted: string;
@@ -28,6 +30,54 @@ export function normalisePostcode(raw: string): string {
 
 export function isLikelyPostcode(raw: string): boolean {
   return /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i.test(raw ?? "");
+}
+
+const SPOKEN_POSTCODE_SYSTEM =
+  "You convert a spoken UK postcode (transcribed from speech) into one canonical UK postcode. " +
+  "The speech may spell letters as sounds (e.g. 'en gee' = NG, 'eff bee' = FB) and say digits as words " +
+  "('two' = 2, 'oh' = 0). Reply with ONLY the postcode in uppercase with a single space before the final " +
+  "three characters (e.g. 'NG2 3FB'), or the single word UNKNOWN if it is not a recognisable UK postcode.";
+
+/**
+ * Turn a spoken postcode transcription into a canonical postcode string.
+ * Returns "" if it can't be confidently resolved. Never throws — any error or
+ * timeout yields "" so the caller can fall back gracefully.
+ */
+export async function normaliseSpokenPostcode(raw: string, timeoutMs = 3000): Promise<string> {
+  const text = (raw ?? "").trim();
+  if (!text) return "";
+  // Already contains a well-formed postcode? Just fix the spacing, no LLM call.
+  const direct = text.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i);
+  if (direct) return normalisePostcode(direct[0]);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await openAIFetch("/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: OPENAI_CHAT_MODEL,
+        temperature: 0,
+        max_tokens: 12,
+        messages: [
+          { role: "system", content: SPOKEN_POSTCODE_SYSTEM },
+          { role: "user", content: text },
+        ],
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return "";
+    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const out = (json.choices?.[0]?.message?.content ?? "").trim().toUpperCase();
+    if (!out || out.includes("UNKNOWN")) return "";
+    const m = out.match(/[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}/);
+    return m ? normalisePostcode(m[0]) : "";
+  } catch {
+    return "";
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function fetchJson(url: string): Promise<unknown> {
@@ -96,22 +146,27 @@ async function viaPostcodesIo(postcode: string, house: string): Promise<Resolved
 }
 
 export async function resolveAddress(postcodeRaw: string, houseRaw: string): Promise<ResolvedAddress> {
-  const postcode = (postcodeRaw ?? "").trim();
   const house = (houseRaw ?? "").trim();
+  // The spoken postcode is raw STT text (e.g. "en gee two, three eff bee"), so
+  // normalise it into a canonical postcode before any lookup.
+  const postcode = await normaliseSpokenPostcode(postcodeRaw);
   const key = process.env.GETADDRESS_API_KEY;
 
-  if (key) {
-    const ga = await viaGetAddress(postcode, house, key);
-    if (ga) return ga;
+  if (postcode) {
+    if (key) {
+      const ga = await viaGetAddress(postcode, house, key);
+      if (ga) return ga;
+    }
+    const pio = await viaPostcodesIo(postcode, house);
+    if (pio) return pio;
   }
 
-  const pio = await viaPostcodesIo(postcode, house);
-  if (pio) return pio;
-
+  // Couldn't validate. Only echo a clean, normalised postcode — never the raw
+  // phonetic transcription. When no postcode could be parsed, postcode is "".
   return {
     ok: false,
-    formatted: [house, normalisePostcode(postcode)].filter(Boolean).join(", "),
-    postcode: normalisePostcode(postcode),
+    formatted: [house, postcode].filter(Boolean).join(", "),
+    postcode,
     provider: "manual",
   };
 }

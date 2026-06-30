@@ -46,6 +46,126 @@ export type Database = {
           },
         ]
       }
+      callback_requests: {
+        Row: {
+          advisor_id: string | null
+          created_at: string
+          customer_email: string | null
+          customer_id: string | null
+          customer_name: string
+          customer_phone: string
+          id: string
+          notes: string | null
+          preferred_window: string
+          session_id: string | null
+          status: string
+        }
+        Insert: {
+          advisor_id?: string | null
+          created_at?: string
+          customer_email?: string | null
+          customer_id?: string | null
+          customer_name: string
+          customer_phone: string
+          id?: string
+          notes?: string | null
+          preferred_window: string
+          session_id?: string | null
+          status?: string
+        }
+        Update: {
+          advisor_id?: string | null
+          created_at?: string
+          customer_email?: string | null
+          customer_id?: string | null
+          customer_name?: string
+          customer_phone?: string
+          id?: string
+          notes?: string | null
+          preferred_window?: string
+          session_id?: string | null
+          status?: string
+        }
+        Relationships: []
+      }
+      session_contact_tracking: {
+        Row: {
+          last_contacted_at: string | null
+          next_contact_at: string | null
+          session_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          last_contacted_at?: string | null
+          next_contact_at?: string | null
+          session_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          last_contacted_at?: string | null
+          next_contact_at?: string | null
+          session_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
+      customer_contact_log: {
+        Row: {
+          author_id: string | null
+          body: string | null
+          created_at: string
+          entry_type: string
+          id: string
+          occurred_at: string
+          session_id: string
+        }
+        Insert: {
+          author_id?: string | null
+          body?: string | null
+          created_at?: string
+          entry_type: string
+          id?: string
+          occurred_at?: string
+          session_id: string
+        }
+        Update: {
+          author_id?: string | null
+          body?: string | null
+          created_at?: string
+          entry_type?: string
+          id?: string
+          occurred_at?: string
+          session_id?: string
+        }
+        Relationships: []
+      }
+      advisor_contact_views: {
+        Row: {
+          advisor_id: string
+          contact_id: string
+          contact_type: string
+          id: string
+          opened_at: string
+        }
+        Insert: {
+          advisor_id: string
+          contact_id: string
+          contact_type: string
+          id?: string
+          opened_at?: string
+        }
+        Update: {
+          advisor_id?: string
+          contact_id?: string
+          contact_type?: string
+          id?: string
+          opened_at?: string
+        }
+        Relationships: []
+      }
       interview_answers: {
         Row: {
           field_key: string

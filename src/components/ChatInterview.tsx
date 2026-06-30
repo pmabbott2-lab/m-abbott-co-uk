@@ -138,6 +138,10 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const profileFirstName = firstNameFromFullName(sessionQ.data?.customer?.full_name);
+  // Kept in a ref so the memoised callStep closure always reads the latest name
+  // (sessionQ.data resolves after callStep is first created).
+  const profileFirstNameRef = useRef("");
+  profileFirstNameRef.current = profileFirstName;
 
   const appendAssistant = useCallback((text: string) => {
     if (!text.trim()) return;
@@ -179,7 +183,9 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
         if (data.done) {
           setDone(true);
           setCurrent(null);
-          appendAssistant("That's everything I need — thank you! Tap below to review your answers and send them to your adviser.");
+          appendAssistant(
+            `Thank you for providing all that information${profileFirstNameRef.current ? `, ${profileFirstNameRef.current}` : ""}. You can now arrange an appointment or request a call back below, or skip to review your answers.`,
+          );
           return;
         }
         setCurrent(data);
@@ -631,7 +637,7 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
               <div className="text-center pt-3 text-sm text-muted-foreground">
                 {submitting
                   ? "Submitting…"
-                  : "Choose an appointment time below, or skip to review your answers."}
+                  : "Book an appointment or request a call back below, or skip to review your answers."}
               </div>
             )}
           </div>
