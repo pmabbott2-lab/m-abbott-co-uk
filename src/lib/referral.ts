@@ -1,3 +1,5 @@
+import { getPublicAppUrl } from "@/lib/app-url";
+
 const REFERRAL_COOKIE = "introducer_ref";
 const REFERRAL_MAX_AGE_DAYS = 30;
 
@@ -69,6 +71,23 @@ export function clearRafCookie() {
 }
 
 export function rafLinkForCode(code: string, origin?: string) {
-  const base = origin ?? (typeof window !== "undefined" ? window.location.origin : "");
+  const base = (origin ?? getPublicAppUrl()).replace(/\/$/, "");
   return `${base}/raf/${code}`;
+}
+
+/** Short OG / meta description for a RAF landing page. */
+export function rafShareDescription(referrerName: string | null): string {
+  if (referrerName?.trim()) {
+    return `${referrerName.trim()} has recommended Mortgage Hub — a friendly way to get your mortgage fact-find done before you meet your advisor.`;
+  }
+  return "A friend has recommended Mortgage Hub — a friendly way to get your mortgage fact-find done before you meet your advisor.";
+}
+
+/** Full shareable message (SMS, email, WhatsApp) including who recommended and the link. */
+export function rafShareMessage(referrerName: string | null, code: string, origin?: string): string {
+  const url = rafLinkForCode(code, origin);
+  const who = referrerName?.trim()
+    ? `${referrerName.trim()} has recommended Mortgage Hub`
+    : "A friend has recommended Mortgage Hub";
+  return `${who} — a friendly way to get your mortgage fact-find done before you meet your advisor. Start here: ${url}`;
 }

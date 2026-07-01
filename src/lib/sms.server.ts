@@ -128,6 +128,51 @@ export function textChannelInviteMessage(opts: {
   return `Hi ${opts.customerName}, ${opts.introducerName} has referred you for a mortgage appointment. Book a time here: ${opts.bookUrl}`;
 }
 
+const JOURNEY_MILESTONE_SMS: Record<string, string> = {
+  appointment_seen: "We've noted your appointment in our system and look forward to speaking with you.",
+  id_confirmed: "Your ID has been confirmed — thank you.",
+  aip_completed: "Great news — your Agreement in Principle (AIP) is complete.",
+};
+
+export async function sendJourneyMilestoneSms(
+  customerId: string,
+  sessionId: string,
+  milestoneKey: string,
+): Promise<void> {
+  try {
+    if (!isTwilioConfigured()) return;
+    const line = JOURNEY_MILESTONE_SMS[milestoneKey];
+    if (!line) return;
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("full_name, phone")
+      .eq("id", customerId)
+      .maybeSingle();
+    const phone = (profile as { phone?: string | null } | null)?.phone?.trim();
+    if (!phone) return;
+
+    const firstName = profile?.full_name?.trim().split(/\s+/)[0] || "there";
+    const body = `Hi ${firstName}, ${line} View your file: ${getAppBaseUrl()}/sessions/${sessionId}`;
+
+    const { sid } = await sendSms({ to: phone, body });
+    try {
+      await supabaseAdmin.from("sms_messages").insert({
+        direction: "outbound",
+        from_number: process.env.TWILIO_PHONE_NUMBER!,
+        to_number: phone,
+        body,
+        twilio_sid: sid,
+      });
+    } catch (e) {
+      console.error("log journey milestone sms failed", e);
+    }
+  } catch (e) {
+    console.error("sendJourneyMilestoneSms failed", e);
+  }
+}
+
 // Best-effort SMS confirming the fact-find is complete, with a direct link to
 // the summary page. Never throws into the caller's happy path: skips silently if
 // Twilio is unconfigured or the customer has no phone, and logs on failure.

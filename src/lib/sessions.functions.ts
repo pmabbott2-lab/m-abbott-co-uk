@@ -7,6 +7,7 @@ import { generateUniqueCompanyCode } from "@/lib/introducer.functions";
 import {
   normaliseUkPhone,
   sendInterviewCompleteSms,
+  sendJourneyMilestoneSms,
 } from "@/lib/sms.server";
 
 // Each customer file (session) can be allocated to at most this many advisors.
@@ -94,6 +95,8 @@ function isMissingTableError(error: { code?: string; message?: string } | null):
     code === "PGRST205" ||
     code === "PGRST106" ||
     msg.includes("session_advisors") ||
+    msg.includes("customer_journey_milestones") ||
+    msg.includes("session_attention_cleared") ||
     msg.includes("does not exist") ||
     msg.includes("schema cache")
   );
@@ -1007,17 +1010,26 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "GET" })
 
     // Contact tracking (last/next contact) so the overview can rank/sort/filter
     // by the planned next contact. Degrades to empty pre-migration.
-    const trackingMap = new Map<string, { last: string | null; next: string | null }>();
+    const trackingMap = new Map<
+      string,
+      { last: string | null; next: string | null; attentionClearedAt: string | null }
+    >();
     {
       const sessionIds = (sessions ?? []).map((s) => s.id);
       if (sessionIds.length > 0) {
         const { data: tracking, error: trackErr } = await supabaseAdmin
           .from("session_contact_tracking")
-          .select("session_id, last_contacted_at, next_contact_at")
+          .select("session_id, last_contacted_at, next_contact_at, session_attention_cleared_at")
           .in("session_id", sessionIds);
         if (trackErr && !isMissingTableError(trackErr)) throw new Error(trackErr.message);
         for (const t of tracking ?? []) {
-          trackingMap.set(t.session_id, { last: t.last_contacted_at, next: t.next_contact_at });
+          trackingMap.set(t.session_id, {
+            last: t.last_contacted_at,
+            next: t.next_contact_at,
+            attentionClearedAt:
+              (t as { session_attention_cleared_at?: string | null }).session_attention_cleared_at ??
+              null,
+          });
         }
       }
     }
@@ -1081,12 +1093,20 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "GET" })
           if (c.session_id && sessionIdSet.has(c.session_id)) {
             targetSessionId = c.session_id;
           } else if (c.customer_id && sessionsByCustomer.has(c.customer_id)) {
-            // No visible session link — flag the customer's most recent session.
             targetSessionId = sessionsByCustomer.get(c.customer_id)![0];
           }
-          if (targetSessionId && !callbackBySession.has(targetSessionId)) {
-            callbackBySession.set(targetSessionId, { id: c.id, window: c.preferred_window });
-          }
+          if (!targetSessionId || callbackBySession.has(targetSessionId)) continue;
+
+          const tracking = trackingMap.get(targetSessionId);
+          const callbackAt = new Date(c.created_at).getTime();
+          const clearedAt = tracking?.attentionClearedAt
+            ? new Date(tracking.attentionClearedAt).getTime()
+            : null;
+          const lastContact = tracking?.last ? new Date(tracking.last).getTime() : null;
+          if (clearedAt != null && clearedAt >= callbackAt) continue;
+          if (lastContact != null && lastContact >= callbackAt) continue;
+
+          callbackBySession.set(targetSessionId, { id: c.id, window: c.preferred_window });
         }
       }
     }
@@ -1411,17 +1431,121 @@ export const addAdvisorNote = createServerFn({ method: "POST" })
     // Mirror the note into the contact timeline so the History tab shows
     // notes alongside contact events. Best-effort (pre-migration safe).
     await appendContactLog(data.sessionId, context.userId, "note", data.note);
+    await clearSessionAttention(data.sessionId, context.userId, "note_added");
     return { ok: true };
   });
 
 // ── Advisor contact tracking: last/next contact, append-only timeline ───────
+
+export const JOURNEY_MILESTONE_KEYS = [
+  "appointment_seen",
+  "id_confirmed",
+  "aip_completed",
+] as const;
+
+export type JourneyMilestoneKey = (typeof JOURNEY_MILESTONE_KEYS)[number];
+
+export const JOURNEY_MILESTONE_LABELS: Record<JourneyMilestoneKey, string> = {
+  appointment_seen: "Appointment seen",
+  id_confirmed: "ID confirmed",
+  aip_completed: "AIP completed",
+};
+
+/** Highest completed journey stage label, or "Not started". */
+export function journeyStageFromMilestones(
+  completed: JourneyMilestoneKey[],
+): string {
+  const order = JOURNEY_MILESTONE_KEYS;
+  for (let i = order.length - 1; i >= 0; i -= 1) {
+    if (completed.includes(order[i])) return JOURNEY_MILESTONE_LABELS[order[i]];
+  }
+  return "Not started";
+}
+
+// Clear the "needs attention" / call-back highlight after any advisor profile action.
+export async function clearSessionAttention(
+  sessionId: string,
+  advisorId: string,
+  _reason: string,
+): Promise<void> {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const now = new Date().toISOString();
+
+    const { error: trackErr } = await supabaseAdmin.from("session_contact_tracking").upsert(
+      {
+        session_id: sessionId,
+        session_attention_cleared_at: now,
+        updated_by: advisorId,
+        updated_at: now,
+      },
+      { onConflict: "session_id" },
+    );
+    if (trackErr && !isMissingTableError(trackErr)) {
+      console.error("clearSessionAttention tracking failed", trackErr);
+    }
+
+    const { data: callbacks, error: cbErr } = await supabaseAdmin
+      .from("callback_requests")
+      .select("id")
+      .eq("session_id", sessionId)
+      .eq("status", "new");
+    if (cbErr && !isMissingTableError(cbErr)) {
+      console.error("clearSessionAttention callbacks failed", cbErr);
+    }
+    for (const cb of callbacks ?? []) {
+      try {
+        await supabaseAdmin.from("advisor_contact_views").upsert(
+          {
+            advisor_id: advisorId,
+            contact_type: "callback",
+            contact_id: cb.id,
+          },
+          { onConflict: "advisor_id,contact_type,contact_id" },
+        );
+      } catch (e) {
+        console.error("clearSessionAttention mark callback opened failed", e);
+      }
+    }
+
+    const { data: appts, error: apptErr } = await supabaseAdmin
+      .from("appointments")
+      .select("id")
+      .eq("session_id", sessionId);
+    if (apptErr && !isMissingTableError(apptErr)) {
+      console.error("clearSessionAttention appointments failed", apptErr);
+    }
+    for (const a of appts ?? []) {
+      try {
+        await supabaseAdmin.from("advisor_contact_views").upsert(
+          {
+            advisor_id: advisorId,
+            contact_type: "appointment",
+            contact_id: a.id,
+          },
+          { onConflict: "advisor_id,contact_type,contact_id" },
+        );
+      } catch (e) {
+        console.error("clearSessionAttention mark appointment opened failed", e);
+      }
+    }
+  } catch (e) {
+    console.error("clearSessionAttention threw", e);
+  }
+}
 
 // Append a typed entry to the customer contact timeline. Never throws into the
 // caller's path — silently degrades if the table isn't present yet.
 async function appendContactLog(
   sessionId: string,
   authorId: string | null,
-  entryType: "contact" | "note" | "next_contact_set" | "appointment" | "callback",
+  entryType:
+    | "contact"
+    | "note"
+    | "next_contact_set"
+    | "appointment"
+    | "callback"
+    | "journey_milestone",
   body: string | null,
 ): Promise<void> {
   try {
@@ -1491,6 +1615,7 @@ export const markContacted = createServerFn({ method: "POST" })
       last_contacted_at: now,
     });
     await appendContactLog(data.sessionId, context.userId, "contact", "Marked as contacted");
+    await clearSessionAttention(data.sessionId, context.userId, "marked_contacted");
     return { ok: true, lastContactedAt: saved.lastContactedAt ?? now };
   });
 
@@ -1519,12 +1644,21 @@ export const setNextContact = createServerFn({ method: "POST" })
     } else {
       await appendContactLog(data.sessionId, context.userId, "next_contact_set", "Next contact cleared");
     }
+    await clearSessionAttention(data.sessionId, context.userId, "next_contact_set");
     return { ok: true };
   });
 
 export type ContactHistoryEntry = {
   id: string;
-  type: "contact" | "note" | "next_contact_set" | "appointment" | "callback" | "sms" | "fact_find";
+  type:
+    | "contact"
+    | "note"
+    | "next_contact_set"
+    | "appointment"
+    | "callback"
+    | "sms"
+    | "fact_find"
+    | "journey_milestone";
   body: string | null;
   occurredAt: string;
 };
@@ -1730,6 +1864,102 @@ export const listContactHistory = createServerFn({ method: "POST" })
 
     entries.sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
     return entries;
+  });
+
+export const getCustomerJourney = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const roles = await getRolesForUser(context.userId);
+    const isStaff = roles.includes("advisor") || roles.includes("admin");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: session, error: sessErr } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("customer_id")
+      .eq("id", data.sessionId)
+      .maybeSingle();
+    if (sessErr) throw new Error(sessErr.message);
+    if (!session) throw new Error("Session not found");
+    if (!isStaff && session.customer_id !== context.userId) throw new Error("Forbidden");
+
+    const milestones: Array<{
+      key: JourneyMilestoneKey;
+      label: string;
+      completedAt: string | null;
+    }> = JOURNEY_MILESTONE_KEYS.map((key) => ({
+      key,
+      label: JOURNEY_MILESTONE_LABELS[key],
+      completedAt: null,
+    }));
+
+    const { data: rows, error } = await supabaseAdmin
+      .from("customer_journey_milestones")
+      .select("milestone_key, completed_at")
+      .eq("session_id", data.sessionId);
+    if (error && !isMissingTableError(error)) throw new Error(error.message);
+
+    for (const row of rows ?? []) {
+      const key = row.milestone_key as JourneyMilestoneKey;
+      const idx = milestones.findIndex((m) => m.key === key);
+      if (idx >= 0) milestones[idx].completedAt = row.completed_at;
+    }
+
+    return { milestones };
+  });
+
+export const confirmJourneyMilestone = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        sessionId: z.string().uuid(),
+        milestoneKey: z.enum(JOURNEY_MILESTONE_KEYS),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const roles = await getRolesForUser(context.userId);
+    if (!roles.includes("advisor") && !roles.includes("admin")) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: session, error: sessErr } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("customer_id")
+      .eq("id", data.sessionId)
+      .maybeSingle();
+    if (sessErr) throw new Error(sessErr.message);
+    if (!session) throw new Error("Session not found");
+
+    const label = JOURNEY_MILESTONE_LABELS[data.milestoneKey];
+    const now = new Date().toISOString();
+
+    const { error: insErr } = await supabaseAdmin.from("customer_journey_milestones").upsert(
+      {
+        session_id: data.sessionId,
+        milestone_key: data.milestoneKey,
+        completed_at: now,
+        completed_by: context.userId,
+      },
+      { onConflict: "session_id,milestone_key" },
+    );
+    if (insErr) {
+      if (isMissingTableError(insErr)) {
+        throw new Error("Run the customer journey migration first.");
+      }
+      throw new Error(insErr.message);
+    }
+
+    await appendContactLog(
+      data.sessionId,
+      context.userId,
+      "journey_milestone",
+      `Journey milestone confirmed: ${label}`,
+    );
+    await clearSessionAttention(data.sessionId, context.userId, `journey_${data.milestoneKey}`);
+    void sendJourneyMilestoneSms(session.customer_id, data.sessionId, data.milestoneKey);
+
+    return { ok: true, completedAt: now };
   });
 
 export const listNotes = createServerFn({ method: "POST" })

@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { isTwilioConfigured, sendSms, getAppBaseUrl } from "@/lib/sms.server";
+import { rafShareMessage } from "@/lib/referral";
 
 // ============================================================================
 // Refer a friend (RAF) — ADMIN-DRIVEN.
@@ -119,45 +120,49 @@ export const searchCustomers = createServerFn({ method: "GET" })
     return withPhone.data ?? [];
   });
 
+// Public share base URL (APP_BASE_URL on server — used when copying RAF messages from localhost).
+export const getPublicShareBaseUrl = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => ({ baseUrl: getAppBaseUrl().replace(/\/$/, "") }));
+
 // ---------------------------------------------------------------------------
 // PUBLIC: resolve a code → its (active) referrer. Used by the /raf/<code> route
 // to validate before setting the 'raf_ref' cookie. Mirrors resolveReferralSlug.
 // ---------------------------------------------------------------------------
+export async function resolveReferralCodeMeta(code: string): Promise<{
+  id: string;
+  code: string;
+  referrer_name: string | null;
+} | null> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: row, error } = await supabaseAdmin
+    .from("referral_codes")
+    .select("id, code, referrer_name, referrer_user_id")
+    .eq("code", code)
+    .eq("active", true)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw new Error(error.message);
+  }
+  if (!row) return null;
+
+  let referrerName = row.referrer_name?.trim() || null;
+  if (!referrerName && row.referrer_user_id) {
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("full_name, email")
+      .eq("id", row.referrer_user_id)
+      .maybeSingle();
+    referrerName = profile?.full_name?.trim() || profile?.email?.split("@")[0] || null;
+  }
+
+  return { id: row.id, code: row.code, referrer_name: referrerName };
+}
+
 export const resolveReferralCode = createServerFn({ method: "GET" })
   .inputValidator((d: unknown) => z.object({ code: z.string().min(1).max(16) }).parse(d))
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: row, error } = await supabaseAdmin
-      .from("referral_codes")
-      .select("id, code, referrer_name, referrer_user_id")
-      .eq("code", data.code)
-      .eq("active", true)
-      .maybeSingle();
-    if (error) {
-      if (isMissingTableError(error)) return null;
-      throw new Error(error.message);
-    }
-    if (!row) return null;
-
-    // Resolve a display name for the referrer. `referrer_name` is normally
-    // populated at link-creation time, but it can be blank (e.g. a link minted
-    // for an existing user whose profile had no full_name, or a row created
-    // outside the admin flow). In that case fall back to the linked user's
-    // profile so the landing page can greet the friend with a real name. This
-    // runs through the service-role client, so anon visitors aren't blocked by
-    // RLS. We only ever expose the display name — nothing else from the profile.
-    let referrerName = row.referrer_name?.trim() || null;
-    if (!referrerName && row.referrer_user_id) {
-      const { data: profile } = await supabaseAdmin
-        .from("profiles")
-        .select("full_name, email")
-        .eq("id", row.referrer_user_id)
-        .maybeSingle();
-      referrerName = profile?.full_name?.trim() || profile?.email?.split("@")[0] || null;
-    }
-
-    return { id: row.id, code: row.code, referrer_name: referrerName };
-  });
+  .handler(async ({ data }) => resolveReferralCodeMeta(data.code));
 
 // ---------------------------------------------------------------------------
 // FRIEND: record a referral from the 'raf_ref' cookie. Called on the friend's
@@ -292,8 +297,9 @@ export const createReferralLink = createServerFn({ method: "POST" })
   });
 
 // ---------------------------------------------------------------------------
-// ADMIN: text the referral link to the referrer's phone. Degrades gracefully if
-// Twilio is unconfigured. Logs to sms_messages when that table exists.
+// ADMIN: text the referral link to the REFERRER's phone so they can forward it.
+// For texting a friend's number directly with the share message, use
+// textRafInviteToFriend instead.
 // ---------------------------------------------------------------------------
 export const textReferralLink = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -337,6 +343,53 @@ export const textReferralLink = createServerFn({ method: "POST" })
       });
     } catch (e) {
       console.error("log RAF sms failed", e);
+    }
+
+    return { ok: true };
+  });
+
+// ---------------------------------------------------------------------------
+// ADMIN: text a FRIEND's number with the full share message (who recommended +
+// link). Use when the admin has the friend's mobile and wants to send the invite
+// directly rather than asking the referrer to forward.
+// ---------------------------------------------------------------------------
+export const textRafInviteToFriend = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), friendPhone: z.string().min(7).max(32) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await requireAdmin(context.userId);
+    if (!isTwilioConfigured()) {
+      throw new Error(
+        "SMS is not configured yet. Add Twilio credentials to your server environment.",
+      );
+    }
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: link, error } = await supabaseAdmin
+      .from("referral_codes")
+      .select("id, code, referrer_name")
+      .eq("id", data.id)
+      .single();
+    if (error) {
+      if (isMissingTableError(error)) throw new Error("Run the Refer-a-friend migration first.");
+      throw new Error(error.message);
+    }
+
+    const body = rafShareMessage(link.referrer_name, link.code, getAppBaseUrl());
+    const { sid } = await sendSms({ to: data.friendPhone, body });
+
+    try {
+      await supabaseAdmin.from("sms_messages").insert({
+        direction: "outbound",
+        from_number: process.env.TWILIO_PHONE_NUMBER!,
+        to_number: data.friendPhone,
+        body,
+        twilio_sid: sid,
+      });
+    } catch (e) {
+      console.error("log RAF friend sms failed", e);
     }
 
     return { ok: true };

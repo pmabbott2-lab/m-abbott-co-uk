@@ -10,6 +10,7 @@ import {
   sendSms,
   textChannelInviteMessage,
 } from "@/lib/sms.server";
+import { clearSessionAttention } from "@/lib/sessions.functions";
 
 const SLOT_MINUTES = 30;
 const BOOKING_HORIZON_DAYS = 28;
@@ -297,6 +298,10 @@ async function bookAppointment(
     }
   }
 
+  if (data.sessionId && userId) {
+    await clearSessionAttention(data.sessionId, userId, "appointment_booked");
+  }
+
   return appointment;
 }
 
@@ -582,6 +587,7 @@ export const logCallbackAttempt = createServerFn({ method: "POST" })
       "contact",
       data.note?.trim() || "Call attempted — no answer",
     );
+    await clearSessionAttention(data.sessionId, context.userId, "callback_attempt");
     return { ok: true };
   });
 
@@ -632,6 +638,7 @@ export const resolveCallback = createServerFn({ method: "POST" })
       "contact",
       data.note?.trim() || "Spoke to customer re: call-back",
     );
+    await clearSessionAttention(data.sessionId, context.userId, "callback_resolved");
     return { ok: true };
   });
 

@@ -16,7 +16,7 @@ import {
 } from "@/lib/introducer.functions";
 import { sendLeadBookingSms } from "@/lib/booking.functions";
 import { referralLinkForSlug } from "@/lib/referral";
-import { format, formatDistanceToNow } from "date-fns";
+import { format } from "date-fns";
 import { Calendar, Check, Copy, Hash, Link2, MessageSquare, UserPlus } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/introducer")({
@@ -82,9 +82,6 @@ function IntroducerPortal() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["introducer-profile"] }),
   });
 
-  // Book on behalf of a customer: capture their details as a lead, then drop the
-  // introducer straight into the diary to pick a slot. The lead carries the
-  // introducer_id, so the resulting appointment stays attributed to them.
   const createLead = useMutation({
     mutationFn: () =>
       createLeadFn({
@@ -134,8 +131,7 @@ function IntroducerPortal() {
   const profile = profileQ.data;
   const referralUrl = referralLinkForSlug(profile.slug);
   const companyCode = (profile as { company_code?: string | null }).company_code ?? null;
-  const leads = referralsQ.data?.leads ?? [];
-  const appointments = referralsQ.data?.appointments ?? [];
+  const referrals = referralsQ.data?.referrals ?? [];
 
   return (
     <AppShell title="Introducer portal">
@@ -156,8 +152,7 @@ function IntroducerPortal() {
                 Your company code
               </div>
               <p className="text-sm text-muted-foreground mt-1">
-                Share this 4-digit code with colleagues so they join the same company. Referrals from
-                anyone in your company are credited together.
+                Share this 4-digit code with colleagues so they join the same company.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -172,21 +167,10 @@ function IntroducerPortal() {
             <Link2 className="w-4 h-4" />
             Your shareable link
           </div>
-          <p className="text-sm text-muted-foreground">
-            One link for your website, emails, or socials. It takes customers to Mortgage Hub where
-            they can choose a verbal interview, a text interview, or book a call — all attributed to
-            you.
-          </p>
           <div className="flex flex-col sm:flex-row gap-2">
             <Input readOnly value={referralUrl} className="font-mono text-sm" />
             <CopyLinkButton url={referralUrl} label="Copy link" />
           </div>
-          <p className="text-xs text-muted-foreground">
-            Embed:{" "}
-            <code className="bg-muted px-1.5 py-0.5 rounded text-[11px]">
-              {`<a href="${referralUrl}">Start your mortgage journey</a>`}
-            </code>
-          </p>
         </section>
 
         <section className="rounded-2xl border bg-card p-6 space-y-4">
@@ -211,10 +195,6 @@ function IntroducerPortal() {
             <UserPlus className="w-4 h-4" />
             Book an appointment for a customer
           </div>
-          <p className="text-sm text-muted-foreground">
-            For customers who&apos;d rather not self-serve. Enter their details and we&apos;ll take you
-            straight to the diary to pick a time — booked under your name.
-          </p>
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="customerName">Customer name</Label>
@@ -224,73 +204,70 @@ function IntroducerPortal() {
               <Label htmlFor="customerPhone">Phone</Label>
               <Input id="customerPhone" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} />
             </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="customerEmail">Email (optional)</Label>
-              <Input id="customerEmail" type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} />
-            </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="notes">Notes (optional)</Label>
-              <Textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
-            </div>
           </div>
           <Button disabled={createLead.isPending || !customerName || !customerPhone} onClick={() => createLead.mutate()}>
             <Calendar className="w-4 h-4 mr-2" />
             {createLead.isPending ? "Opening diary…" : "Book an appointment for a customer"}
           </Button>
-          {createLead.isError && (
-            <p className="text-sm text-destructive">{(createLead.error as Error).message}</p>
-          )}
         </section>
 
         <section className="space-y-3">
           <h3 className="font-medium">Your referrals</h3>
-          <div className="rounded-2xl border bg-card divide-y">
-            {leads.length === 0 && appointments.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            Limited view — customer name, journey stage, lead source, advisor and contact dates only.
+          </p>
+          <div className="rounded-2xl border bg-card overflow-hidden">
+            {referrals.length === 0 && (
               <div className="p-6 text-sm text-muted-foreground">No referrals yet.</div>
             )}
-            {leads.map((lead) => (
-              <div key={lead.id} className="p-4 space-y-3">
-                <div>
-                  <div className="font-medium">{lead.customer_name}</div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    {lead.status} · {lead.customer_phone}
-                    {lead.customer_email ? ` · ${lead.customer_email}` : ""} ·{" "}
-                    {formatDistanceToNow(new Date(lead.created_at), { addSuffix: true })}
-                  </div>
-                  {lead.notes && <p className="text-sm mt-2 text-muted-foreground">{lead.notes}</p>}
-                </div>
-                {lead.status !== "booked" && (
-                  <div className="flex flex-wrap gap-2">
-                    <Link to="/book/$slug" params={{ slug: profile.slug }} search={{ lead: lead.id }}>
-                      <Button size="sm" variant="secondary">
-                        <Calendar className="w-3.5 h-3.5 mr-1.5" />
-                        Book into diary
-                      </Button>
-                    </Link>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!lead.customer_phone || sendSms.isPending}
-                      onClick={() => sendSms.mutate(lead.id)}
-                    >
-                      <MessageSquare className="w-3.5 h-3.5 mr-1.5" />
-                      Text booking link
-                    </Button>
-                  </div>
-                )}
-                {sendSms.isError && sendSms.variables === lead.id && (
-                  <p className="text-xs text-destructive">{(sendSms.error as Error).message}</p>
-                )}
+            {referrals.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/40 text-left">
+                      <th className="p-3 font-medium">Customer</th>
+                      <th className="p-3 font-medium">Stage</th>
+                      <th className="p-3 font-medium">Lead source</th>
+                      <th className="p-3 font-medium">Advisor</th>
+                      <th className="p-3 font-medium">Days at stage</th>
+                      <th className="p-3 font-medium">Last contact</th>
+                      <th className="p-3 font-medium" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {referrals.map((r) => (
+                      <tr key={`${r.kind}-${r.id}`}>
+                        <td className="p-3 font-medium">{r.customerName}</td>
+                        <td className="p-3">{r.journeyStage}</td>
+                        <td className="p-3 text-muted-foreground">{r.leadSource}</td>
+                        <td className="p-3">{r.advisorName ?? "—"}</td>
+                        <td className="p-3">{r.daysAtStage}</td>
+                        <td className="p-3 text-muted-foreground">
+                          {r.lastContactDate ? format(new Date(r.lastContactDate), "d MMM yyyy") : "—"}
+                        </td>
+                        <td className="p-3">
+                          {r.leadId && r.journeyStage === "Not started" && (
+                            <div className="flex gap-2">
+                              <Link to="/book/$slug" params={{ slug: profile.slug }} search={{ lead: r.leadId }}>
+                                <Button size="sm" variant="secondary">Book</Button>
+                              </Link>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={sendSms.isPending}
+                                onClick={() => sendSms.mutate(r.leadId!)}
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ))}
-            {appointments.map((appt) => (
-              <div key={appt.id} className="p-4">
-                <div className="font-medium">{appt.customer_name}</div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  Appointment · {format(new Date(appt.starts_at), "EEE d MMM, HH:mm")} · {appt.customer_phone}
-                </div>
-              </div>
-            ))}
+            )}
           </div>
         </section>
       </div>

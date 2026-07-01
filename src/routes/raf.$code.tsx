@@ -2,60 +2,74 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
-import { setRafCookie } from "@/lib/referral";
-import { resolveReferralCode } from "@/lib/referrals.functions";
+import { setRafCookie, rafShareDescription } from "@/lib/referral";
+import { resolveReferralCode, resolveReferralCodeMeta } from "@/lib/referrals.functions";
 import { Button } from "@/components/ui/button";
 import { Gift, CalendarCheck, MessageSquare, Mic, ShieldCheck } from "lucide-react";
 import avatarImg from "@/assets/susan.png";
 
+function rafShareUrl(code: string): string {
+  const base =
+    (typeof process !== "undefined" && (process.env.APP_BASE_URL || process.env.VITE_APP_URL)) ||
+    (typeof window !== "undefined" ? window.location.origin : "http://localhost:8080");
+  return `${String(base).replace(/\/$/, "")}/raf/${code}`;
+}
+
 export const Route = createFileRoute("/raf/$code")({
-  head: () => ({
-    meta: [
-      { title: "A friend invited you — Mortgage Hub" },
-      {
-        name: "description",
-        content:
-          "A friend has invited you to Mortgage Hub — a friendly, guided way to get your mortgage advisor everything they need before you even meet.",
-      },
-    ],
-  }),
+  loader: async ({ params }) => {
+    const meta = await resolveReferralCodeMeta(params.code);
+    return { meta, shareUrl: rafShareUrl(params.code) };
+  },
+  head: ({ loaderData, params }) => {
+    const referrerName = loaderData?.meta?.referrer_name ?? null;
+    const title = referrerName
+      ? `${referrerName} invited you — Mortgage Hub`
+      : "A friend invited you — Mortgage Hub";
+    const description = rafShareDescription(referrerName);
+    const url = loaderData?.shareUrl ?? rafShareUrl(params.code);
+    return {
+      meta: [
+        { title },
+        { name: "description", content: description },
+        { property: "og:title", content: title },
+        { property: "og:description", content: description },
+        { property: "og:type", content: "website" },
+        { property: "og:url", content: url },
+      ],
+    };
+  },
   component: ReferAFriendLanding,
 });
 
 function ReferAFriendLanding() {
   const { code } = Route.useParams();
+  const loaderData = Route.useLoaderData();
   const navigate = useNavigate();
   const resolveFn = useServerFn(resolveReferralCode);
-  const [referrerName, setReferrerName] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
+  const [referrerName, setReferrerName] = useState<string | null>(
+    loaderData?.meta?.referrer_name ?? null,
+  );
+  const [ready, setReady] = useState(!!loaderData?.meta);
 
   useEffect(() => {
     let cancelled = false;
 
-    // If the friend is already signed in, send them into the app. We still set
-    // the RAF cookie first (below) so attribution is recorded on /home.
     supabase.auth.getSession().then(({ data }) => {
       if (!cancelled && data.session) navigate({ to: "/home" });
     });
+
+    if (loaderData?.meta) return;
 
     (async () => {
       try {
         const link = await resolveFn({ data: { code } });
         if (cancelled) return;
         if (link) {
-          // PRESERVE ATTRIBUTION: set the RAF cookie (separate from the
-          // introducer cookie) so the referring customer is credited when this
-          // friend signs up. This is read later on the authenticated /home load
-          // by claimReferral(). The landing page + CTA carry this forward — the
-          // cookie persists across navigation to /auth and into /home.
           setRafCookie(link.code);
           setReferrerName(link.referrer_name ?? null);
         }
-        // An invalid/expired/empty code simply falls through to a warm, generic
-        // welcome rather than an error screen.
       } catch {
-        // Network/server hiccup — still show the welcoming page so the visitor
-        // can get started; attribution just won't be captured this time.
+        // Network/server hiccup — still show the welcoming page.
       } finally {
         if (!cancelled) setReady(true);
       }
@@ -64,13 +78,10 @@ function ReferAFriendLanding() {
     return () => {
       cancelled = true;
     };
-  }, [code, resolveFn, navigate]);
+  }, [code, resolveFn, navigate, loaderData]);
 
   if (!ready) return <div className="min-h-screen bg-background" />;
 
-  // Greet the friend with the referrer's real name when we can resolve it; fall
-  // back to the generic wording only for invalid/expired codes or a truly
-  // missing name.
   const headline = referrerName
     ? `${referrerName} has invited you to Mortgage Hub`
     : "A friend has invited you to Mortgage Hub";

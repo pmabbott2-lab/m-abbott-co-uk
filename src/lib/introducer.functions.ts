@@ -221,30 +221,180 @@ export const createManualLead = createServerFn({ method: "POST" })
     return lead;
   });
 
+const JOURNEY_ORDER = ["appointment_seen", "id_confirmed", "aip_completed"] as const;
+const JOURNEY_LABELS: Record<string, string> = {
+  appointment_seen: "Appointment seen",
+  id_confirmed: "ID confirmed",
+  aip_completed: "AIP completed",
+};
+
+function journeyStageLabel(completed: string[]): string {
+  for (let i = JOURNEY_ORDER.length - 1; i >= 0; i -= 1) {
+    if (completed.includes(JOURNEY_ORDER[i])) return JOURNEY_LABELS[JOURNEY_ORDER[i]];
+  }
+  return "Not started";
+}
+
 export const listIntroducerReferrals = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { data: introducer, error: introErr } = await context.supabase
       .from("introducers")
-      .select("id")
+      .select("id, company_name, company_code")
       .eq("user_id", context.userId)
       .single();
     if (introErr) throw new Error(introErr.message);
 
-    const [{ data: leads, error: leadsErr }, { data: appointments, error: apptErr }] = await Promise.all([
-      context.supabase
-        .from("introducer_leads")
-        .select("*")
-        .eq("introducer_id", introducer.id)
-        .order("created_at", { ascending: false }),
-      context.supabase
-        .from("appointments")
-        .select("id, status, lead_source, referral_channel, starts_at, customer_name, customer_phone")
-        .eq("introducer_id", introducer.id)
-        .order("starts_at", { ascending: false }),
-    ]);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const [{ data: leads, error: leadsErr }, { data: appointments, error: apptErr }] =
+      await Promise.all([
+        supabaseAdmin
+          .from("introducer_leads")
+          .select("id, customer_name, status, lead_source, channel, created_at, appointment_id")
+          .eq("introducer_id", introducer.id)
+          .order("created_at", { ascending: false }),
+        supabaseAdmin
+          .from("appointments")
+          .select(
+            "id, status, lead_source, referral_channel, starts_at, customer_name, session_id, advisor_id, created_at",
+          )
+          .eq("introducer_id", introducer.id)
+          .order("starts_at", { ascending: false }),
+      ]);
     if (leadsErr) throw new Error(leadsErr.message);
     if (apptErr) throw new Error(apptErr.message);
 
-    return { leads: leads ?? [], appointments: appointments ?? [] };
+    const sessionIds = Array.from(
+      new Set(
+        (appointments ?? [])
+          .map((a) => a.session_id)
+          .filter(Boolean) as string[],
+      ),
+    );
+
+    const milestoneMap = new Map<string, string[]>();
+    const trackingMap = new Map<string, string | null>();
+    const sessionCreatedMap = new Map<string, string>();
+
+    if (sessionIds.length > 0) {
+      const { data: sessions } = await supabaseAdmin
+        .from("interview_sessions")
+        .select("id, started_at")
+        .in("id", sessionIds);
+      for (const s of sessions ?? []) sessionCreatedMap.set(s.id, s.started_at);
+
+      try {
+        const { data: milestones } = await supabaseAdmin
+          .from("customer_journey_milestones")
+          .select("session_id, milestone_key, completed_at")
+          .in("session_id", sessionIds);
+        for (const m of milestones ?? []) {
+          const list = milestoneMap.get(m.session_id) ?? [];
+          list.push(m.milestone_key);
+          milestoneMap.set(m.session_id, list);
+        }
+      } catch {
+        /* table may not exist yet */
+      }
+
+      try {
+        const { data: tracking } = await supabaseAdmin
+          .from("session_contact_tracking")
+          .select("session_id, last_contacted_at")
+          .in("session_id", sessionIds);
+        for (const t of tracking ?? []) {
+          trackingMap.set(t.session_id, t.last_contacted_at);
+        }
+      } catch {
+        /* table may not exist yet */
+      }
+    }
+
+    const advisorIds = Array.from(
+      new Set((appointments ?? []).map((a) => a.advisor_id).filter(Boolean) as string[]),
+    );
+    const advisorNames = new Map<string, string>();
+    if (advisorIds.length > 0) {
+      const { data: profiles } = await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", advisorIds);
+      for (const p of profiles ?? []) {
+        advisorNames.set(p.id, p.full_name || p.email || "Advisor");
+      }
+    }
+
+
+    type IntroducerReferralRow = {
+      id: string;
+      customerName: string;
+      journeyStage: string;
+      leadSource: string;
+      advisorName: string | null;
+      daysAtStage: number;
+      lastContactDate: string | null;
+      createdAt: string;
+      kind: "lead" | "appointment";
+      leadId?: string;
+      appointmentId?: string;
+    };
+
+    const rows: IntroducerReferralRow[] = [];
+    const seenNames = new Set<string>();
+
+    const leadSourceLabel = (source: string | null, channel: string | null): string => {
+      if (source === "introducer_portal" || channel === "manual") {
+        return introducer.company_name || "Your company";
+      }
+      if (source === "referral_link") return "Direct link";
+      return "Direct";
+    };
+
+    const daysSince = (iso: string) =>
+      Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24)));
+
+    for (const lead of leads ?? []) {
+      const key = lead.customer_name.toLowerCase();
+      if (seenNames.has(key)) continue;
+      seenNames.add(key);
+      rows.push({
+        id: lead.id,
+        kind: "lead",
+        leadId: lead.id,
+        customerName: lead.customer_name,
+        journeyStage: lead.status === "booked" ? "Appointment booked" : "Not started",
+        leadSource: leadSourceLabel(lead.lead_source, lead.channel),
+        advisorName: null,
+        daysAtStage: daysSince(lead.created_at),
+        lastContactDate: null,
+        createdAt: lead.created_at,
+      });
+    }
+
+    for (const appt of appointments ?? []) {
+      const sessionId = appt.session_id;
+      const completed = sessionId ? (milestoneMap.get(sessionId) ?? []) : [];
+      const stage = sessionId ? journeyStageLabel(completed) : "Appointment booked";
+      const stageStart = sessionId
+        ? sessionCreatedMap.get(sessionId) ?? appt.created_at
+        : appt.created_at;
+
+      rows.push({
+        id: appt.id,
+        kind: "appointment",
+        appointmentId: appt.id,
+        customerName: appt.customer_name,
+        journeyStage: stage,
+        leadSource: leadSourceLabel(appt.lead_source, appt.referral_channel),
+        advisorName: appt.advisor_id ? advisorNames.get(appt.advisor_id) ?? null : null,
+        daysAtStage: daysSince(stageStart),
+        lastContactDate: sessionId ? trackingMap.get(sessionId) ?? null : null,
+        createdAt: appt.created_at,
+      });
+    }
+
+    rows.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return { referrals: rows };
   });

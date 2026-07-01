@@ -13,6 +13,8 @@ import {
   markContacted,
   setNextContact,
   listContactHistory,
+  getCustomerJourney,
+  confirmJourneyMilestone,
 } from "@/lib/sessions.functions";
 import { SECTIONS } from "@/lib/interview-script";
 import { mergeKeyFacts, formatGBP as fmtGBP } from "@/lib/structured-answers";
@@ -27,8 +29,9 @@ import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { format } from "date-fns";
-import { CalendarCheck, Clock, History, PhoneCall, StickyNote } from "lucide-react";
+import { CalendarCheck, Check, Clock, History, MapPin, PhoneCall, StickyNote } from "lucide-react";
 import { toast } from "sonner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export const Route = createFileRoute("/_authenticated/sessions/$sessionId")({
   component: SessionDetail,
@@ -93,107 +96,119 @@ function SessionDetail() {
           )}
         </div>
 
-        <ContactCard customer={customer} />
+        <Tabs defaultValue={isAdvisor ? "contact" : "journey"} className="w-full">
+          <TabsList className="flex flex-wrap h-auto gap-1 w-full justify-start">
+            {isAdvisor && (
+              <>
+                <TabsTrigger value="contact">Contact</TabsTrigger>
+                <TabsTrigger value="notes">Notes &amp; history</TabsTrigger>
+                <TabsTrigger value="factfind">Fact find</TabsTrigger>
+              </>
+            )}
+            <TabsTrigger value="journey">Customer journey</TabsTrigger>
+            {!isAdvisor && <TabsTrigger value="factfind">Your answers</TabsTrigger>}
+          </TabsList>
 
-        {isAdvisor && (
-          <div className="space-y-6">
-            <AppointmentCallbackCard sessionId={sessionId} customer={customer} />
-            <ContactTrackingCard sessionId={sessionId} />
-            <AdvisorNoteInput sessionId={sessionId} />
-            <ContactHistoryCard sessionId={sessionId} />
-          </div>
-        )}
+          {isAdvisor && (
+            <TabsContent value="contact" className="space-y-6 mt-4">
+              <ContactCard customer={customer} />
+              <AppointmentCallbackCard sessionId={sessionId} customer={customer} />
+              <ContactTrackingCard sessionId={sessionId} />
+            </TabsContent>
+          )}
 
-        <LenderExampleCard sessionId={sessionId} />
+          {isAdvisor && (
+            <TabsContent value="notes" className="space-y-6 mt-4">
+              <AdvisorNoteInput sessionId={sessionId} />
+              <ContactHistoryCard sessionId={sessionId} />
+            </TabsContent>
+          )}
 
-        <KeyFactsCard facts={keyFacts} />
+          <TabsContent value="journey" className="space-y-6 mt-4">
+            <CustomerJourneyTab sessionId={sessionId} isAdvisor={isAdvisor} />
+          </TabsContent>
 
-        {!isAdvisor && apptQ.data && (
-          <div className="rounded-2xl border bg-card p-5">
-            <div className="flex items-center gap-2 font-semibold mb-2">
-              <CalendarCheck className="w-4 h-4 text-accent" />
-              Appointment booked
-            </div>
-            <dl className="grid sm:grid-cols-2 gap-3 text-sm">
-              <div>
-                <dt className="text-muted-foreground">Date &amp; time</dt>
-                <dd className="font-medium">{format(new Date(apptQ.data.starts_at), "EEE d MMM yyyy, HH:mm")}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Duration</dt>
-                <dd className="font-medium">30 minutes</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Name</dt>
-                <dd className="font-medium">{apptQ.data.customer_name}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Phone</dt>
-                <dd className="font-medium">{apptQ.data.customer_phone}</dd>
-              </div>
-            </dl>
-          </div>
-        )}
-
-        {(session as { summary?: string | null }).summary && (
-          <div className="rounded-2xl border bg-card p-5">
-            <h3 className="font-semibold mb-2">AI summary for the advisor</h3>
-            <div className="text-sm whitespace-pre-wrap leading-relaxed">
-              {(session as { summary?: string | null }).summary}
-            </div>
-          </div>
-        )}
-
-
-
-        {SECTIONS.map((sec) => (
-          <div key={sec.id} className="rounded-2xl border bg-card p-5">
-            <h3 className="font-semibold mb-4">{sec.title}</h3>
-            <dl className="divide-y">
-              {sec.questions.map((qst) => {
-                const a = answerMap.get(`${sec.id}:${qst.key}`);
-                return (
-                  <div key={qst.key} className="py-3 grid grid-cols-1 sm:grid-cols-3 gap-2 items-start">
-                    <dt className="text-sm text-muted-foreground">{qst.label}</dt>
-                    <dd className="sm:col-span-2">
-                      {isAdvisor || session.status === "submitted" ? (
-                        <span className="text-sm">{a?.value || <em className="text-muted-foreground">No answer</em>}</span>
-                      ) : (
-                        <EditableValue
-                          value={a?.value ?? ""}
-                          onSave={(v) => onEdit(sec.id, qst.key, qst.label, v)}
-                        />
-                      )}
-                    </dd>
-                  </div>
-                );
-              })}
-            </dl>
-          </div>
-        ))}
-
-        {messages.length > 0 && (
-          <div className="rounded-2xl border bg-card p-5">
-            <h3 className="font-semibold mb-3">Interview transcript</h3>
-            <p className="text-xs text-muted-foreground mb-4">
-              Full conversation record — useful for checking context behind the structured answers.
-            </p>
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {messages.map((m) => (
-                <div
-                  key={m.id}
-                  className={`text-sm rounded-lg p-3 ${m.role === "avatar" ? "bg-muted/50" : "bg-background border"}`}
-                >
-                  <div className="text-xs font-medium text-muted-foreground mb-1">
-                    {m.role === "avatar" ? "Susan" : "Customer"} · {format(new Date(m.created_at), "PPp")}
-                  </div>
-                  {m.text}
+          <TabsContent value="factfind" className="space-y-6 mt-4">
+            {!isAdvisor && apptQ.data && (
+              <div className="rounded-2xl border bg-card p-5">
+                <div className="flex items-center gap-2 font-semibold mb-2">
+                  <CalendarCheck className="w-4 h-4 text-accent" />
+                  Appointment booked
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
+                <dl className="grid sm:grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <dt className="text-muted-foreground">Date &amp; time</dt>
+                    <dd className="font-medium">{format(new Date(apptQ.data.starts_at), "EEE d MMM yyyy, HH:mm")}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Duration</dt>
+                    <dd className="font-medium">30 minutes</dd>
+                  </div>
+                </dl>
+              </div>
+            )}
 
+            {isAdvisor && <LenderExampleCard sessionId={sessionId} />}
+            <KeyFactsCard facts={keyFacts} />
+
+            {(session as { summary?: string | null }).summary && (
+              <div className="rounded-2xl border bg-card p-5">
+                <h3 className="font-semibold mb-2">AI summary for the advisor</h3>
+                <div className="text-sm whitespace-pre-wrap leading-relaxed">
+                  {(session as { summary?: string | null }).summary}
+                </div>
+              </div>
+            )}
+
+            {SECTIONS.map((sec) => (
+              <div key={sec.id} className="rounded-2xl border bg-card p-5">
+                <h3 className="font-semibold mb-4">{sec.title}</h3>
+                <dl className="divide-y">
+                  {sec.questions.map((qst) => {
+                    const a = answerMap.get(`${sec.id}:${qst.key}`);
+                    return (
+                      <div key={qst.key} className="py-3 grid grid-cols-1 sm:grid-cols-3 gap-2 items-start">
+                        <dt className="text-sm text-muted-foreground">{qst.label}</dt>
+                        <dd className="sm:col-span-2">
+                          {isAdvisor || session.status === "submitted" ? (
+                            <span className="text-sm">{a?.value || <em className="text-muted-foreground">No answer</em>}</span>
+                          ) : (
+                            <EditableValue
+                              value={a?.value ?? ""}
+                              onSave={(v) => onEdit(sec.id, qst.key, qst.label, v)}
+                            />
+                          )}
+                        </dd>
+                      </div>
+                    );
+                  })}
+                </dl>
+              </div>
+            ))}
+
+            {messages.length > 0 && isAdvisor && (
+              <div className="rounded-2xl border bg-card p-5">
+                <h3 className="font-semibold mb-3">Interview transcript</h3>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Full conversation record — useful for checking context behind the structured answers.
+                </p>
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {messages.map((m) => (
+                    <div
+                      key={m.id}
+                      className={`text-sm rounded-lg p-3 ${m.role === "avatar" ? "bg-muted/50" : "bg-background border"}`}
+                    >
+                      <div className="text-xs font-medium text-muted-foreground mb-1">
+                        {m.role === "avatar" ? "Susan" : "Customer"} · {format(new Date(m.created_at), "PPp")}
+                      </div>
+                      {m.text}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
     </AppShell>
   );
@@ -207,6 +222,7 @@ const HISTORY_LABELS: Record<string, string> = {
   callback: "Call-back",
   sms: "SMS",
   fact_find: "Fact-find",
+  journey_milestone: "Journey",
 };
 
 const CALLBACK_WINDOW_LABELS: Record<string, string> = {
@@ -271,6 +287,7 @@ function AppointmentCallbackCard({
   const invalidateAfterAction = () => {
     qc.invalidateQueries({ queryKey: ["session-booking", sessionId] });
     qc.invalidateQueries({ queryKey: ["contact-history", sessionId] });
+    qc.invalidateQueries({ queryKey: ["contact-tracking", sessionId] });
     qc.invalidateQueries({ queryKey: ["advisor-contacts"] });
     qc.invalidateQueries({ queryKey: ["advisor-customers"] });
     qc.invalidateQueries({ queryKey: ["all-sessions"] });
@@ -548,6 +565,7 @@ function AdvisorNoteInput({ sessionId }: { sessionId: string }) {
       setNote("");
       toast.success("Note added");
       qc.invalidateQueries({ queryKey: ["contact-history", sessionId] });
+      qc.invalidateQueries({ queryKey: ["all-sessions"] });
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not save note"),
   });
@@ -579,6 +597,87 @@ function AdvisorNoteInput({ sessionId }: { sessionId: string }) {
 function toLocalInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function CustomerJourneyTab({
+  sessionId,
+  isAdvisor,
+}: {
+  sessionId: string;
+  isAdvisor: boolean;
+}) {
+  const qc = useQueryClient();
+  const journeyFn = useServerFn(getCustomerJourney);
+  const confirmFn = useServerFn(confirmJourneyMilestone);
+
+  const journeyQ = useQuery({
+    queryKey: ["customer-journey", sessionId],
+    queryFn: () => journeyFn({ data: { sessionId } }),
+  });
+
+  const confirm = useMutation({
+    mutationFn: (milestoneKey: string) =>
+      confirmFn({ data: { sessionId, milestoneKey: milestoneKey as "appointment_seen" | "id_confirmed" | "aip_completed" } }),
+    onSuccess: () => {
+      toast.success("Milestone confirmed");
+      qc.invalidateQueries({ queryKey: ["customer-journey", sessionId] });
+      qc.invalidateQueries({ queryKey: ["contact-history", sessionId] });
+      qc.invalidateQueries({ queryKey: ["all-sessions"] });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not confirm"),
+  });
+
+  const milestones = journeyQ.data?.milestones ?? [];
+
+  return (
+    <div className="rounded-2xl border bg-card p-5 space-y-4">
+      <h3 className="font-semibold flex items-center gap-2">
+        <MapPin className="w-4 h-4 text-muted-foreground" />
+        Customer journey
+      </h3>
+      <p className="text-xs text-muted-foreground">
+        {isAdvisor
+          ? "Confirm each milestone as the customer progresses. The customer is texted when you tick a step."
+          : "Track where you are in your mortgage journey with your advisor."}
+      </p>
+      {journeyQ.isLoading && <p className="text-sm text-muted-foreground">Loading journey…</p>}
+      <div className="space-y-2">
+        {milestones.map((m) => {
+          const done = !!m.completedAt;
+          return (
+            <button
+              key={m.key}
+              type="button"
+              disabled={!isAdvisor || done || confirm.isPending}
+              onClick={() => isAdvisor && !done && confirm.mutate(m.key)}
+              className={`w-full flex items-center gap-3 rounded-lg border p-4 text-left transition ${
+                done ? "bg-muted/40 opacity-90" : isAdvisor ? "hover:bg-muted/30 cursor-pointer" : ""
+              }`}
+            >
+              <div
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
+                  done ? "bg-primary border-primary text-primary-foreground" : "bg-background"
+                }`}
+              >
+                {done && <Check className="w-3.5 h-3.5" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-sm">{m.label}</div>
+                {m.completedAt && (
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    Completed {format(new Date(m.completedAt), "PPp")}
+                  </div>
+                )}
+              </div>
+            </button>
+          );
+        })}
+        {!journeyQ.isLoading && milestones.length === 0 && (
+          <p className="text-sm text-muted-foreground">Journey tracking will appear once the database migration is applied.</p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function ContactCard({

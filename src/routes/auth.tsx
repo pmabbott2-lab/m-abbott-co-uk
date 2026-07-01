@@ -1,5 +1,7 @@
 import { createFileRoute, useNavigate, useMatches, Outlet, Link } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import {
   clearPasswordRecoveryPending,
@@ -7,7 +9,15 @@ import {
   isPasswordRecoveryPending,
   isPasswordRecoveryUrl,
 } from "@/lib/auth-recovery";
+import { sendLoginSmsCode, verifyLoginSmsCodeFn } from "@/lib/auth.functions";
+import {
+  clearLoginSmsVerified,
+  isLoginSmsVerified,
+  markLoginSmsVerified,
+} from "@/lib/auth-sms-session";
 import { getAuthCallbackUrl, getPasswordResetUrl, isLocalDev } from "@/lib/app-url";
+import { isLoginMfaSuspended } from "@/lib/auth-mfa-config";
+import { fetchUserRoles, requiresAuthenticatorMfa, requiresSmsLoginVerification } from "@/lib/auth-roles";
 import { isValidUkMobile, normaliseUkPhone } from "@/lib/phone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +25,11 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import avatarImg from "@/assets/susan.png";
 
-type AuthMode = "signin" | "signup" | "forgot" | "phone";
+type AuthMode = "signin" | "signup" | "forgot" | "phone" | "mfa-challenge" | "mfa-enroll" | "mfa-setup-required" | "sms-login-challenge";
+
+function isSupabaseMfaDisabledMessage(msg: string): boolean {
+  return /mfa|totp|factor|not enabled|disabled|unavailable/i.test(msg);
+}
 
 export const Route = createFileRoute("/auth")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -52,6 +66,24 @@ function AuthPage() {
   // to and switch to the code-entry step.
   const [otpSentTo, setOtpSentTo] = useState<string | null>(null);
   const [otpCode, setOtpCode] = useState("");
+  // TOTP MFA: challenge after password sign-in, or first-time enrollment for staff.
+  const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
+  const [mfaChallengeId, setMfaChallengeId] = useState<string | null>(null);
+  const [mfaTotpCode, setMfaTotpCode] = useState("");
+  const [mfaQrSvg, setMfaQrSvg] = useState<string | null>(null);
+  const [mfaSecret, setMfaSecret] = useState<string | null>(null);
+  const [mfaEnrollFactorId, setMfaEnrollFactorId] = useState<string | null>(null);
+  const [mfaBlocking, setMfaBlocking] = useState(false);
+  const [mfaStaffRequired, setMfaStaffRequired] = useState(false);
+  // SMS login verification for customers & introducers (after email/Google sign-in).
+  const [smsBlocking, setSmsBlocking] = useState(false);
+  const [smsSentTo, setSmsSentTo] = useState<string | null>(null);
+  const [smsLoginCode, setSmsLoginCode] = useState("");
+  const [smsNeedsPhone, setSmsNeedsPhone] = useState(false);
+  const [smsChallengePhone, setSmsChallengePhone] = useState("");
+
+  const sendLoginSmsFn = useServerFn(sendLoginSmsCode);
+  const verifyLoginSmsFn = useServerFn(verifyLoginSmsCodeFn);
 
   useEffect(() => {
     if (isChildRoute) return;
@@ -60,26 +92,30 @@ function AuthPage() {
       return;
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === "PASSWORD_RECOVERY") {
         goToPasswordRecoveryPage();
         return;
       }
-      // After an email confirmation / magic link, Supabase parses the tokens
-      // from the URL and fires SIGNED_IN — forward them straight into the app.
-      if (session && !isPasswordRecoveryPending()) {
+      if (event === "SIGNED_OUT") {
+        clearLoginSmsVerified();
+        return;
+      }
+      if (session && !isPasswordRecoveryPending() && !mfaBlocking && !smsBlocking) {
+        if (await resumeLoginStepIfNeeded(session)) return;
         navigate({ to: "/home" });
       }
     });
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session && !isPasswordRecoveryPending()) {
-        navigate({ to: "/home" });
-      }
-    });
+    void (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session || isPasswordRecoveryPending() || mfaBlocking || smsBlocking) return;
+      if (await resumeLoginStepIfNeeded(data.session)) return;
+      navigate({ to: "/home" });
+    })();
 
     return () => subscription.unsubscribe();
-  }, [recovery, navigate, isChildRoute]);
+  }, [recovery, navigate, isChildRoute, mfaBlocking, smsBlocking]);
 
   const showStatus = (type: "error" | "success", text: string) => {
     setStatus({ type, text });
@@ -95,8 +131,245 @@ function AuthPage() {
     setPhone("");
     setOtpSentTo(null);
     setOtpCode("");
+    setMfaFactorId(null);
+    setMfaChallengeId(null);
+    setMfaTotpCode("");
+    setMfaQrSvg(null);
+    setMfaSecret(null);
+    setMfaEnrollFactorId(null);
+    setMfaBlocking(false);
+    setMfaStaffRequired(false);
+    setSmsBlocking(false);
+    setSmsSentTo(null);
+    setSmsLoginCode("");
+    setSmsNeedsPhone(false);
+    setSmsChallengePhone("");
     if (typeof window !== "undefined") {
       window.history.replaceState({}, "", "/auth");
+    }
+  };
+
+  const finishSignIn = (session?: Session | null) => {
+    setMfaBlocking(false);
+    setMfaStaffRequired(false);
+    setSmsBlocking(false);
+    clearPasswordRecoveryPending();
+    if (session) markLoginSmsVerified(session);
+    navigate({ to: "/home" });
+  };
+
+  const dispatchLoginSms = async (phone?: string): Promise<boolean> => {
+    try {
+      const result = await sendLoginSmsFn({ data: phone ? { phone } : {} });
+      setSmsSentTo(result.sentTo);
+      setSmsNeedsPhone(false);
+      setSmsLoginCode("");
+      showStatus("success", `We've texted a 6-digit code to ${result.sentTo}.`);
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not send the code";
+      if (/mobile number|phone/i.test(msg)) {
+        setSmsNeedsPhone(true);
+        setSmsSentTo(null);
+      }
+      showStatus("error", msg);
+      return false;
+    }
+  };
+
+  const beginCustomerSmsChallenge = async (session: Session): Promise<boolean> => {
+    const roles = await fetchUserRoles(session.user.id);
+    if (!requiresSmsLoginVerification(roles)) return false;
+    if (isLoginSmsVerified(session)) return false;
+
+    setSmsBlocking(true);
+    setMode("sms-login-challenge");
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("phone")
+      .eq("id", session.user.id)
+      .maybeSingle();
+    const savedPhone = profile?.phone?.trim();
+    if (savedPhone) {
+      setSmsChallengePhone(savedPhone);
+      await dispatchLoginSms();
+    } else {
+      setSmsNeedsPhone(true);
+      setSmsSentTo(null);
+    }
+    return true;
+  };
+
+  /** Staff (advisor/admin): authenticator. Customers/introducers: SMS code. Skipped when MFA suspended. */
+  const resolveLoginStepAfterSignIn = async (session: Session): Promise<boolean> => {
+    if (isLoginMfaSuspended()) return false;
+    const roles = await fetchUserRoles(session.user.id);
+    if (requiresAuthenticatorMfa(roles)) {
+      setMfaStaffRequired(true);
+      if (await beginMfaChallenge()) return true;
+      if (await maybePromptMfaEnrollment()) return true;
+      return false;
+    }
+    return beginCustomerSmsChallenge(session);
+  };
+
+  const resumeLoginStepIfNeeded = async (session: Session): Promise<boolean> => {
+    if (isLoginMfaSuspended()) return false;
+    const roles = await fetchUserRoles(session.user.id);
+    if (requiresAuthenticatorMfa(roles)) {
+      setMfaStaffRequired(true);
+      if (await beginMfaChallenge()) return true;
+      if (await maybePromptMfaEnrollment()) return true;
+      return false;
+    }
+    if (isLoginSmsVerified(session)) return false;
+    return beginCustomerSmsChallenge(session);
+  };
+
+  const showStaffMfaSetupRequired = () => {
+    setMfaBlocking(true);
+    setMfaStaffRequired(true);
+    setMode("mfa-setup-required");
+  };
+
+  const signOutAndRestart = async () => {
+    await supabase.auth.signOut();
+    switchMode("signin");
+  };
+
+  const retryStaffMfaSetup = async () => {
+    setStatus(null);
+    setLoading(true);
+    try {
+      if (await maybePromptMfaEnrollment()) return;
+      showStatus(
+        "error",
+        "TOTP still isn't available. In Supabase go to Authentication → MFA, enable TOTP, save, then try again.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const beginMfaChallenge = async (): Promise<boolean> => {
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    const { data: factors, error: listErr } = await supabase.auth.mfa.listFactors();
+    if (listErr) {
+      if (isSupabaseMfaDisabledMessage(listErr.message ?? "")) {
+        showStaffMfaSetupRequired();
+        return true;
+      }
+      throw listErr;
+    }
+    const verifiedTotp = factors?.totp?.find((f) => f.status === "verified");
+    if (
+      verifiedTotp &&
+      aal?.currentLevel === "aal1" &&
+      aal?.nextLevel === "aal2"
+    ) {
+      const { data: challenge, error: chErr } = await supabase.auth.mfa.challenge({
+        factorId: verifiedTotp.id,
+      });
+      if (chErr) throw chErr;
+      setMfaFactorId(verifiedTotp.id);
+      setMfaChallengeId(challenge.id);
+      setMfaTotpCode("");
+      setMfaBlocking(true);
+      setMode("mfa-challenge");
+      return true;
+    }
+    return false;
+  };
+
+  const maybePromptMfaEnrollment = async (): Promise<boolean> => {
+    const { data: factors, error: listErr } = await supabase.auth.mfa.listFactors();
+    if (listErr) {
+      console.error("mfa listFactors", listErr);
+      if (isSupabaseMfaDisabledMessage(listErr.message ?? "")) {
+        showStaffMfaSetupRequired();
+        return true;
+      }
+      return false;
+    }
+    const hasVerified = (factors?.totp ?? []).some((f) => f.status === "verified");
+    if (hasVerified) return false;
+
+    const { data: enroll, error: enrollErr } = await supabase.auth.mfa.enroll({
+      factorType: "totp",
+      friendlyName: "Authenticator app",
+    });
+    if (enrollErr) {
+      const msg = enrollErr.message ?? "";
+      if (isSupabaseMfaDisabledMessage(msg)) {
+        showStaffMfaSetupRequired();
+        return true;
+      }
+      showStatus("error", msg || "Could not start authenticator setup.");
+      return false;
+    }
+
+    setMfaEnrollFactorId(enroll.id);
+    setMfaQrSvg(enroll.totp.qr_code);
+    setMfaSecret(enroll.totp.secret);
+    setMfaTotpCode("");
+    setMfaBlocking(true);
+    setMode("mfa-enroll");
+    return true;
+  };
+
+  const verifyMfaChallenge = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mfaFactorId || !mfaChallengeId) return;
+    const code = mfaTotpCode.trim();
+    if (!/^\d{6}$/.test(code)) {
+      showStatus("error", "Enter the 6-digit code from your authenticator app.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.mfa.verify({
+        factorId: mfaFactorId,
+        challengeId: mfaChallengeId,
+        code,
+      });
+      if (error) throw error;
+      const { data: sessionData } = await supabase.auth.getSession();
+      finishSignIn(sessionData.session);
+    } catch (err) {
+      showStatus("error", err instanceof Error ? err.message : "Invalid code — try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verifyMfaEnrollment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mfaEnrollFactorId) return;
+    const code = mfaTotpCode.trim();
+    if (!/^\d{6}$/.test(code)) {
+      showStatus("error", "Enter the 6-digit code from your authenticator app.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data: challenge, error: chErr } = await supabase.auth.mfa.challenge({
+        factorId: mfaEnrollFactorId,
+      });
+      if (chErr) throw chErr;
+      const { error } = await supabase.auth.mfa.verify({
+        factorId: mfaEnrollFactorId,
+        challengeId: challenge.id,
+        code,
+      });
+      if (error) throw error;
+      toast.success("Authenticator app linked");
+      const { data: sessionData } = await supabase.auth.getSession();
+      finishSignIn(sessionData.session);
+    } catch (err) {
+      showStatus("error", err instanceof Error ? err.message : "Could not verify — check the code.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -161,8 +434,9 @@ function AuthPage() {
         }
 
         if (data.session) {
-          showStatus("success", "Account created — taking you to your dashboard…");
-          navigate({ to: "/home" });
+          clearPasswordRecoveryPending();
+          if (await resolveLoginStepAfterSignIn(data.session)) return;
+          finishSignIn(data.session);
           return;
         }
 
@@ -184,7 +458,9 @@ function AuthPage() {
         return;
       }
       clearPasswordRecoveryPending();
-      navigate({ to: "/home" });
+
+      if (await resolveLoginStepAfterSignIn(data.session)) return;
+      finishSignIn(data.session);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong";
       if (/email not confirmed/i.test(msg)) {
@@ -273,7 +549,9 @@ function AuthPage() {
         return;
       }
       clearPasswordRecoveryPending();
-      navigate({ to: "/home" });
+      markLoginSmsVerified(data.session);
+      if (await resolveLoginStepAfterSignIn(data.session)) return;
+      finishSignIn(data.session);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong";
       if (/expired|invalid|incorrect|token/i.test(msg)) {
@@ -286,22 +564,75 @@ function AuthPage() {
     }
   };
 
+  const verifySmsLoginChallenge = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = smsLoginCode.trim();
+    if (!/^\d{6}$/.test(code)) {
+      showStatus("error", "Enter the 6-digit code from the text message.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await verifyLoginSmsFn({ data: { code } });
+      const { data: sessionData } = await supabase.auth.getSession();
+      finishSignIn(sessionData.session);
+    } catch (err) {
+      showStatus("error", err instanceof Error ? err.message : "Invalid code — try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const sendSmsLoginCode = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (smsNeedsPhone && !isValidUkMobile(smsChallengePhone)) {
+      showStatus("error", "Enter a valid UK mobile number (e.g. 07123 456789).");
+      return;
+    }
+    setLoading(true);
+    try {
+      await dispatchLoginSms(smsNeedsPhone ? smsChallengePhone : undefined);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const title =
-    mode === "forgot"
+    mode === "sms-login-challenge"
+      ? "Check your phone"
+      : mode === "mfa-challenge"
+      ? "Two-factor authentication"
+      : mode === "mfa-enroll"
+        ? "Set up authenticator app"
+        : mode === "mfa-setup-required"
+          ? "Enable staff authenticator in Supabase"
+        : mode === "forgot"
       ? "Reset your password"
       : mode === "phone"
         ? "Sign in with your phone"
         : "Get started with Mortgage Hub";
 
   const subtitle =
-    mode === "forgot"
+    mode === "sms-login-challenge"
+      ? smsSentTo
+        ? `Enter the 6-digit code we texted to ${smsSentTo}.`
+        : "We'll text you a one-time code to confirm it's you."
+      : mode === "mfa-challenge"
+      ? "Enter the 6-digit code from Microsoft Authenticator, Google Authenticator, or Authy."
+      : mode === "mfa-enroll"
+        ? mfaStaffRequired
+          ? "Staff accounts must link an authenticator app before continuing."
+          : "Scan the QR code with your authenticator app, then enter the code to finish setup."
+        : mode === "mfa-setup-required"
+          ? "Your account is an advisor or admin. Supabase must have TOTP turned on before you can link Microsoft Authenticator."
+        : mode === "forgot"
       ? isLocalDev()
         ? "We'll create a direct reset link for localhost (no email required)."
         : "Enter your email and we'll send you a reset link."
       : mode === "phone"
         ? otpSentTo
           ? "Enter the 6-digit code we just texted you."
-          : "We'll text you a one-time code to sign in — no password needed."
+          : "Customers and introducers: we'll text you a one-time code to sign in — no authenticator app needed."
         : "A friendly voice interview that helps your advisor know you faster.";
 
   const submitLabel =
@@ -342,6 +673,14 @@ function AuthPage() {
                 Create account
               </button>
             </div>
+          ) : mode === "mfa-setup-required" ? (
+            <button
+              type="button"
+              onClick={() => void signOutAndRestart()}
+              className="text-sm text-muted-foreground hover:text-foreground hover:underline"
+            >
+              ← Sign out
+            </button>
           ) : (
             <button
               type="button"
@@ -387,7 +726,145 @@ function AuthPage() {
             </div>
           )}
 
-          {mode !== "phone" && (
+          {mode === "mfa-setup-required" && (
+            <div className="space-y-4 text-sm">
+              <ol className="list-decimal list-inside space-y-2 text-muted-foreground">
+                <li>Open your Supabase project dashboard.</li>
+                <li>Go to <strong>Authentication</strong> → <strong>MFA</strong> (or Multi-factor authentication).</li>
+                <li>Enable <strong>TOTP</strong> (authenticator app) and save.</li>
+                <li>Come back here and tap the button below to scan the QR code with Microsoft Authenticator.</li>
+              </ol>
+              <p className="text-xs text-muted-foreground">
+                Customers and introducers use a text-message code instead — you only see this screen because
+                your account is an advisor or admin.
+              </p>
+              <Button type="button" className="w-full" disabled={loading} onClick={() => void retryStaffMfaSetup()}>
+                {loading ? "Checking…" : "I've enabled TOTP — set up my authenticator"}
+              </Button>
+            </div>
+          )}
+
+          {mode === "sms-login-challenge" && (
+            <>
+              {smsNeedsPhone && !smsSentTo && (
+                <form onSubmit={sendSmsLoginCode} className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="sms-login-phone">Mobile number</Label>
+                    <Input
+                      id="sms-login-phone"
+                      type="tel"
+                      autoComplete="tel"
+                      inputMode="tel"
+                      placeholder="07…"
+                      value={smsChallengePhone}
+                      onChange={(e) => setSmsChallengePhone(e.target.value)}
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  <Button type="submit" disabled={loading} className="w-full">
+                    {loading ? "Sending…" : "Text me a code"}
+                  </Button>
+                </form>
+              )}
+              {smsSentTo && (
+                <form onSubmit={verifySmsLoginChallenge} className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="sms-login-code">6-digit code</Label>
+                    <Input
+                      id="sms-login-code"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      placeholder="123456"
+                      value={smsLoginCode}
+                      onChange={(e) => setSmsLoginCode(e.target.value.replace(/\D/g, ""))}
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  <Button type="submit" disabled={loading} className="w-full">
+                    {loading ? "Verifying…" : "Verify & continue"}
+                  </Button>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => void sendSmsLoginCode()}
+                    className="w-full text-xs text-muted-foreground hover:text-foreground hover:underline disabled:opacity-50"
+                  >
+                    Resend code
+                  </button>
+                </form>
+              )}
+            </>
+          )}
+
+          {mode === "mfa-challenge" && (
+            <form onSubmit={verifyMfaChallenge} className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="mfa-code">Authenticator code</Label>
+                <Input
+                  id="mfa-code"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  placeholder="123456"
+                  value={mfaTotpCode}
+                  onChange={(e) => setMfaTotpCode(e.target.value.replace(/\D/g, ""))}
+                  required
+                  autoFocus
+                />
+              </div>
+              <Button type="submit" disabled={loading} className="w-full">
+                {loading ? "Verifying…" : "Verify & continue"}
+              </Button>
+            </form>
+          )}
+
+          {mode === "mfa-enroll" && (
+            <form onSubmit={verifyMfaEnrollment} className="space-y-4">
+              {mfaQrSvg && (
+                <div
+                  className="mx-auto w-48 h-48 rounded-lg border bg-white p-2 [&_svg]:w-full [&_svg]:h-full"
+                  dangerouslySetInnerHTML={{ __html: mfaQrSvg }}
+                />
+              )}
+              {mfaSecret && (
+                <p className="text-xs text-muted-foreground break-all text-center">
+                  Or enter this key manually: <span className="font-mono">{mfaSecret}</span>
+                </p>
+              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="mfa-enroll-code">6-digit code</Label>
+                <Input
+                  id="mfa-enroll-code"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={mfaTotpCode}
+                  onChange={(e) => setMfaTotpCode(e.target.value.replace(/\D/g, ""))}
+                  required
+                />
+              </div>
+              <Button type="submit" disabled={loading} className="w-full">
+                {loading ? "Verifying…" : "Enable & continue"}
+              </Button>
+              {!mfaStaffRequired && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => finishSignIn()}
+                >
+                  Skip for now
+                </Button>
+              )}
+            </form>
+          )}
+
+          {mode !== "phone" && mode !== "mfa-challenge" && mode !== "mfa-enroll" && mode !== "mfa-setup-required" && mode !== "sms-login-challenge" && (
           <form onSubmit={onSubmit} className="space-y-3">
             {mode === "signup" && (
               <div className="space-y-1.5">
@@ -477,7 +954,7 @@ function AuthPage() {
                   autoFocus
                 />
                 <p className="text-xs text-muted-foreground">
-                  UK mobile only. Standard message rates may apply.
+                  UK mobile only. For customers and introducers — advisors and admins should sign in with email and an authenticator app.
                 </p>
               </div>
               <Button type="submit" disabled={loading} className="w-full">
@@ -550,7 +1027,7 @@ function AuthPage() {
                 disabled={loading}
                 type="button"
               >
-                Sign in with phone (SMS code)
+                Sign in with text message (SMS code)
               </Button>
             </>
           )}

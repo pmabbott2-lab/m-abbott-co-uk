@@ -7,8 +7,8 @@ import type { AdvisorCustomerRow } from "@/lib/sessions.functions";
 import { listAdvisorContacts, markContactOpened } from "@/lib/booking.functions";
 import type { AdvisorContact } from "@/lib/booking.functions";
 import { checkIsIntroducer } from "@/lib/introducer.functions";
-import { claimReferral, createReferralLink, textReferralLink, listReferralLinks, listAllReferrals, updateReferralBonusStatus, searchCustomers } from "@/lib/referrals.functions";
-import { getRafCode, clearRafCookie, rafLinkForCode } from "@/lib/referral";
+import { claimReferral, createReferralLink, textReferralLink, textRafInviteToFriend, getPublicShareBaseUrl, listReferralLinks, listAllReferrals, updateReferralBonusStatus, searchCustomers } from "@/lib/referrals.functions";
+import { getRafCode, clearRafCookie, rafLinkForCode, rafShareMessage } from "@/lib/referral";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -134,7 +134,15 @@ function BinStaffButton({
 }
 
 // Small copy-to-clipboard button that flips to a check for a moment.
-function CopyLinkButton({ value, label = "Copy link" }: { value: string; label?: string }) {
+function CopyLinkButton({
+  value,
+  label = "Copy link",
+  successToast = "Link copied",
+}: {
+  value: string;
+  label?: string;
+  successToast?: string;
+}) {
   const [copied, setCopied] = useState(false);
   return (
     <Button
@@ -145,10 +153,10 @@ function CopyLinkButton({ value, label = "Copy link" }: { value: string; label?:
         try {
           await navigator.clipboard.writeText(value);
           setCopied(true);
-          toast.success("Link copied");
+          toast.success(successToast);
           setTimeout(() => setCopied(false), 1500);
         } catch {
-          toast.error("Couldn't copy — select and copy the link manually.");
+          toast.error("Couldn't copy — select and copy manually.");
         }
       }}
     >
@@ -949,6 +957,8 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 function CreateReferralLinkDialog({ onCreated }: { onCreated: () => void }) {
   const createFn = useServerFn(createReferralLink);
   const textFn = useServerFn(textReferralLink);
+  const textFriendFn = useServerFn(textRafInviteToFriend);
+  const publicUrlFn = useServerFn(getPublicShareBaseUrl);
   const searchFn = useServerFn(searchCustomers);
 
   const [open, setOpen] = useState(false);
@@ -957,7 +967,15 @@ function CreateReferralLinkDialog({ onCreated }: { onCreated: () => void }) {
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerResult | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [friendPhone, setFriendPhone] = useState("");
   const [created, setCreated] = useState<ReferralLink | null>(null);
+
+  const publicUrlQ = useQuery({
+    queryKey: ["public-share-url"],
+    queryFn: () => publicUrlFn(),
+    enabled: open,
+  });
+  const shareBase = publicUrlQ.data?.baseUrl;
 
   const debouncedQuery = useDebouncedValue(customerQuery.trim(), 300);
   const searchQ = useQuery({
@@ -990,12 +1008,19 @@ function CreateReferralLinkDialog({ onCreated }: { onCreated: () => void }) {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not text link"),
   });
 
+  const textFriend = useMutation({
+    mutationFn: (vars: { id: string; friendPhone: string }) => textFriendFn({ data: vars }),
+    onSuccess: () => toast.success("Invite texted to your friend"),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not text friend"),
+  });
+
   const reset = () => {
     setMode("existing");
     setCustomerQuery("");
     setSelectedCustomer(null);
     setName("");
     setPhone("");
+    setFriendPhone("");
     setCreated(null);
   };
 
@@ -1031,24 +1056,59 @@ function CreateReferralLinkDialog({ onCreated }: { onCreated: () => void }) {
                 Link ready for {created.referrer_name || "your referrer"}.
               </p>
               <p className="text-xs text-muted-foreground break-all font-mono">
-                {rafLinkForCode(created.code)}
+                {rafLinkForCode(created.code, shareBase)}
+              </p>
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap border rounded-lg p-3 bg-muted/30">
+                {rafShareMessage(created.referrer_name, created.code, shareBase)}
               </p>
               <div className="flex flex-wrap gap-2">
-                <CopyLinkButton value={rafLinkForCode(created.code)} />
+                <CopyLinkButton
+                  value={rafShareMessage(created.referrer_name, created.code, shareBase)}
+                  label="Copy message for friend"
+                  successToast="Share message copied"
+                />
+                <CopyLinkButton value={rafLinkForCode(created.code, shareBase)} label="Copy link only" />
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={!created.referrer_phone || text.isPending}
-                  title={created.referrer_phone ? undefined : "No phone on file for this referrer"}
+                  title={created.referrer_phone ? "Texts the referrer so they can forward the link" : "No phone on file for this referrer"}
                   onClick={() => text.mutate({ id: created.id })}
                 >
                   <Send className="w-4 h-4 mr-1.5" />
-                  {text.isPending ? "Texting…" : "Text link"}
+                  {text.isPending ? "Texting…" : "Text referrer"}
                 </Button>
+              </div>
+              <div className="space-y-2 pt-2 border-t">
+                <Label htmlFor="raf-friend-phone">Text a friend directly</Label>
+                <div className="flex flex-wrap gap-2">
+                  <Input
+                    id="raf-friend-phone"
+                    type="tel"
+                    placeholder="Friend's mobile (07…)"
+                    value={friendPhone}
+                    onChange={(e) => setFriendPhone(e.target.value)}
+                    className="max-w-xs"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!friendPhone.trim() || textFriend.isPending}
+                    onClick={() =>
+                      textFriend.mutate({ id: created.id, friendPhone: friendPhone.trim() })
+                    }
+                  >
+                    <Send className="w-4 h-4 mr-1.5" />
+                    {textFriend.isPending ? "Sending…" : "Text friend"}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Sends the full message including who recommended Mortgage Hub — ready for SMS or WhatsApp.
+                </p>
               </div>
               {!created.referrer_phone && (
                 <p className="text-xs text-muted-foreground">
-                  No phone number on file — copy the link and share it manually.
+                  No phone number on file — copy the message above and share it manually (SMS, email or WhatsApp).
                 </p>
               )}
             </div>
@@ -1196,10 +1256,13 @@ function ReferAFriendCard() {
   const linksFn = useServerFn(listReferralLinks);
   const referralsFn = useServerFn(listAllReferrals);
   const textFn = useServerFn(textReferralLink);
+  const publicUrlFn = useServerFn(getPublicShareBaseUrl);
   const updateFn = useServerFn(updateReferralBonusStatus);
 
   const linksQ = useQuery({ queryKey: ["referral-links"], queryFn: () => linksFn() });
   const referralsQ = useQuery({ queryKey: ["all-referrals"], queryFn: () => referralsFn() });
+  const publicUrlQ = useQuery({ queryKey: ["public-share-url"], queryFn: () => publicUrlFn() });
+  const shareBase = publicUrlQ.data?.baseUrl;
 
   const text = useMutation({
     mutationFn: (vars: { id: string }) => textFn({ data: vars }),
@@ -1261,16 +1324,21 @@ function ReferAFriendCard() {
                 <span>· {l.referralCount} referral{l.referralCount === 1 ? "" : "s"}</span>
               </div>
             </div>
-            <CopyLinkButton value={rafLinkForCode(l.code)} />
+            <CopyLinkButton
+              value={rafShareMessage(l.referrer_name, l.code, shareBase)}
+              label="Copy message"
+              successToast="Share message copied"
+            />
+            <CopyLinkButton value={rafLinkForCode(l.code, shareBase)} label="Link only" />
             <Button
               variant="outline"
               size="sm"
               disabled={!l.referrer_phone || (text.isPending && text.variables?.id === l.id)}
-              title={l.referrer_phone ? undefined : "No phone on file for this referrer"}
+              title={l.referrer_phone ? "Texts the referrer so they can forward the link" : "No phone on file for this referrer"}
               onClick={() => text.mutate({ id: l.id })}
             >
               <Send className="w-4 h-4 mr-1.5" />
-              Text
+              Text referrer
             </Button>
           </div>
         ))}
