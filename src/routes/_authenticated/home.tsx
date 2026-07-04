@@ -2,14 +2,28 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
-import { listMySessions, createSession, getMyRole, listAllSessionsForAdvisor, deleteSession, listUsersWithRoles, setAdvisorRole, setIntroducerRole, listAdvisors, listAdvisorCustomers, allocateSession, unallocateSession, bulkAllocateSessions, softDeleteAdvisor, restoreAdvisor, softDeleteIntroducer, restoreIntroducer, listBinnedStaff, createStaffInvite, listStaffInvites, revokeStaffInvite } from "@/lib/sessions.functions";
+import { listMySessions, createSession, getMyRole, listAllSessionsForAdvisor, deleteSession, restoreSession, listUsersWithRoles, setAdvisorRole, setIntroducerRole, listAdvisors, listAdvisorCustomers, allocateSession, unallocateSession, bulkAllocateSessions, softDeleteAdvisor, restoreAdvisor, softDeleteIntroducer, restoreIntroducer, listBinnedStaff, createStaffInvite, listStaffInvites, revokeStaffInvite, listMyCases } from "@/lib/sessions.functions";
+import { listAdmins, setAdminLevel, setAdminPermissions, listUsersForAdminGrant } from "@/lib/admin.functions";
+import { listFinanceLedger, setCommissionRate, getCommissionRate, getRafBonusAmount, listCommissionStaff, listCommissionRateHistory, FEE_TYPE_LABELS, RAF_BONUS_POUNDS } from "@/lib/finance.functions";
+import {
+  ADMIN_LEVEL_LABELS,
+  DEFAULT_GENERAL_PERMISSIONS,
+  PERMISSION_KEYS,
+  PERMISSION_LABELS,
+  canView,
+  canViewFinanceReport,
+  canViewCommissionPayouts,
+  canAmendCommissionPayouts,
+  type PermissionAccess,
+  type PermissionKey,
+} from "@/lib/admin-access";
 import type { AdvisorCustomerRow } from "@/lib/sessions.functions";
-import { listAdvisorContacts, markContactOpened } from "@/lib/booking.functions";
+import { listAdvisorContacts, markContactOpened, getSessionBooking } from "@/lib/booking.functions";
 import type { AdvisorContact } from "@/lib/booking.functions";
 import { checkIsIntroducer } from "@/lib/introducer.functions";
-import { claimReferral, createReferralLink, textReferralLink, textRafInviteToFriend, getPublicShareBaseUrl, listReferralLinks, listAllReferrals, updateReferralBonusStatus, searchCustomers } from "@/lib/referrals.functions";
+import { claimReferral, createReferralLink, textReferralLink, textRafInviteToFriend, getPublicShareBaseUrl, listReferralLinks, listAllReferrals, updateReferralBonusStatus, searchCustomers, listMyReferralActivity, ensureMyReferralLink } from "@/lib/referrals.functions";
 import { getRafCode, clearRafCookie, rafLinkForCode, rafShareMessage } from "@/lib/referral";
-import { AppShell } from "@/components/AppShell";
+import { CommissionPayoutsPanel } from "@/components/CommissionPayoutsPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,9 +49,15 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Mic, MessageSquare, FileText, ArrowRight, Trash2, RotateCcw, ShieldCheck, ShieldOff, CalendarCheck, CalendarDays, Link2, UserPlus, UserMinus, Users, UserCog, Search, Hash, KeyRound, Copy, Check, Clock, Mail, Gift, Send, Phone, Briefcase, ChevronRight, PhoneCall, Inbox } from "lucide-react";
+import { Mic, MessageSquare, FileText, ArrowRight, Trash2, RotateCcw, ShieldCheck, ShieldOff, CalendarCheck, CalendarDays, Link2, UserPlus, UserMinus, Users, UserCog, Search, Hash, KeyRound, Copy, Check, Clock, Mail, Gift, Send, Phone, Briefcase, ChevronRight, PhoneCall, Inbox, PoundSterling } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  PostCompletionBooking,
+  CALLBACK_WINDOW_RANGES,
+} from "@/components/PostCompletionBooking";
 
 export const Route = createFileRoute("/_authenticated/home")({
   component: Home,
@@ -47,7 +67,11 @@ function DeleteButton({ sessionId, onDeleted }: { sessionId: string; onDeleted: 
   const deleteFn = useServerFn(deleteSession);
   const del = useMutation({
     mutationFn: () => deleteFn({ data: { sessionId } }),
-    onSuccess: () => onDeleted(),
+    onSuccess: () => {
+      toast.success("Customer moved to Recently deleted");
+      onDeleted();
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not delete"),
   });
   return (
     <AlertDialog>
@@ -57,16 +81,17 @@ function DeleteButton({ sessionId, onDeleted }: { sessionId: string; onDeleted: 
           size="icon"
           className="text-muted-foreground hover:text-destructive"
           onClick={(e) => e.stopPropagation()}
-          aria-label="Delete fact-find"
+          aria-label="Delete customer fact-find"
         >
           <Trash2 className="w-4 h-4" />
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent onClick={(e) => e.stopPropagation()}>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete this fact-find?</AlertDialogTitle>
+          <AlertDialogTitle>Delete this customer fact-find?</AlertDialogTitle>
           <AlertDialogDescription>
-            This permanently removes the session, all answers, messages and notes. This cannot be undone.
+            The fact-find is moved to Recently deleted and can be restored by the Owner or an Admin
+            Supervisor. Answers, messages and notes are kept.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -163,6 +188,483 @@ function CopyLinkButton({
       {copied ? <Check className="w-4 h-4 mr-1.5" /> : <Copy className="w-4 h-4 mr-1.5" />}
       {copied ? "Copied" : label}
     </Button>
+  );
+}
+
+function AdminPermissionMatrix({
+  permissions,
+  onChange,
+}: {
+  permissions: Record<PermissionKey, PermissionAccess>;
+  onChange: (next: Record<PermissionKey, PermissionAccess>) => void;
+}) {
+  return (
+    <div className="grid sm:grid-cols-2 gap-2">
+      {PERMISSION_KEYS.map((key) => (
+        <div key={key} className="flex items-center justify-between gap-2 text-sm">
+          <span>{PERMISSION_LABELS[key]}</span>
+          <select
+            className="h-8 rounded-md border bg-background px-2 text-xs"
+            value={permissions[key]}
+            onChange={(e) =>
+              onChange({
+                ...permissions,
+                [key]: e.target.value as PermissionAccess,
+              })
+            }
+          >
+            <option value="none">None</option>
+            <option value="view">View</option>
+            <option value="amend">Amend</option>
+          </select>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AdminAccessPanel({ isOwner }: { isOwner: boolean }) {
+  const qc = useQueryClient();
+  const listFn = useServerFn(listAdmins);
+  const usersFn = useServerFn(listUsersForAdminGrant);
+  const setLevelFn = useServerFn(setAdminLevel);
+  const setPermsFn = useServerFn(setAdminPermissions);
+
+  const [grantUserId, setGrantUserId] = useState("");
+  const [grantLevel, setGrantLevel] = useState<"supervisor" | "general">("general");
+  const [grantPerms, setGrantPerms] = useState<Record<PermissionKey, PermissionAccess>>({
+    ...DEFAULT_GENERAL_PERMISSIONS,
+  });
+  const [editUserId, setEditUserId] = useState<string | null>(null);
+  const [editPerms, setEditPerms] = useState<Record<PermissionKey, PermissionAccess> | null>(null);
+
+  const adminsQ = useQuery({ queryKey: ["admins"], queryFn: () => listFn() });
+  const usersQ = useQuery({ queryKey: ["users-for-admin-grant"], queryFn: () => usersFn() });
+
+  const setLevel = useMutation({
+    mutationFn: async (vars: {
+      userId: string;
+      level: "supervisor" | "general" | "none";
+      permissions?: Record<PermissionKey, PermissionAccess>;
+    }) => {
+      await setLevelFn({ data: { userId: vars.userId, level: vars.level } });
+      if (vars.level === "general" && vars.permissions) {
+        await setPermsFn({ data: { userId: vars.userId, permissions: vars.permissions } });
+      }
+    },
+    onSuccess: () => {
+      toast.success("Admin access updated");
+      setGrantUserId("");
+      setGrantPerms({ ...DEFAULT_GENERAL_PERMISSIONS });
+      qc.invalidateQueries({ queryKey: ["admins"] });
+      qc.invalidateQueries({ queryKey: ["my-role"] });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not update"),
+  });
+
+  const savePerms = useMutation({
+    mutationFn: () =>
+      setPermsFn({ data: { userId: editUserId!, permissions: editPerms! } }),
+    onSuccess: () => {
+      toast.success("Permissions saved");
+      setEditUserId(null);
+      qc.invalidateQueries({ queryKey: ["admins"] });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not save"),
+  });
+
+  const admins = adminsQ.data?.admins ?? [];
+  const migrationRequired = adminsQ.data?.migrationRequired ?? false;
+  const users = usersQ.data ?? [];
+
+  return (
+    <div className="space-y-6">
+      {migrationRequired && (
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
+          <p className="font-medium text-amber-900 dark:text-amber-100">Supabase setup needed</p>
+          <p className="text-muted-foreground mt-1">
+            You can preview the permission matrix below, but grants won&apos;t save until you run
+            one SQL script. In Supabase → SQL Editor, paste and run{" "}
+            <code className="text-xs bg-background/80 px-1 py-0.5 rounded">
+              supabase/RUN_ADMIN_AND_BIN.sql
+            </code>
+            , then refresh this page.
+          </p>
+        </div>
+      )}
+
+      <div className="rounded-2xl border bg-card p-6 space-y-4">
+        <div>
+          <h3 className="font-semibold text-lg">Admin access</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            Owner has full control. Supervisors can grant General Admin only. General Admins get a
+            permission matrix (view / amend / none).
+          </p>
+        </div>
+
+        <div className="grid sm:grid-cols-3 gap-3 items-end">
+          <div className="space-y-1 sm:col-span-1">
+            <Label>User</Label>
+            <select
+              className="w-full h-9 rounded-md border bg-background px-2 text-sm"
+              value={grantUserId}
+              onChange={(e) => setGrantUserId(e.target.value)}
+            >
+              <option value="">Select user…</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name || u.email || u.id}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label>Level</Label>
+            <select
+              className="w-full h-9 rounded-md border bg-background px-2 text-sm"
+              value={grantLevel}
+              onChange={(e) => setGrantLevel(e.target.value as "supervisor" | "general")}
+            >
+              {isOwner && <option value="supervisor">Admin Supervisor</option>}
+              <option value="general">General Admin</option>
+            </select>
+          </div>
+          <Button
+            disabled={!grantUserId || setLevel.isPending}
+            onClick={() =>
+              setLevel.mutate({
+                userId: grantUserId,
+                level: grantLevel,
+                permissions: grantLevel === "general" ? grantPerms : undefined,
+              })
+            }
+          >
+            Grant access
+          </Button>
+        </div>
+
+        {grantLevel === "general" && (
+          <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+            <div>
+              <p className="text-sm font-medium">Permission matrix</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Set each module to None, View, or Amend for this General Admin.
+              </p>
+            </div>
+            <AdminPermissionMatrix permissions={grantPerms} onChange={setGrantPerms} />
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border bg-card overflow-hidden">
+        <div className="p-4 border-b font-medium">Current admins</div>
+        {adminsQ.isLoading && <p className="p-4 text-sm text-muted-foreground">Loading…</p>}
+        {adminsQ.isError && (
+          <p className="p-4 text-sm text-destructive">
+            {adminsQ.error instanceof Error ? adminsQ.error.message : "Could not load admins"}
+          </p>
+        )}
+        {admins.length === 0 && !adminsQ.isLoading && !adminsQ.isError && (
+          <p className="p-4 text-sm text-muted-foreground">No admins listed yet.</p>
+        )}
+        <ul className="divide-y">
+          {admins.map((a) => (
+            <li key={a.userId} className="p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="font-medium">{a.fullName || a.email || a.userId}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {a.email} ·{" "}
+                    <span className="font-medium">{ADMIN_LEVEL_LABELS[a.level]}</span>
+                  </div>
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  {isOwner && a.level === "general" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={setLevel.isPending}
+                      onClick={() => setLevel.mutate({ userId: a.userId, level: "supervisor" })}
+                    >
+                      Make supervisor
+                    </Button>
+                  )}
+                  {a.level === "general" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setEditUserId(a.userId);
+                        setEditPerms({ ...a.permissions });
+                      }}
+                    >
+                      Permissions
+                    </Button>
+                  )}
+                  {a.level !== "owner" && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive"
+                      disabled={setLevel.isPending}
+                      onClick={() => setLevel.mutate({ userId: a.userId, level: "none" })}
+                    >
+                      Remove admin
+                    </Button>
+                  )}
+                </div>
+              </div>
+              {editUserId === a.userId && editPerms && (
+                <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Set each module to None, View, or Amend.
+                  </p>
+                  <AdminPermissionMatrix
+                    permissions={editPerms}
+                    onChange={(next) => setEditPerms(next)}
+                  />
+                  <div className="flex gap-2 pt-1">
+                    <Button size="sm" disabled={savePerms.isPending} onClick={() => savePerms.mutate()}>
+                      Save permissions
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setEditUserId(null)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function OwnerFinanceReport() {
+  const ledgerFn = useServerFn(listFinanceLedger);
+  const staffFn = useServerFn(listCommissionStaff);
+  const setRateFn = useServerFn(setCommissionRate);
+  const getRateFn = useServerFn(getCommissionRate);
+  const historyFn = useServerFn(listCommissionRateHistory);
+  const rafBonusFn = useServerFn(getRafBonusAmount);
+  const ledgerQ = useQuery({ queryKey: ["finance-ledger"], queryFn: () => ledgerFn() });
+  const rafBonusQ = useQuery({ queryKey: ["raf-bonus-amount"], queryFn: () => rafBonusFn() });
+  const [rateRole, setRateRole] = useState<"advisor" | "introducer">("advisor");
+  const [rateUserId, setRateUserId] = useState("");
+  const [staffSearch, setStaffSearch] = useState("");
+  const [pctFee, setPctFee] = useState("10");
+  const [pctMortgage, setPctMortgage] = useState("10");
+  const [pctInsurance, setPctInsurance] = useState("10");
+  const [pctOther, setPctOther] = useState("10");
+
+  const staffQ = useQuery({
+    queryKey: ["commission-staff", rateRole, staffSearch],
+    queryFn: () => staffFn({ data: { role: rateRole, query: staffSearch || undefined } }),
+  });
+
+  const existingRateQ = useQuery({
+    queryKey: ["commission-rate", rateUserId, rateRole],
+    queryFn: () => getRateFn({ data: { userId: rateUserId, role: rateRole } }),
+    enabled: Boolean(rateUserId),
+  });
+
+  const historyQ = useQuery({
+    queryKey: ["commission-history", rateUserId, rateRole],
+    queryFn: () => historyFn({ data: { userId: rateUserId, role: rateRole } }),
+    enabled: Boolean(rateUserId),
+  });
+
+  useEffect(() => {
+    setRateUserId("");
+  }, [rateRole]);
+
+  useEffect(() => {
+    const r = existingRateQ.data;
+    if (!r || !rateUserId) return;
+    if (r.pctFee != null) setPctFee(String(r.pctFee));
+    if (r.pctMortgageFee != null) setPctMortgage(String(r.pctMortgageFee));
+    if (r.pctInsuranceFee != null) setPctInsurance(String(r.pctInsuranceFee));
+    if (r.pctOtherFee != null) setPctOther(String(r.pctOtherFee));
+  }, [existingRateQ.data, rateUserId]);
+
+  const setRate = useMutation({
+    mutationFn: () =>
+      setRateFn({
+        data: {
+          userId: rateUserId,
+          role: rateRole,
+          pctFee: Number(pctFee),
+          pctMortgageFee: Number(pctMortgage),
+          pctInsuranceFee: Number(pctInsurance),
+          pctOtherFee: Number(pctOther),
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Commission rates saved — applies to new fees only");
+      historyQ.refetch();
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not save rates"),
+  });
+
+  const rows = ledgerQ.data?.rows ?? [];
+  const staff = staffQ.data ?? [];
+  const rafBonusPounds =
+    rafBonusQ.data?.amountPence != null ? rafBonusQ.data.amountPence / 100 : RAF_BONUS_POUNDS;
+
+  if (ledgerQ.data?.migrationRequired) {
+    return (
+      <div className="rounded-2xl border bg-card p-6 text-sm text-muted-foreground">
+        Run the admin/finance SQL migration to enable the finance ledger.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+    <div className="rounded-2xl border bg-card p-6 space-y-4">
+      <div>
+        <h3 className="font-semibold text-lg">Commission rates</h3>
+        <p className="text-sm text-muted-foreground mt-1">
+          Set a separate % for each fee type. Changes apply to newly posted fees only — historical
+          commission stays unchanged.
+        </p>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <Label>Role</Label>
+          <select
+            className="w-full h-9 rounded-md border bg-background px-2 text-sm"
+            value={rateRole}
+            onChange={(e) => setRateRole(e.target.value as "advisor" | "introducer")}
+          >
+            <option value="advisor">Advisor</option>
+            <option value="introducer">Introducer</option>
+          </select>
+        </div>
+        <div className="space-y-1">
+          <Label>Search</Label>
+          <Input
+            placeholder="Name or reference code…"
+            value={staffSearch}
+            onChange={(e) => setStaffSearch(e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label>{rateRole === "advisor" ? "Advisor" : "Introducer"}</Label>
+        <select
+          className="w-full h-9 rounded-md border bg-background px-2 text-sm"
+          value={rateUserId}
+          onChange={(e) => setRateUserId(e.target.value)}
+        >
+          <option value="">Select…</option>
+          {staff.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.full_name || u.email}
+              {u.referenceCode ? ` · ${u.referenceCode}` : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+      {rateUserId && (
+        <div className="grid sm:grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-4">
+          <div className="space-y-1">
+            <Label>{FEE_TYPE_LABELS.fee} %</Label>
+            <Input type="number" min="0" max="100" step="0.1" value={pctFee} onChange={(e) => setPctFee(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>{FEE_TYPE_LABELS.mortgage_fee} %</Label>
+            <Input type="number" min="0" max="100" step="0.1" value={pctMortgage} onChange={(e) => setPctMortgage(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>{FEE_TYPE_LABELS.insurance_fee} %</Label>
+            <Input type="number" min="0" max="100" step="0.1" value={pctInsurance} onChange={(e) => setPctInsurance(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>{FEE_TYPE_LABELS.other_fee} %</Label>
+            <Input type="number" min="0" max="100" step="0.1" value={pctOther} onChange={(e) => setPctOther(e.target.value)} />
+          </div>
+        </div>
+      )}
+      <Button disabled={!rateUserId || setRate.isPending} onClick={() => setRate.mutate()}>
+        Save commission rates
+      </Button>
+      {rateUserId && (historyQ.data ?? []).length > 0 && (
+        <div className="rounded-lg border p-4 space-y-2">
+          <h4 className="text-sm font-medium">Rate change history</h4>
+          <ul className="text-xs space-y-1.5 text-muted-foreground">
+            {(historyQ.data ?? []).map((h, i) => (
+              <li key={i}>
+                {format(new Date(h.created_at), "d MMM yyyy HH:mm")} ·{" "}
+                {FEE_TYPE_LABELS[h.fee_type as keyof typeof FEE_TYPE_LABELS] ?? h.fee_type}:{" "}
+                {h.pct_from != null ? `${h.pct_from}% → ` : "new "}
+                {h.pct_to}%
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+
+    <div className="rounded-2xl border bg-card p-6 space-y-2">
+      <h3 className="font-semibold text-lg">Refer a Friend bonus</h3>
+      <p className="text-sm text-muted-foreground">
+        Standard reward paid to referrers when a friend completes their fact-find and the bonus is
+        marked eligible or paid.
+      </p>
+      <p className="text-2xl font-semibold">£{rafBonusPounds.toFixed(0)}</p>
+    </div>
+
+    <div className="rounded-2xl border bg-card p-6 space-y-4">
+      <div>
+        <h3 className="font-semibold text-lg">Finance ledger</h3>
+        <p className="text-sm text-muted-foreground mt-1">
+          Owner only. Posted fees and commission pull-through. Amendments and deletions show in red.
+        </p>
+      </div>
+      {ledgerQ.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {rows.length === 0 && !ledgerQ.isLoading && (
+        <p className="text-sm text-muted-foreground">No finance transactions yet.</p>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-left text-muted-foreground">
+              <th className="p-2 font-medium">When</th>
+              <th className="p-2 font-medium">Kind</th>
+              <th className="p-2 font-medium">Type</th>
+              <th className="p-2 font-medium text-right">Amount</th>
+              <th className="p-2 font-medium">Note</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {rows.map((r) => {
+              const red = r.is_reversal || r.kind === "amend" || r.kind === "delete";
+              return (
+                <tr key={r.id} className={red ? "text-destructive" : ""}>
+                  <td className="p-2 whitespace-nowrap">
+                    {format(new Date(r.created_at), "d MMM yyyy HH:mm")}
+                  </td>
+                  <td className="p-2 capitalize">{r.kind}</td>
+                  <td className="p-2">{r.fee_type ?? "—"}</td>
+                  <td className="p-2 text-right font-medium">
+                    £{(r.amount_pence / 100).toFixed(2)}
+                  </td>
+                  <td className="p-2 text-muted-foreground max-w-xs truncate">
+                    {r.note ??
+                      (r.beneficiary_role
+                        ? `${r.beneficiary_role} ${r.commission_pct ?? ""}%`
+                        : "—")}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    </div>
   );
 }
 
@@ -503,13 +1005,14 @@ function IntroducerAccessCard() {
   );
 }
 
-// "Recently deleted" bin: lists soft-deleted advisors & introducers with a
-// Restore action that re-grants the role and clears the bin state.
+// "Recently deleted" bin: lists soft-deleted advisors, introducers, and customer
+// fact-finds with a Restore action. Owner / Admin Supervisor only.
 function RecentlyDeletedCard() {
   const qc = useQueryClient();
   const binnedFn = useServerFn(listBinnedStaff);
   const restoreAdvisorFn = useServerFn(restoreAdvisor);
   const restoreIntroducerFn = useServerFn(restoreIntroducer);
+  const restoreSessionFn = useServerFn(restoreSession);
 
   const binnedQ = useQuery({ queryKey: ["binned-staff"], queryFn: () => binnedFn() });
 
@@ -517,6 +1020,8 @@ function RecentlyDeletedCard() {
     qc.invalidateQueries({ queryKey: ["binned-staff"] });
     qc.invalidateQueries({ queryKey: ["users-with-roles"] });
     qc.invalidateQueries({ queryKey: ["is-introducer"] });
+    qc.invalidateQueries({ queryKey: ["all-sessions"] });
+    qc.invalidateQueries({ queryKey: ["my-sessions"] });
   };
 
   const restoreAdv = useMutation({
@@ -537,9 +1042,19 @@ function RecentlyDeletedCard() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not restore"),
   });
 
+  const restoreCustomer = useMutation({
+    mutationFn: (vars: { sessionId: string }) => restoreSessionFn({ data: vars }),
+    onSuccess: () => {
+      invalidateAll();
+      toast.success("Customer fact-find restored");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not restore"),
+  });
+
   const advisors = binnedQ.data?.advisors ?? [];
   const introducers = binnedQ.data?.introducers ?? [];
-  const isEmpty = advisors.length === 0 && introducers.length === 0;
+  const customers = binnedQ.data?.customers ?? [];
+  const isEmpty = advisors.length === 0 && introducers.length === 0 && customers.length === 0;
 
   return (
     <div className="mt-10">
@@ -549,14 +1064,46 @@ function RecentlyDeletedCard() {
       </h3>
       <div className="rounded-2xl border bg-card divide-y">
         <div className="p-4 text-xs text-muted-foreground">
-          Binned advisors and introducers are kept here and can be restored any time. Restoring
-          re-grants their role (advisors keep their original code; introducers keep their company).
-          Accounts and customer data are never deleted.
+          Binned customers, advisors and introducers are kept here and can be restored any time by
+          the Owner or an Admin Supervisor. Restoring reinstates access; data is never permanently
+          removed from the bin.
         </div>
         {binnedQ.isLoading && <div className="p-4 text-sm text-muted-foreground">Loading bin…</div>}
-        {!binnedQ.isLoading && isEmpty && (
+        {binnedQ.isError && (
+          <div className="p-4 text-sm text-destructive">
+            {binnedQ.error instanceof Error ? binnedQ.error.message : "Could not load bin"}
+          </div>
+        )}
+        {!binnedQ.isLoading && !binnedQ.isError && isEmpty && (
           <div className="p-4 text-sm text-muted-foreground">Nothing in the bin.</div>
         )}
+        {customers.map((c) => (
+          <div key={`cust-${c.sessionId}`} className="flex items-center gap-3 p-4">
+            <div className="flex-1 min-w-0">
+              <div className="font-medium truncate">
+                {c.customerName || c.customerEmail || "Unnamed customer"}
+              </div>
+              <div className="text-xs text-muted-foreground truncate">
+                {c.customerEmail}
+                <span className="ml-2 text-accent-foreground">· Customer fact-find (binned)</span>
+                <span className="ml-2">
+                  · {c.status === "submitted" ? "Submitted" : "In progress"}
+                </span>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={
+                restoreCustomer.isPending && restoreCustomer.variables?.sessionId === c.sessionId
+              }
+              onClick={() => restoreCustomer.mutate({ sessionId: c.sessionId })}
+            >
+              <RotateCcw className="w-4 h-4 mr-1.5" />
+              Restore
+            </Button>
+          </div>
+        ))}
         {advisors.map((a) => (
           <div key={`adv-${a.id}`} className="flex items-center gap-3 p-4">
             <div className="flex-1 min-w-0">
@@ -1251,7 +1798,7 @@ function CreateReferralLinkDialog({ onCreated }: { onCreated: () => void }) {
   );
 }
 
-function ReferAFriendCard() {
+function RafLinksAccessCard() {
   const qc = useQueryClient();
   const linksFn = useServerFn(listReferralLinks);
   const referralsFn = useServerFn(listAllReferrals);
@@ -1284,11 +1831,11 @@ function ReferAFriendCard() {
   const referrals = referralsQ.data ?? [];
 
   return (
-    <div className="mt-2">
+    <div className="mt-10">
       <div className="flex items-center justify-between gap-3 mb-3">
         <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
           <Gift className="w-4 h-4" />
-          Referral links
+          Refer-a-friend links
         </h3>
         <CreateReferralLinkDialog
           onCreated={() => qc.invalidateQueries({ queryKey: ["referral-links"] })}
@@ -1297,8 +1844,8 @@ function ReferAFriendCard() {
 
       <div className="rounded-2xl border bg-card divide-y">
         <div className="p-4 text-xs text-muted-foreground">
-          Each link is tied to a referrer who shares it with friends. Friends self-serve from the
-          landing page; their referral is credited to the referrer below.
+          Create personal links for referrers (existing customers or external contacts). Friends
+          sign up via the link; qualified referrals appear on the Commission tab for payout.
         </div>
         {linksQ.isLoading && <div className="p-4 text-sm text-muted-foreground">Loading links…</div>}
         {!linksQ.isLoading && links.length === 0 && (
@@ -1306,42 +1853,96 @@ function ReferAFriendCard() {
             No referral links yet — create one above.
           </div>
         )}
-        {links.map((l) => (
-          <div key={l.id} className="flex items-center gap-3 p-4">
-            <div className="flex-1 min-w-0">
-              <div className="font-medium truncate">{l.referrer_name || "Referrer"}</div>
-              <div className="text-xs text-muted-foreground truncate flex items-center gap-2 flex-wrap">
-                <span className="inline-flex items-center gap-1 font-mono text-foreground">
-                  <Hash className="w-3 h-3" />
-                  {l.code}
-                </span>
-                {l.referrer_phone && (
-                  <span className="inline-flex items-center gap-1">
-                    <Phone className="w-3 h-3" />
-                    {l.referrer_phone}
-                  </span>
-                )}
-                <span>· {l.referralCount} referral{l.referralCount === 1 ? "" : "s"}</span>
+        {links.map((l) => {
+          const linkReferrals = referrals.filter((r) => r.code === l.code);
+          return (
+            <div key={l.id} className="p-4 sm:p-5 space-y-4 border-b last:border-b-0">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div className="min-w-0 flex-1 space-y-3">
+                  <div>
+                    <div className="font-semibold text-base">{l.referrer_name || "Referrer"}</div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {l.referralCount} referral{l.referralCount === 1 ? "" : "s"} · £75 bonus when
+                      eligible
+                    </p>
+                  </div>
+                  <dl className="grid sm:grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                    {l.referrer_phone && (
+                      <>
+                        <dt className="text-muted-foreground">Referrer mobile</dt>
+                        <dd>{l.referrer_phone}</dd>
+                      </>
+                    )}
+                    <dt className="text-muted-foreground">Link code</dt>
+                    <dd className="font-mono">{l.code}</dd>
+                    <dt className="text-muted-foreground">Share link</dt>
+                    <dd className="break-all text-xs font-mono">
+                      {rafLinkForCode(l.code, shareBase)}
+                    </dd>
+                  </dl>
+                </div>
+                <div className="flex flex-col sm:flex-row flex-wrap gap-2 shrink-0">
+                  <CopyLinkButton
+                    value={rafShareMessage(l.referrer_name, l.code, shareBase)}
+                    label="Copy message"
+                    successToast="Share message copied"
+                  />
+                  <CopyLinkButton value={rafLinkForCode(l.code, shareBase)} label="Copy link" />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!l.referrer_phone || (text.isPending && text.variables?.id === l.id)}
+                    title={
+                      l.referrer_phone
+                        ? "Texts the referrer so they can forward the link"
+                        : "No phone on file for this referrer"
+                    }
+                    onClick={() => text.mutate({ id: l.id })}
+                  >
+                    <Send className="w-4 h-4 mr-1.5" />
+                    Text referrer
+                  </Button>
+                </div>
               </div>
+
+              {linkReferrals.length > 0 ? (
+                <div className="rounded-xl border bg-muted/30 p-3 space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Referred friends
+                  </p>
+                  <ul className="divide-y rounded-lg border bg-background">
+                    {linkReferrals.map((r) => (
+                      <li
+                        key={r.id}
+                        className="p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-medium">{r.referredName}</div>
+                          <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+                            {r.referredEmail && <span>{r.referredEmail}</span>}
+                            {r.referredPhone && <span>{r.referredPhone}</span>}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-muted">
+                            {STATUS_LABEL[r.status] ?? r.status}
+                          </span>
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded-full ${r.bonus_status === "paid" ? "bg-accent/30" : r.bonus_status === "eligible" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400" : "bg-muted"}`}
+                          >
+                            {BONUS_LABEL[r.bonus_status] ?? r.bonus_status}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">No friends have used this link yet.</p>
+              )}
             </div>
-            <CopyLinkButton
-              value={rafShareMessage(l.referrer_name, l.code, shareBase)}
-              label="Copy message"
-              successToast="Share message copied"
-            />
-            <CopyLinkButton value={rafLinkForCode(l.code, shareBase)} label="Link only" />
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!l.referrer_phone || (text.isPending && text.variables?.id === l.id)}
-              title={l.referrer_phone ? "Texts the referrer so they can forward the link" : "No phone on file for this referrer"}
-              onClick={() => text.mutate({ id: l.id })}
-            >
-              <Send className="w-4 h-4 mr-1.5" />
-              Text referrer
-            </Button>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <h3 className="text-sm font-medium text-muted-foreground mb-3 mt-8 flex items-center gap-2">
@@ -1360,43 +1961,60 @@ function ReferAFriendCard() {
           <div className="p-4 text-sm text-muted-foreground">No referrals yet.</div>
         )}
         {referrals.map((r) => (
-          <div key={r.id} className="flex items-center gap-3 p-4 flex-wrap">
-            <div className="flex-1 min-w-0">
-              <div className="font-medium truncate">
-                {r.referredName}
-                <span className="text-muted-foreground font-normal"> ← {r.referrerName}</span>
+          <div key={r.id} className="p-4 sm:p-5 space-y-3 border-b last:border-b-0">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold">{r.referredName}</div>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Referred by <span className="text-foreground">{r.referrerName}</span>
+                </p>
+                <dl className="grid sm:grid-cols-2 gap-x-4 gap-y-1 mt-2 text-sm">
+                  {r.referredEmail && (
+                    <>
+                      <dt className="text-muted-foreground">Friend email</dt>
+                      <dd className="break-all">{r.referredEmail}</dd>
+                    </>
+                  )}
+                  {r.referredPhone && (
+                    <>
+                      <dt className="text-muted-foreground">Friend phone</dt>
+                      <dd>{r.referredPhone}</dd>
+                    </>
+                  )}
+                  <dt className="text-muted-foreground">Link code</dt>
+                  <dd className="font-mono">{r.code}</dd>
+                  <dt className="text-muted-foreground">Signed up</dt>
+                  <dd>{formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}</dd>
+                  <dt className="text-muted-foreground">Bonus amount</dt>
+                  <dd className="font-medium">£75</dd>
+                </dl>
               </div>
-              <div className="text-xs text-muted-foreground truncate flex items-center gap-2 flex-wrap">
-                <span className="inline-flex items-center gap-1 font-mono">
-                  <Hash className="w-3 h-3" />
-                  {r.code}
-                </span>
-                <span className="px-2 py-0.5 rounded-full bg-muted">
+              <div className="flex flex-col gap-2 shrink-0 min-w-[140px]">
+                <span className="text-xs px-2 py-1 rounded-full bg-muted text-center">
                   {STATUS_LABEL[r.status] ?? r.status}
                 </span>
-                <span>· {formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}</span>
+                <span
+                  className={`text-xs px-2 py-1 rounded-full text-center ${r.bonus_status === "paid" ? "bg-accent/30" : r.bonus_status === "eligible" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400" : "bg-muted"}`}
+                >
+                  {BONUS_LABEL[r.bonus_status] ?? r.bonus_status}
+                </span>
+                <select
+                  className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                  value={r.bonus_status}
+                  disabled={updateBonus.isPending && updateBonus.variables?.id === r.id}
+                  onChange={(e) =>
+                    updateBonus.mutate({
+                      id: r.id,
+                      bonusStatus: e.target.value as "none" | "eligible" | "paid",
+                    })
+                  }
+                >
+                  <option value="none">No bonus</option>
+                  <option value="eligible">Eligible (£75)</option>
+                  <option value="paid">Paid (£75)</option>
+                </select>
               </div>
             </div>
-            <span
-              className={`text-xs px-2 py-1 rounded-full shrink-0 ${r.bonus_status === "paid" ? "bg-accent/30" : r.bonus_status === "eligible" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400" : "bg-muted"}`}
-            >
-              {BONUS_LABEL[r.bonus_status] ?? r.bonus_status}
-            </span>
-            <select
-              className="rounded-md border bg-background px-2 py-1.5 text-sm"
-              value={r.bonus_status}
-              disabled={updateBonus.isPending && updateBonus.variables?.id === r.id}
-              onChange={(e) =>
-                updateBonus.mutate({
-                  id: r.id,
-                  bonusStatus: e.target.value as "none" | "eligible" | "paid",
-                })
-              }
-            >
-              <option value="none">No bonus</option>
-              <option value="eligible">Eligible</option>
-              <option value="paid">Paid</option>
-            </select>
           </div>
         ))}
       </div>
@@ -1624,48 +2242,329 @@ type AdvisorListItem = {
   customerCount: number;
 };
 
+function SessionReferenceBadge({ caseRef }: { caseRef: string | null }) {
+  if (caseRef) {
+    return (
+      <span className="inline-flex items-center rounded-md border border-primary/20 bg-primary/5 px-2 py-0.5 font-mono text-[11px] font-medium text-primary whitespace-nowrap">
+        {caseRef}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center rounded-md border border-dashed px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+      Fact-find
+    </span>
+  );
+}
+
+function SessionProgressBadge({
+  isCase,
+  status,
+}: {
+  isCase: boolean;
+  status: string;
+}) {
+  const label = isCase ? "Case" : status === "submitted" ? "Ready" : "Active";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap",
+        isCase
+          ? "bg-primary/10 text-primary"
+          : status === "submitted"
+            ? "bg-accent/40 text-accent-foreground"
+            : "bg-muted text-muted-foreground",
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function DashboardSessionsListHeader({ showCheckbox }: { showCheckbox: boolean }) {
+  return (
+    <div
+      className={cn(
+        "hidden sm:grid gap-x-4 px-4 py-2.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground border-b bg-muted/30",
+        showCheckbox
+          ? "sm:grid-cols-[auto_minmax(0,1.3fr)_6.75rem_5.25rem_minmax(0,1fr)_auto]"
+          : "sm:grid-cols-[minmax(0,1.3fr)_6.75rem_5.25rem_minmax(0,1fr)_auto]",
+      )}
+    >
+      {showCheckbox && <span aria-hidden className="w-4" />}
+      <span>Customer</span>
+      <span>Reference</span>
+      <span>Stage</span>
+      <span>Details</span>
+      <span className="sr-only">Actions</span>
+    </div>
+  );
+}
+
 function AdvisorCustomerRowView({ row }: { row: AdvisorCustomerRow }) {
   const c = row.customer;
-  const contact = [c?.email, c?.phone].filter(Boolean).join(" · ");
+  const name = c?.full_name || c?.email || "Unnamed customer";
+  const contact = [c?.email, c?.phone].filter(Boolean).join(" · ") || "No contact on file";
+  const isCase = Boolean(row.caseRef);
+  const statusLabel = row.status === "submitted" ? "Submitted" : "In progress";
+  const startedLabel = formatDistanceToNow(new Date(row.startedAt), { addSuffix: true });
+
   return (
     <Link
       to="/sessions/$sessionId"
       params={{ sessionId: row.sessionId }}
-      className="flex items-center gap-3 p-4 hover:bg-muted/40 transition"
+      className="grid grid-cols-[1fr_auto] items-start gap-x-3 gap-y-2 px-4 py-3.5 sm:grid-cols-[minmax(0,1.3fr)_6.75rem_5.25rem_minmax(0,1fr)_auto] sm:items-center sm:gap-x-4 sm:py-3 hover:bg-muted/30 transition-colors group"
     >
-      <div className="min-w-0 flex-1">
-        <div className="font-medium truncate">
-          {c?.full_name || c?.email || "Unnamed customer"}
+      <div className="min-w-0 sm:contents">
+        <div className="min-w-0">
+          <p className="font-medium text-sm leading-snug truncate">{name}</p>
+          <p className="text-xs text-muted-foreground truncate mt-0.5">{contact}</p>
         </div>
-        <div className="text-xs text-muted-foreground truncate">
-          {contact || "No contact details on file"}
+        <div className="hidden sm:flex">
+          <SessionReferenceBadge caseRef={row.caseRef} />
         </div>
-        <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1">
-            {row.channel === "text" ? (
-              <MessageSquare className="w-3 h-3" />
-            ) : (
-              <Mic className="w-3 h-3" />
-            )}
-            {row.channel === "text" ? "Chat" : "Voice"}
-          </span>
-          <span>· {row.status === "submitted" ? "Submitted" : "In progress"}</span>
-          <span>· {formatDistanceToNow(new Date(row.startedAt), { addSuffix: true })}</span>
-          {row.source === "appointment" && (
-            <span className="inline-flex items-center gap-1 text-accent-foreground">
-              <CalendarCheck className="w-3 h-3" />
-              Appointment
+        <div className="hidden sm:flex">
+          <SessionProgressBadge isCase={isCase} status={row.status} />
+        </div>
+        <div className="hidden sm:block min-w-0 text-xs text-muted-foreground space-y-0.5">
+          <p className="truncate">
+            {statusLabel} · {startedLabel}
+          </p>
+          <p className="truncate flex items-center gap-1.5 flex-wrap">
+            <span className="inline-flex items-center gap-1">
+              {row.channel === "text" ? (
+                <MessageSquare className="w-3 h-3 shrink-0" />
+              ) : (
+                <Mic className="w-3 h-3 shrink-0" />
+              )}
+              {row.channel === "text" ? "Chat" : "Voice"}
             </span>
-          )}
+            {row.source === "appointment" && (
+              <span className="inline-flex items-center gap-1">
+                <CalendarCheck className="w-3 h-3 shrink-0" />
+                Appointment
+              </span>
+            )}
+          </p>
         </div>
       </div>
-      <span
-        className={`text-xs px-2 py-1 rounded-full shrink-0 ${row.status === "submitted" ? "bg-accent/30" : "bg-muted"}`}
-      >
-        {row.status === "submitted" ? "Ready to review" : "In progress"}
-      </span>
-      <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+      <div className="col-span-2 sm:hidden flex flex-wrap items-center gap-2">
+        <SessionReferenceBadge caseRef={row.caseRef} />
+        <SessionProgressBadge isCase={isCase} status={row.status} />
+        <span className="text-xs text-muted-foreground">
+          {statusLabel} · {startedLabel}
+        </span>
+      </div>
+      <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0 col-start-2 row-start-1 self-center opacity-60 group-hover:opacity-100 transition-opacity sm:col-start-auto sm:row-start-auto hidden sm:block" />
     </Link>
+  );
+}
+
+function DashboardSessionRow({
+  session,
+  isMainAdmin,
+  isOwner,
+  isSupervisor,
+  selected,
+  onToggleSelect,
+  onCallbackOpen,
+  onInvalidate,
+}: {
+  session: {
+    id: string;
+    customer_id: string;
+    status: string;
+    started_at: string;
+    case_ref?: string | null;
+    customer?: { full_name?: string | null; email?: string | null; phone?: string | null } | null;
+    assignedAdvisors?: AssignedAdvisor[];
+    nextContactAt?: string | null;
+    callback?: { id: string; window: string | null } | null;
+  };
+  isMainAdmin: boolean;
+  isOwner: boolean;
+  isSupervisor: boolean;
+  selected: boolean;
+  onToggleSelect: (on: boolean) => void;
+  onCallbackOpen: (contactId: string) => void;
+  onInvalidate: () => void;
+}) {
+  const assigned = session.assignedAdvisors ?? [];
+  const callback = session.callback ?? null;
+  const nextContactAt = session.nextContactAt ?? null;
+  const caseRef = session.case_ref ?? null;
+  const isCase = Boolean(caseRef);
+  const name = session.customer?.full_name || session.customer?.email || "Unnamed customer";
+  const contactLine =
+    [session.customer?.email, session.customer?.phone].filter(Boolean).join(" · ") ||
+    "No contact on file";
+  const statusLabel = session.status === "submitted" ? "Submitted" : "In progress";
+  const startedLabel = formatDistanceToNow(new Date(session.started_at), { addSuffix: true });
+  const advisorLine =
+    assigned.length > 0
+      ? assigned.map(advisorLabel).join(", ")
+      : !isCase
+        ? "Unallocated"
+        : null;
+
+  const gridCols = isMainAdmin
+    ? "sm:grid-cols-[auto_minmax(0,1.3fr)_6.75rem_5.25rem_minmax(0,1fr)_auto]"
+    : "sm:grid-cols-[minmax(0,1.3fr)_6.75rem_5.25rem_minmax(0,1fr)_auto]";
+
+  return (
+    <div
+      className={cn(
+        "grid grid-cols-[1fr_auto] items-start gap-x-3 gap-y-2 px-4 py-3.5 sm:items-center sm:gap-x-4 sm:py-3 border-b border-border/60 last:border-0 transition-colors",
+        gridCols,
+        callback ? "bg-primary/[0.04] hover:bg-primary/[0.07]" : "hover:bg-muted/25",
+      )}
+    >
+      {isMainAdmin && (
+        <Checkbox
+          className="hidden sm:block shrink-0"
+          checked={selected}
+          onCheckedChange={(v) => onToggleSelect(v === true)}
+          aria-label="Select record"
+        />
+      )}
+
+      <Link
+        to="/sessions/$sessionId"
+        params={{ sessionId: session.id }}
+        onClick={() => {
+          if (callback) onCallbackOpen(callback.id);
+        }}
+        className="min-w-0 col-start-1 row-start-1 sm:contents group/link"
+      >
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <p className="font-medium text-sm leading-snug truncate">{name}</p>
+            {callback && (
+              <span className="inline-flex shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">
+                New
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground truncate mt-0.5">{contactLine}</p>
+        </div>
+
+        <div className="hidden sm:flex">
+          <SessionReferenceBadge caseRef={caseRef} />
+        </div>
+
+        <div className="hidden sm:flex">
+          <SessionProgressBadge isCase={isCase} status={session.status} />
+        </div>
+
+        <div className="hidden sm:block min-w-0 text-xs text-muted-foreground space-y-1">
+          <p className="truncate">
+            {statusLabel} · {startedLabel}
+          </p>
+          {advisorLine && (
+            <p
+              className={cn(
+                "truncate",
+                !isCase && assigned.length === 0 && "text-amber-600 dark:text-amber-500 font-medium",
+              )}
+            >
+              {assigned.length > 0 ? `Advisor: ${advisorLine}` : advisorLine}
+            </p>
+          )}
+          {(callback || nextContactAt) && (
+            <div className="flex flex-wrap gap-1.5">
+              {callback && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                  <PhoneCall className="w-3 h-3 shrink-0" />
+                  Call-back
+                  {callback.window
+                    ? ` · ${CALLBACK_WINDOW_LABELS[callback.window] ?? callback.window}`
+                    : ""}
+                </span>
+              )}
+              {nextContactAt && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[11px]">
+                  <Clock className="w-3 h-3 shrink-0" />
+                  {format(new Date(nextContactAt), "EEE d MMM, HH:mm")}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </Link>
+
+      <div className="col-span-2 sm:hidden space-y-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <SessionReferenceBadge caseRef={caseRef} />
+          <SessionProgressBadge isCase={isCase} status={session.status} />
+          <span className="text-xs text-muted-foreground">
+            {statusLabel} · {startedLabel}
+          </span>
+        </div>
+        {advisorLine && (
+          <p
+            className={cn(
+              "text-xs truncate",
+              !isCase && assigned.length === 0
+                ? "text-amber-600 dark:text-amber-500 font-medium"
+                : "text-muted-foreground",
+            )}
+          >
+            {assigned.length > 0 ? `Advisor: ${advisorLine}` : advisorLine}
+          </p>
+        )}
+        {(callback || nextContactAt) && (
+          <div className="flex flex-wrap gap-1.5">
+            {callback && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                <PhoneCall className="w-3 h-3 shrink-0" />
+                Call-back
+              </span>
+            )}
+            {nextContactAt && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                <Clock className="w-3 h-3 shrink-0" />
+                {format(new Date(nextContactAt), "EEE d MMM")}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="col-start-2 row-start-1 sm:col-start-auto sm:row-start-auto flex items-center gap-0.5 shrink-0 self-center">
+        {isMainAdmin && (
+          <Checkbox
+            className="sm:hidden shrink-0 mr-1"
+            checked={selected}
+            onCheckedChange={(v) => onToggleSelect(v === true)}
+            aria-label="Select record"
+          />
+        )}
+        <Link to="/customers/$customerId" params={{ customerId: session.customer_id }}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2 text-xs hidden md:inline-flex"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Customer
+          </Button>
+        </Link>
+        {isMainAdmin && !isCase && (
+          <AllocateDialog sessionId={session.id} assigned={assigned} onChanged={onInvalidate} />
+        )}
+        {(isOwner || isSupervisor) && (
+          <DeleteButton sessionId={session.id} onDeleted={onInvalidate} />
+        )}
+        <Link
+          to="/sessions/$sessionId"
+          params={{ sessionId: session.id }}
+          className="hidden sm:inline-flex p-1.5 text-muted-foreground hover:text-foreground"
+          aria-label="Open record"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </Link>
+      </div>
+    </div>
   );
 }
 
@@ -1779,7 +2678,8 @@ function AdvisorsCard() {
                   className="pl-9"
                 />
               </div>
-              <div className="rounded-2xl border bg-card divide-y overflow-hidden">
+              <div className="rounded-2xl border bg-card overflow-hidden">
+                <DashboardSessionsListHeader showCheckbox={false} />
                 {customersQ.isLoading && (
                   <div className="p-4 text-sm text-muted-foreground">Loading customers…</div>
                 )}
@@ -1912,11 +2812,257 @@ function ContactsCard() {
   );
 }
 
+function CustomerAppointmentCard() {
+  const qc = useQueryClient();
+  const casesFn = useServerFn(listMyCases);
+  const bookingFn = useServerFn(getSessionBooking);
+  const casesQ = useQuery({ queryKey: ["my-cases"], queryFn: () => casesFn() });
+
+  const [panel, setPanel] = useState<"none" | "amend" | "callback">("none");
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+
+  useQuery({
+    queryKey: ["profile-for-home-booking"],
+    queryFn: async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (profile?.full_name) setProfileName(profile.full_name);
+      if (profile?.email) setProfileEmail(profile.email);
+      return profile;
+    },
+  });
+
+  const cases = casesQ.data ?? [];
+  const withAppt = cases
+    .filter((c) => c.appointment)
+    .sort(
+      (a, b) =>
+        new Date(a.appointment!.startsAt).getTime() - new Date(b.appointment!.startsAt).getTime(),
+    );
+  const now = Date.now();
+  const upcoming =
+    withAppt.find((c) => new Date(c.appointment!.startsAt).getTime() >= now) ?? withAppt[0] ?? null;
+
+  const bookingQ = useQuery({
+    queryKey: ["landing-booking", upcoming?.id],
+    queryFn: () => bookingFn({ data: { sessionId: upcoming!.id } }),
+    enabled: Boolean(upcoming?.id),
+  });
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["my-cases"] });
+    qc.invalidateQueries({ queryKey: ["landing-booking"] });
+    setPanel("none");
+  };
+
+  if (casesQ.isLoading) {
+    return (
+      <div className="rounded-2xl border p-5 text-sm text-muted-foreground">
+        Loading appointment…
+      </div>
+    );
+  }
+
+  if (!upcoming?.appointment) {
+    return (
+      <Link
+        to="/booking"
+        className="group text-left rounded-2xl border p-5 hover:border-primary hover:bg-muted/40 transition block"
+      >
+        <div className="flex items-center gap-3">
+          <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <CalendarCheck className="w-5 h-5" />
+          </span>
+          <div>
+            <div className="font-semibold flex items-center gap-1">
+              Book an appointment
+              <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition" />
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Pick a time to speak with your advisor.
+            </div>
+          </div>
+        </div>
+      </Link>
+    );
+  }
+
+  const appt = upcoming.appointment;
+  const callback = bookingQ.data?.callback ?? null;
+  const callbackOpen = callback && callback.status !== "closed";
+
+  return (
+    <div className="rounded-2xl border bg-card p-5 space-y-4 sm:col-span-2 lg:col-span-3">
+      <div className="flex items-start gap-3">
+        <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary shrink-0">
+          <CalendarCheck className="w-5 h-5" />
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold">Your appointment</div>
+          {panel === "none" && (
+            <>
+              <dl className="mt-2 grid sm:grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Date &amp; time</dt>
+                  <dd className="font-medium">
+                    {format(new Date(appt.startsAt), "EEE d MMM yyyy, HH:mm")}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Advisor</dt>
+                  <dd className="font-medium">{appt.advisorName}</dd>
+                </div>
+                {upcoming.case_ref && (
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Case</dt>
+                    <dd className="font-mono text-xs">{upcoming.case_ref}</dd>
+                  </div>
+                )}
+              </dl>
+              {callbackOpen && (
+                <p className="text-xs text-primary mt-2 inline-flex items-center gap-1">
+                  <PhoneCall className="w-3 h-3" />
+                  Call-back requested ·{" "}
+                  {CALLBACK_WINDOW_RANGES[callback.preferredWindow as "9-12" | "12-4" | "4-8"] ??
+                    callback.preferredWindow}
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2 mt-3">
+                <Button type="button" size="sm" variant="outline" onClick={() => setPanel("amend")}>
+                  Amend appointment
+                </Button>
+                <Button type="button" size="sm" variant="secondary" onClick={() => setPanel("callback")}>
+                  <PhoneCall className="w-4 h-4 mr-1.5" />
+                  Request a call back
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {panel === "amend" && (
+        <div className="rounded-xl border bg-muted/20 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="font-medium text-sm">Change your appointment</h4>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setPanel("none")}>
+              Cancel
+            </Button>
+          </div>
+          <PostCompletionBooking
+            sessionId={upcoming.id}
+            channel="text"
+            defaultName={profileName}
+            defaultEmail={profileEmail}
+            initialMode="appointment"
+            hideModeToggle
+            compact
+            onComplete={() => {
+              refresh();
+              toast.success("Appointment updated");
+            }}
+          />
+        </div>
+      )}
+
+      {panel === "callback" && (
+        <div className="rounded-xl border bg-muted/20 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="font-medium text-sm">When should we call you?</h4>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setPanel("none")}>
+              Cancel
+            </Button>
+          </div>
+          <PostCompletionBooking
+            sessionId={upcoming.id}
+            channel="text"
+            defaultName={profileName}
+            defaultEmail={profileEmail}
+            initialMode="callback"
+            hideModeToggle
+            compact
+            onComplete={() => {
+              refresh();
+              toast.success("Call-back requested");
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CustomerRafSelfServeCard() {
+  const qc = useQueryClient();
+  const activityFn = useServerFn(listMyReferralActivity);
+  const ensureFn = useServerFn(ensureMyReferralLink);
+  const publicUrlFn = useServerFn(getPublicShareBaseUrl);
+
+  const activityQ = useQuery({ queryKey: ["my-raf-activity"], queryFn: () => activityFn() });
+  const publicUrlQ = useQuery({ queryKey: ["public-share-url"], queryFn: () => publicUrlFn() });
+  const shareBase = publicUrlQ.data?.baseUrl;
+
+  const ensure = useMutation({
+    mutationFn: () => ensureFn(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["my-raf-activity"] }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not create link"),
+  });
+
+  const code = activityQ.data?.codes?.[0]?.code;
+  const referrals = activityQ.data?.referrals ?? [];
+
+  return (
+    <div className="rounded-2xl border bg-card p-5 space-y-4 sm:col-span-2 lg:col-span-1">
+      <div className="flex items-center gap-3">
+        <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <Gift className="w-5 h-5" />
+        </span>
+        <div>
+          <div className="font-semibold">Refer a friend</div>
+          <div className="text-xs text-muted-foreground">Share your link and track referrals · £75 bonus</div>
+        </div>
+      </div>
+      {activityQ.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {!activityQ.isLoading && !code && (
+        <Button size="sm" onClick={() => ensure.mutate()} disabled={ensure.isPending}>
+          {ensure.isPending ? "Creating…" : "Get my referral link"}
+        </Button>
+      )}
+      {code && (
+        <div className="space-y-2">
+          <p className="text-xs font-mono break-all">{rafLinkForCode(code, shareBase)}</p>
+          <CopyLinkButton value={rafShareMessage(null, code, shareBase)} label="Copy share message" />
+        </div>
+      )}
+      {referrals.length > 0 && (
+        <div className="rounded-xl border bg-muted/30 p-3 space-y-2">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Your referrals</p>
+          {referrals.slice(0, 5).map((r) => (
+            <div key={r.id} className="text-sm flex justify-between gap-2">
+              <span className="truncate">{r.referredEmail ?? r.referredPhone ?? "Friend"}</span>
+              <span className="text-xs text-muted-foreground shrink-0 capitalize">{r.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Home() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const roleFn = useServerFn(getMyRole);
   const sessionsFn = useServerFn(listMySessions);
+  const casesFn = useServerFn(listMyCases);
   const allFn = useServerFn(listAllSessionsForAdvisor);
   const createFn = useServerFn(createSession);
 
@@ -1926,6 +3072,19 @@ function Home() {
   const roleQ = useQuery({ queryKey: ["my-role"], queryFn: () => roleFn() });
   const isAdvisor = roleQ.data?.isAdvisor ?? false;
   const isMainAdmin = roleQ.data?.isMainAdmin ?? false;
+  const isOwner = roleQ.data?.isOwner ?? false;
+  const isSupervisor = roleQ.data?.isSupervisor ?? false;
+  const adminLevel = roleQ.data?.adminLevel ?? null;
+  const adminAccess = roleQ.data?.adminAccess ?? null;
+  const showCommissionPayouts = canViewCommissionPayouts(adminAccess);
+  const canAmendPayouts = canAmendCommissionPayouts(adminAccess);
+  const showManage =
+    canView(adminAccess, "advisors") ||
+    canView(adminAccess, "introducers") ||
+    canView(adminAccess, "invites") ||
+    canView(adminAccess, "raf");
+  const showAccessTab = isOwner || isSupervisor;
+  const showFinanceReport = canViewFinanceReport(adminAccess);
 
   const introducerQ = useQuery({ queryKey: ["is-introducer"], queryFn: () => introducerFn() });
   const isIntroducer = introducerQ.data?.isIntroducer ?? false;
@@ -1939,6 +3098,12 @@ function Home() {
   const sessionsQ = useQuery({
     queryKey: ["my-sessions"],
     queryFn: () => sessionsFn(),
+    enabled: !roleQ.isLoading && !isAdvisor,
+  });
+
+  const casesQ = useQuery({
+    queryKey: ["my-cases"],
+    queryFn: () => casesFn(),
     enabled: !roleQ.isLoading && !isAdvisor,
   });
 
@@ -2010,12 +3175,15 @@ function Home() {
     const q = search.trim().toLowerCase();
     const sessions = (allQ.data ?? [])
       .filter((s) => {
-        if (unallocatedOnly && ((s as { assignedAdvisors?: AssignedAdvisor[] }).assignedAdvisors ?? []).length !== 0) {
+        const assigned = (s as { assignedAdvisors?: AssignedAdvisor[] }).assignedAdvisors ?? [];
+        const isCase = Boolean((s as { case_ref?: string | null }).case_ref);
+        if (unallocatedOnly && (isCase || assigned.length !== 0)) {
           return false;
         }
         if (!q) return true;
         const c = (s as { customer?: { full_name?: string | null; email?: string | null; phone?: string | null } | null }).customer;
-        const haystack = [c?.full_name, c?.email, c?.phone].filter(Boolean).join(" ").toLowerCase();
+        const caseRef = (s as { case_ref?: string | null }).case_ref ?? "";
+        const haystack = [c?.full_name, c?.email, c?.phone, caseRef].filter(Boolean).join(" ").toLowerCase();
         return haystack.includes(q);
       })
       .sort((a, b) => {
@@ -2038,7 +3206,14 @@ function Home() {
       setSelectedIds((prev) => (on ? [...new Set([...prev, id])] : prev.filter((x) => x !== id)));
     const clearSelection = () => setSelectedIds([]);
 
-    const tabCount = 2 + (isIntroducer ? 1 : 0) + (isMainAdmin ? 3 : 0);
+    const tabCount =
+      2 +
+      (isIntroducer ? 1 : 0) +
+      (isMainAdmin ? 1 : 0) +
+      (showCommissionPayouts ? 1 : 0) +
+      (showManage ? 1 : 0) +
+      (showAccessTab ? 1 : 0) +
+      (showFinanceReport ? 1 : 0);
 
     return (
       <AppShell title="Advisor dashboard">
@@ -2047,6 +3222,11 @@ function Home() {
             <h2 className="text-2xl font-semibold">
               {isMainAdmin ? "Admin dashboard" : "Your customers"}
             </h2>
+            {adminLevel && (
+              <span className="inline-flex items-center rounded-full border bg-muted px-3 py-1 text-xs font-medium">
+                {ADMIN_LEVEL_LABELS[adminLevel]}
+              </span>
+            )}
             {advisorCode && (
               <span className="inline-flex items-center gap-1.5 rounded-full border bg-muted px-3 py-1 text-sm">
                 <KeyRound className="w-3.5 h-3.5 text-muted-foreground" />
@@ -2101,16 +3281,28 @@ function Home() {
                   Introducer
                 </TabsTrigger>
               )}
-              {isMainAdmin && (
-                <TabsTrigger value="raf">
-                  <Gift className="w-4 h-4 mr-1.5" />
-                  Refer a friend
+              {showCommissionPayouts && (
+                <TabsTrigger value="commission">
+                  <PoundSterling className="w-4 h-4 mr-1.5" />
+                  Commission
                 </TabsTrigger>
               )}
-              {isMainAdmin && (
+              {showManage && (
                 <TabsTrigger value="manage">
                   <ShieldCheck className="w-4 h-4 mr-1.5" />
                   Manage
+                </TabsTrigger>
+              )}
+              {showAccessTab && (
+                <TabsTrigger value="access">
+                  <UserCog className="w-4 h-4 mr-1.5" />
+                  Admin access
+                </TabsTrigger>
+              )}
+              {showFinanceReport && (
+                <TabsTrigger value="finance">
+                  <PoundSterling className="w-4 h-4 mr-1.5" />
+                  Finance
                 </TabsTrigger>
               )}
             </TabsList>
@@ -2121,8 +3313,7 @@ function Home() {
               <div className="space-y-3 mb-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <p className="text-sm text-muted-foreground">
-                    All fact-finds across the team. Assign advisors so they appear on each advisor&apos;s
-                    dashboard.
+                    One row per fact-find or case — customer name, reference, and status at a glance.
                   </p>
                   <label className="flex items-center gap-2 text-sm cursor-pointer">
                     <Checkbox
@@ -2181,90 +3372,40 @@ function Home() {
                 </div>
               </div>
             )}
-            <div className="rounded-2xl border bg-card divide-y">
+            <div className="rounded-2xl border bg-card overflow-hidden">
+              <DashboardSessionsListHeader showCheckbox={isMainAdmin} />
               {sessions.length === 0 && (
                 <div className="p-6 text-muted-foreground text-sm">
                   {search.trim()
                     ? "No customers match your search."
                     : unallocatedOnly
                       ? "No unallocated fact-finds."
-                      : "No fact-finds yet."}
+                      : "No customers yet."}
                 </div>
               )}
-              {sessions.map((s) => {
-                const assigned = ((s as { assignedAdvisors?: AssignedAdvisor[] }).assignedAdvisors ?? []);
-                const phone = (s as { customer?: { phone?: string | null } | null }).customer?.phone;
-                const nextContactAt = (s as { nextContactAt?: string | null }).nextContactAt;
-                const callback = (s as { callback?: { id: string; window: string | null } | null }).callback ?? null;
-                return (
-                  <div
-                    key={s.id}
-                    className={`flex items-center gap-2 p-4 transition ${callback ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-muted/40"}`}
-                  >
-                    {isMainAdmin && (
-                      <Checkbox
-                        className="shrink-0"
-                        checked={selectedIds.includes(s.id)}
-                        onCheckedChange={(v) => toggleSelected(s.id, v === true)}
-                        aria-label="Select customer"
-                      />
-                    )}
-                    <Link
-                      to="/sessions/$sessionId"
-                      params={{ sessionId: s.id }}
-                      onClick={() => {
-                        if (callback) markCallbackOpened.mutate({ contactId: callback.id });
-                      }}
-                      className="flex-1 flex items-center justify-between gap-3"
-                    >
-                      <div className="min-w-0">
-                        <div className="font-medium truncate flex items-center gap-2">
-                          {s.customer?.full_name || s.customer?.email || "Unnamed customer"}
-                          {callback && (
-                            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground shrink-0">
-                              New
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {s.status === "submitted" ? "Submitted" : "In progress"} ·{" "}
-                          {formatDistanceToNow(new Date(s.started_at), { addSuffix: true })}
-                          {phone ? ` · ${phone}` : ""}
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-0.5">
-                          {assigned.length > 0 ? (
-                            <span>Advisors: {assigned.map(advisorLabel).join(", ")}</span>
-                          ) : (
-                            <span className="text-amber-600 dark:text-amber-500">Unallocated</span>
-                          )}
-                        </div>
-                        {callback && (
-                          <div className="text-xs mt-0.5 inline-flex items-center gap-1.5 text-primary font-medium">
-                            <PhoneCall className="w-3 h-3" />
-                            Call-back requested
-                            <span className="font-normal">
-                              · {CALLBACK_WINDOW_LABELS[callback.window ?? ""] ?? callback.window}
-                            </span>
-                          </div>
-                        )}
-                        {nextContactAt && (
-                          <div className="text-xs mt-0.5 inline-flex items-center gap-1 text-primary">
-                            <Clock className="w-3 h-3" />
-                            Next contact: {format(new Date(nextContactAt), "EEE d MMM, HH:mm")}
-                          </div>
-                        )}
-                      </div>
-                      <span className={`text-xs px-2 py-1 rounded-full shrink-0 ${s.status === "submitted" ? "bg-accent/30" : "bg-muted"}`}>
-                        {s.status === "submitted" ? "Ready to review" : "In progress"}
-                      </span>
-                    </Link>
-                    {isMainAdmin && (
-                      <AllocateDialog sessionId={s.id} assigned={assigned} onChanged={invalidateSessions} />
-                    )}
-                    <DeleteButton sessionId={s.id} onDeleted={invalidateSessions} />
-                  </div>
-                );
-              })}
+              {sessions.map((s) => (
+                <DashboardSessionRow
+                  key={s.id}
+                  session={{
+                    id: s.id,
+                    customer_id: (s as { customer_id: string }).customer_id,
+                    status: s.status,
+                    started_at: s.started_at,
+                    case_ref: (s as { case_ref?: string | null }).case_ref,
+                    customer: (s as { customer?: { full_name?: string | null; email?: string | null; phone?: string | null } | null }).customer,
+                    assignedAdvisors: (s as { assignedAdvisors?: AssignedAdvisor[] }).assignedAdvisors,
+                    nextContactAt: (s as { nextContactAt?: string | null }).nextContactAt,
+                    callback: (s as { callback?: { id: string; window: string | null } | null }).callback,
+                  }}
+                  isMainAdmin={isMainAdmin}
+                  isOwner={isOwner}
+                  isSupervisor={isSupervisor}
+                  selected={selectedIds.includes(s.id)}
+                  onToggleSelect={(on) => toggleSelected(s.id, on)}
+                  onCallbackOpen={(id) => markCallbackOpened.mutate({ contactId: id })}
+                  onInvalidate={invalidateSessions}
+                />
+              ))}
             </div>
           </TabsContent>
 
@@ -2299,18 +3440,33 @@ function Home() {
             </TabsContent>
           )}
 
-          {isMainAdmin && (
-            <TabsContent value="raf">
-              <ReferAFriendCard />
+          {showCommissionPayouts && (
+            <TabsContent value="commission">
+              <CommissionPayoutsPanel canAmend={canAmendPayouts} />
             </TabsContent>
           )}
 
-          {isMainAdmin && (
+          {showManage && (
             <TabsContent value="manage">
-              <InviteStaffCard />
-              <AdvisorAccessCard />
-              <IntroducerAccessCard />
-              <RecentlyDeletedCard />
+              <div className="space-y-6">
+                {canView(adminAccess, "invites") && <InviteStaffCard />}
+                {canView(adminAccess, "advisors") && <AdvisorAccessCard />}
+                {canView(adminAccess, "introducers") && <IntroducerAccessCard />}
+                {canView(adminAccess, "raf") && <RafLinksAccessCard />}
+                {(isOwner || isSupervisor) && <RecentlyDeletedCard />}
+              </div>
+            </TabsContent>
+          )}
+
+          {showAccessTab && (
+            <TabsContent value="access">
+              <AdminAccessPanel isOwner={isOwner} />
+            </TabsContent>
+          )}
+
+          {showFinanceReport && (
+            <TabsContent value="finance">
+              <OwnerFinanceReport />
             </TabsContent>
           )}
         </Tabs>
@@ -2321,6 +3477,8 @@ function Home() {
   const sessions = sessionsQ.data ?? [];
   const inProgress = sessions.find((s) => s.status === "in_progress");
   const hasSubmitted = sessions.some((s) => s.status === "submitted");
+  const hasCases = (casesQ.data ?? []).length > 0;
+  const caseCount = casesQ.data?.length ?? 0;
 
   return (
     <AppShell title="Your fact-finds">
@@ -2337,7 +3495,7 @@ function Home() {
                 : "Choose how you'd like to answer Susan's questions. It takes around 5–10 minutes."}
           </p>
         </div>
-        <div className="grid sm:grid-cols-3 gap-3 mt-5">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-5">
           <button
             type="button"
             disabled={create.isPending}
@@ -2392,25 +3550,31 @@ function Home() {
               </div>
             </div>
           </button>
-          <Link
-            to="/booking"
-            className="group text-left rounded-2xl border p-5 hover:border-primary hover:bg-muted/40 transition block"
-          >
-            <div className="flex items-center gap-3">
-              <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <CalendarCheck className="w-5 h-5" />
-              </span>
-              <div>
-                <div className="font-semibold flex items-center gap-1">
-                  Book an appointment
-                  <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition" />
+          <CustomerAppointmentCard />
+          {hasCases && (
+            <>
+              <Link
+                to="/cases"
+                className="group text-left rounded-2xl border p-5 hover:border-primary hover:bg-muted/40 transition block"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary">
+                    <FileText className="w-5 h-5" />
+                  </span>
+                  <div>
+                    <div className="font-semibold flex items-center gap-1">
+                      Your summary
+                      <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition" />
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      Journey progress, next steps, and your cases ({caseCount}).
+                    </div>
+                  </div>
                 </div>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  Skip the fact-find for now and pick a time to speak with your advisor.
-                </div>
-              </div>
-            </div>
-          </Link>
+              </Link>
+              <CustomerRafSelfServeCard />
+            </>
+          )}
         </div>
       </div>
       {isIntroducer && (
@@ -2423,44 +3587,20 @@ function Home() {
           </Link>
         </div>
       )}
-      <h3 className="text-sm font-medium text-muted-foreground mb-3">Previous sessions</h3>
-      <div className="rounded-2xl border bg-card divide-y">
-        {sessions.length === 0 && (
-          <div className="p-6 text-sm text-muted-foreground flex items-center gap-2">
-            <FileText className="w-4 h-4" /> No sessions yet — start your first interview above.
-          </div>
-        )}
-        {sessions.map((s) => (
-          <div key={s.id} className="flex items-center gap-2 p-4 hover:bg-muted/40 transition">
-            <Link
-              to={s.status === "in_progress" ? "/interview/$sessionId" : "/sessions/$sessionId"}
-              params={{ sessionId: s.id }}
-              className="flex-1 flex items-center justify-between"
-            >
-              <div>
-                <div className="font-medium">
-                  {s.status === "submitted" ? "Submitted fact-find" : "In progress"}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  Started {formatDistanceToNow(new Date(s.started_at), { addSuffix: true })}
-                </div>
-              </div>
-              <span className="text-xs text-muted-foreground mr-2 flex items-center gap-1">
-                {s.status === "in_progress" ? (
-                  <>
-                    <RotateCcw className="w-3 h-3" /> Resume
-                  </>
-                ) : (
-                  <>
-                    View <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
-              </span>
-            </Link>
-            <DeleteButton sessionId={s.id} onDeleted={() => qc.invalidateQueries({ queryKey: ["my-sessions"] })} />
-          </div>
-        ))}
-      </div>
+      {inProgress && hasCases && (
+        <p className="text-sm text-muted-foreground mb-4">
+          You have a fact-find in progress — use Talk or Type above to continue, or open{" "}
+          <Link to="/cases" className="text-primary underline-offset-2 hover:underline">
+            Your summary
+          </Link>{" "}
+          for journey and booking details.
+        </p>
+      )}
+      {inProgress && !hasCases && (
+        <p className="text-sm text-muted-foreground mb-4">
+          You have a fact-find in progress — use Talk or Type above to continue.
+        </p>
+      )}
     </AppShell>
   );
 }

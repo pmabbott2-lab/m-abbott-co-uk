@@ -60,6 +60,22 @@ async function requireAdmin(userId: string): Promise<void> {
   if (!roles.includes("admin")) throw new Error("Forbidden");
 }
 
+async function requireRafView(userId: string, email?: string): Promise<void> {
+  const { resolveAdminAccess } = await import("@/lib/admin.functions");
+  const { canView } = await import("@/lib/admin-access");
+  const access = await resolveAdminAccess(userId, email);
+  if (access.isOwner || access.isSupervisor || canView(access, "raf")) return;
+  await requireAdmin(userId);
+}
+
+async function requireRafAmend(userId: string, email?: string): Promise<void> {
+  const { resolveAdminAccess } = await import("@/lib/admin.functions");
+  const { canAmend } = await import("@/lib/admin-access");
+  const access = await resolveAdminAccess(userId, email);
+  if (access.isOwner || access.isSupervisor || canAmend(access, "raf")) return;
+  await requireAdmin(userId);
+}
+
 // Generate a referral code that doesn't collide with an existing one.
 async function generateUniqueReferralCode(): Promise<string> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -85,7 +101,8 @@ export const searchCustomers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ query: z.string().max(120) }).parse(d))
   .handler(async ({ data, context }) => {
-    await requireAdmin(context.userId);
+    const email = (context.claims as { email?: string }).email;
+    await requireRafView(context.userId, email);
     // Sanitise: PostgREST `.or()` uses , and () as delimiters, and ilike treats
     // % and _ as wildcards. Strip those so a raw query can't break the filter.
     const safe = data.query.replace(/[,%_()*]/g, " ").trim();
@@ -225,13 +242,23 @@ export const claimReferral = createServerFn({ method: "POST" })
 export async function markReferralQualified(referredUserId: string): Promise<void> {
   try {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin
+    const { data: updated, error } = await supabaseAdmin
       .from("referrals")
-      .update({ status: "qualified", updated_at: new Date().toISOString() })
+      .update({
+        status: "qualified",
+        bonus_status: "eligible",
+        updated_at: new Date().toISOString(),
+      })
       .eq("referred_user_id", referredUserId)
-      .in("status", ["pending", "signed_up"]);
+      .in("status", ["pending", "signed_up"])
+      .select("id");
     if (error && !isMissingTableError(error)) {
       console.error("markReferralQualified failed", error);
+      return;
+    }
+    const { ensureRafCommissionLedgerEntry } = await import("@/lib/finance.functions");
+    for (const row of updated ?? []) {
+      await ensureRafCommissionLedgerEntry(row.id);
     }
   } catch (e) {
     console.error("markReferralQualified threw", e);
@@ -256,7 +283,8 @@ export const createReferralLink = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    await requireAdmin(context.userId);
+    const email = (context.claims as { email?: string }).email;
+    await requireRafAmend(context.userId, email);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     // Resolve referrer details. When an existing user is picked, backfill their
@@ -305,7 +333,8 @@ export const textReferralLink = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    await requireAdmin(context.userId);
+    const email = (context.claims as { email?: string }).email;
+    await requireRafAmend(context.userId, email);
     if (!isTwilioConfigured()) {
       throw new Error(
         "SMS is not configured yet. Add Twilio credentials to your server environment.",
@@ -359,7 +388,8 @@ export const textRafInviteToFriend = createServerFn({ method: "POST" })
     z.object({ id: z.string().uuid(), friendPhone: z.string().min(7).max(32) }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    await requireAdmin(context.userId);
+    const email = (context.claims as { email?: string }).email;
+    await requireRafAmend(context.userId, email);
     if (!isTwilioConfigured()) {
       throw new Error(
         "SMS is not configured yet. Add Twilio credentials to your server environment.",
@@ -401,7 +431,8 @@ export const textRafInviteToFriend = createServerFn({ method: "POST" })
 export const listReferralLinks = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireAdmin(context.userId);
+    const email = (context.claims as { email?: string }).email;
+    await requireRafView(context.userId, email);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const { data: links, error } = await supabaseAdmin
@@ -430,7 +461,8 @@ export const listReferralLinks = createServerFn({ method: "GET" })
 export const listAllReferrals = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireAdmin(context.userId);
+    const email = (context.claims as { email?: string }).email;
+    await requireRafView(context.userId, email);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const { data: refs, error } = await supabaseAdmin
@@ -461,14 +493,28 @@ export const listAllReferrals = createServerFn({ method: "GET" })
         ].filter(Boolean) as string[],
       ),
     );
-    const profileMap = new Map<string, { full_name: string | null; email: string | null }>();
+    const profileMap = new Map<string, { full_name: string | null; email: string | null; phone: string | null }>();
     if (userIds.length > 0) {
-      const { data: profiles } = await supabaseAdmin
+      const withPhone = await supabaseAdmin
         .from("profiles")
-        .select("id, full_name, email")
+        .select("id, full_name, email, phone")
         .in("id", userIds);
-      for (const p of profiles ?? []) {
-        profileMap.set(p.id, { full_name: p.full_name, email: p.email });
+      if (withPhone.error) {
+        const { data: basic } = await supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, email")
+          .in("id", userIds);
+        for (const p of basic ?? []) {
+          profileMap.set(p.id, { full_name: p.full_name, email: p.email, phone: null });
+        }
+      } else {
+        for (const p of withPhone.data ?? []) {
+          profileMap.set(p.id, {
+            full_name: p.full_name,
+            email: p.email,
+            phone: (p as { phone?: string | null }).phone ?? null,
+          });
+        }
       }
     }
 
@@ -484,6 +530,8 @@ export const listAllReferrals = createServerFn({ method: "GET" })
           "Referrer",
         referredName:
           friendProfile?.full_name || friendProfile?.email || r.referred_email || "Friend",
+        referredPhone: friendProfile?.phone ?? null,
+        referredEmail: friendProfile?.email ?? r.referred_email ?? null,
       };
     });
   });
@@ -497,15 +545,23 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
     z
       .object({
         id: z.string().uuid(),
-        bonusStatus: z.enum(["none", "eligible", "paid"]).optional(),
+        bonusStatus: z.enum(["none", "eligible", "paid", "rejected"]).optional(),
         status: z.enum(["pending", "signed_up", "qualified", "rewarded"]).optional(),
         notes: z.string().max(500).optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    await requireAdmin(context.userId);
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const { canAmend } = await import("@/lib/admin-access");
+    const email = (context.claims as { email?: string }).email;
+    const access = await resolveAdminAccess(context.userId, email);
+    if (!canAmend(access, "finance_raf") && !access.isOwner && !access.isSupervisor) {
+      await requireAdmin(context.userId);
+    }
+
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { ensureRafCommissionLedgerEntry } = await import("@/lib/finance.functions");
 
     const patch: {
       updated_at: string;
@@ -522,5 +578,121 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
       if (isMissingTableError(error)) throw new Error("Run the Refer-a-friend migration first.");
       throw new Error(error.message);
     }
+
+    if (data.bonusStatus === "eligible") {
+      await ensureRafCommissionLedgerEntry(data.id, context.userId);
+    }
+
+    if (data.bonusStatus === "paid" || data.bonusStatus === "rejected") {
+      const payoutStatus = data.bonusStatus === "paid" ? "paid" : "rejected";
+      const { data: ledgerRow } = await supabaseAdmin
+        .from("finance_ledger")
+        .select("id")
+        .eq("referral_id", data.id)
+        .eq("kind", "commission")
+        .maybeSingle();
+      if (ledgerRow) {
+        await supabaseAdmin
+          .from("finance_ledger")
+          .update({
+            payout_status: payoutStatus,
+            payout_at: new Date().toISOString(),
+            payout_by: context.userId,
+          })
+          .eq("id", ledgerRow.id);
+      }
+    }
+
     return { ok: true };
+  });
+
+// ---------------------------------------------------------------------------
+// CUSTOMER: self-serve RAF — view referral links and track referred friends.
+// ---------------------------------------------------------------------------
+export const listMyReferralActivity = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: codes, error: codeErr } = await supabaseAdmin
+      .from("referral_codes")
+      .select("id, code, active, created_at")
+      .eq("referrer_user_id", context.userId)
+      .order("created_at", { ascending: false });
+    if (codeErr) {
+      if (isMissingTableError(codeErr)) return { codes: [], referrals: [], migrationRequired: true };
+      throw new Error(codeErr.message);
+    }
+
+    const codeList = (codes ?? []).map((c) => c.code);
+    let referrals: Array<{
+      id: string;
+      code: string;
+      referredEmail: string | null;
+      referredPhone: string | null;
+      status: string;
+      bonusStatus: string;
+      createdAt: string;
+    }> = [];
+    if (codeList.length > 0) {
+      const { data: refs, error: refErr } = await supabaseAdmin
+        .from("referrals")
+        .select("id, code, referred_email, referred_phone, status, bonus_status, created_at")
+        .in("code", codeList)
+        .order("created_at", { ascending: false });
+      if (refErr && !isMissingTableError(refErr)) throw new Error(refErr.message);
+      referrals = (refs ?? []).map((r) => ({
+        id: r.id,
+        code: r.code,
+        referredEmail: r.referred_email ?? null,
+        referredPhone: r.referred_phone ?? null,
+        status: r.status,
+        bonusStatus: r.bonus_status,
+        createdAt: r.created_at,
+      }));
+    }
+
+    return {
+      codes: codes ?? [],
+      referrals,
+      migrationRequired: false,
+    };
+  });
+
+export const ensureMyReferralLink = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: existing } = await supabaseAdmin
+      .from("referral_codes")
+      .select("id, code")
+      .eq("referrer_user_id", context.userId)
+      .eq("active", true)
+      .limit(1)
+      .maybeSingle();
+    if (existing) return { code: existing.code };
+
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("full_name, phone")
+      .eq("id", context.userId)
+      .maybeSingle();
+
+    const code = await generateUniqueReferralCode();
+    const { data: inserted, error } = await supabaseAdmin
+      .from("referral_codes")
+      .insert({
+        code,
+        referrer_user_id: context.userId,
+        referrer_name: profile?.full_name ?? null,
+        referrer_phone: profile?.phone ?? null,
+        active: true,
+        created_by: context.userId,
+      })
+      .select("code")
+      .single();
+    if (error) {
+      if (isMissingTableError(error)) throw new Error("Run the Refer-a-friend migration first.");
+      throw new Error(error.message);
+    }
+    return { code: inserted.code };
   });

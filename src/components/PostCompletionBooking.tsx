@@ -20,6 +20,9 @@ type Props = {
   defaultName?: string;
   defaultEmail?: string;
   onComplete: () => void;
+  initialMode?: "appointment" | "callback";
+  hideModeToggle?: boolean;
+  compact?: boolean;
 };
 
 export const CALLBACK_WINDOW_OPTIONS: Array<{ value: "9-12" | "12-4" | "4-8"; label: string }> = [
@@ -41,12 +44,15 @@ export function PostCompletionBooking({
   defaultName = "",
   defaultEmail = "",
   onComplete,
+  initialMode = "appointment",
+  hideModeToggle = false,
+  compact = false,
 }: Props) {
   const slotsFn = useServerFn(getAvailableSlots);
   const bookFn = useServerFn(bookSessionAppointment);
   const callbackFn = useServerFn(requestSessionCallback);
 
-  const [mode, setMode] = useState<"appointment" | "callback">("appointment");
+  const [mode, setMode] = useState<"appointment" | "callback">(initialMode);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState(defaultName);
@@ -108,7 +114,7 @@ export function PostCompletionBooking({
           You&apos;ll receive a text confirmation if SMS is enabled.
         </p>
         <Button size="lg" onClick={onComplete}>
-          Review your answers
+          View your summary &amp; next steps
         </Button>
       </div>
     );
@@ -116,31 +122,35 @@ export function PostCompletionBooking({
 
   return (
     <div className="w-full space-y-6 text-left">
-      <div className="text-center space-y-2">
-        <CalendarCheck className="w-10 h-10 mx-auto text-accent" />
-        <h2 className="text-2xl font-semibold">What would you like to do next?</h2>
-        <p className="text-muted-foreground">
-          You can book an appointment with your advisor now, or ask them to call you back at a time
-          that suits you.
-        </p>
-      </div>
+      {!compact && (
+        <div className="text-center space-y-2">
+          <CalendarCheck className="w-10 h-10 mx-auto text-accent" />
+          <h2 className="text-2xl font-semibold">What would you like to do next?</h2>
+          <p className="text-muted-foreground">
+            You can book an appointment with your advisor now, or ask them to call you back at a time
+            that suits you.
+          </p>
+        </div>
+      )}
 
-      <div className="grid grid-cols-2 gap-2 max-w-md mx-auto">
-        <button
-          type="button"
-          onClick={() => setMode("appointment")}
-          className={`flex items-center justify-center gap-2 rounded-xl border p-3 text-sm font-medium transition ${mode === "appointment" ? "border-primary bg-primary/5" : "hover:bg-muted/40"}`}
-        >
-          <CalendarCheck className="w-4 h-4" /> Book an appointment
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("callback")}
-          className={`flex items-center justify-center gap-2 rounded-xl border p-3 text-sm font-medium transition ${mode === "callback" ? "border-primary bg-primary/5" : "hover:bg-muted/40"}`}
-        >
-          <PhoneCall className="w-4 h-4" /> Request a call back
-        </button>
-      </div>
+      {!hideModeToggle && (
+        <div className="grid grid-cols-2 gap-2 max-w-md mx-auto">
+          <button
+            type="button"
+            onClick={() => setMode("appointment")}
+            className={`flex items-center justify-center gap-2 rounded-xl border p-3 text-sm font-medium transition ${mode === "appointment" ? "border-primary bg-primary/5" : "hover:bg-muted/40"}`}
+          >
+            <CalendarCheck className="w-4 h-4" /> Book an appointment
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("callback")}
+            className={`flex items-center justify-center gap-2 rounded-xl border p-3 text-sm font-medium transition ${mode === "callback" ? "border-primary bg-primary/5" : "hover:bg-muted/40"}`}
+          >
+            <PhoneCall className="w-4 h-4" /> Request a call back
+          </button>
+        </div>
+      )}
 
       {mode === "appointment" ? (
         <div className="grid md:grid-cols-2 gap-6">

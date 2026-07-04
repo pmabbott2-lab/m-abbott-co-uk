@@ -9,6 +9,7 @@ import {
   sendInterviewCompleteSms,
   sendJourneyMilestoneSms,
 } from "@/lib/sms.server";
+import { canAmend } from "@/lib/admin-access";
 
 // Each customer file (session) can be allocated to at most this many advisors.
 const MAX_ADVISORS_PER_SESSION = 3;
@@ -106,6 +107,52 @@ async function getRolesForUser(userId: string): Promise<string[]> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("user_roles").select("role").eq("user_id", userId);
   return (data ?? []).map((r) => r.role);
+}
+
+/** Advisors may only open customers allocated to them; admins may open any customer. */
+export async function assertStaffCanAccessCustomer(
+  staffUserId: string,
+  customerId: string,
+): Promise<void> {
+  const roles = await getRolesForUser(staffUserId);
+  const isMainAdmin = roles.includes("admin");
+  const isAdvisor = roles.includes("advisor");
+  if (!isMainAdmin && !isAdvisor) throw new Error("Forbidden");
+
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: sessions, error } = await supabaseAdmin
+    .from("interview_sessions")
+    .select("id")
+    .eq("customer_id", customerId)
+    .is("deleted_at", null);
+  if (error) throw new Error(error.message);
+
+  const sessionIds = (sessions ?? []).map((s) => s.id);
+  if (sessionIds.length === 0 && !isMainAdmin) {
+    throw new Error("Customer not found");
+  }
+
+  if (!isMainAdmin && isAdvisor) {
+    let allowed = false;
+    if (sessionIds.length > 0) {
+      const { data: alloc } = await supabaseAdmin
+        .from("session_advisors")
+        .select("session_id")
+        .eq("advisor_id", staffUserId)
+        .in("session_id", sessionIds);
+      if ((alloc ?? []).length > 0) allowed = true;
+      if (!allowed) {
+        const { data: appt } = await supabaseAdmin
+          .from("appointments")
+          .select("id")
+          .eq("advisor_id", staffUserId)
+          .in("session_id", sessionIds)
+          .limit(1);
+        if (appt?.length) allowed = true;
+      }
+    }
+    if (!allowed) throw new Error("This customer is not allocated to you.");
+  }
 }
 
 const WORD_NUMS: Record<string, number> = {
@@ -370,6 +417,110 @@ Return JSON: { "rate": <number, annual %>, "product": "<e.g. '5-year fixed'>", "
   });
 
 
+async function allocateNextCaseRef(
+  supabaseAdmin: Awaited<
+    ReturnType<typeof import("@/integrations/supabase/client.server")>
+  >["supabaseAdmin"],
+): Promise<string> {
+  const { data, error } = await supabaseAdmin.rpc("allocate_case_ref");
+  if (!error && typeof data === "string") return data;
+  if (isMissingCaseRefColumn(error)) throw caseRefMigrationRequiredError();
+
+  const year = new Date().getFullYear();
+  const { count, error: countErr } = await supabaseAdmin
+    .from("interview_sessions")
+    .select("id", { count: "exact", head: true })
+    .not("case_ref", "is", null);
+  if (countErr) {
+    if (isMissingCaseRefColumn(countErr)) throw caseRefMigrationRequiredError();
+    throw new Error(countErr.message);
+  }
+  return `MG-${year}-${String((count ?? 0) + 1).padStart(4, "0")}`;
+}
+
+function isMissingCaseRefColumn(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const msg = (error.message ?? "").toLowerCase();
+  return (
+    error.code === "42703" ||
+    error.code === "PGRST204" ||
+    (msg.includes("case_ref") && msg.includes("does not exist"))
+  );
+}
+
+function caseRefMigrationRequiredError(): Error {
+  return new Error(
+    "Case references are not set up in the database yet. In Supabase SQL Editor, run the file supabase/RUN_CASE_REF_ONLY.sql, then refresh and try again.",
+  );
+}
+
+/** Assigns a case reference when a fact-find progresses to an appointment (idempotent). */
+export async function promoteSessionToCase(sessionId: string): Promise<string> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: session, error: readErr } = await supabaseAdmin
+    .from("interview_sessions")
+    .select("case_ref")
+    .eq("id", sessionId)
+    .maybeSingle();
+  if (readErr) {
+    if (isMissingCaseRefColumn(readErr)) throw caseRefMigrationRequiredError();
+    throw new Error(readErr.message);
+  }
+  if (!session) throw new Error("Session not found");
+  if (session.case_ref) return session.case_ref;
+
+  const caseRef = await allocateNextCaseRef(supabaseAdmin);
+  const { error } = await supabaseAdmin
+    .from("interview_sessions")
+    .update({ case_ref: caseRef, updated_at: new Date().toISOString() })
+    .eq("id", sessionId);
+  if (error) {
+    if (isMissingCaseRefColumn(error)) throw caseRefMigrationRequiredError();
+    throw new Error(error.message);
+  }
+  return caseRef;
+}
+
+export const promoteSessionToCaseAsStaff = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ sessionId: z.string().uuid(), customerId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertStaffCanAccessCustomer(context.userId, data.customerId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: session, error } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("id, customer_id, case_ref")
+      .eq("id", data.sessionId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!session || session.customer_id !== data.customerId) {
+      throw new Error("Session not found for this customer.");
+    }
+    if (session.case_ref) return { caseRef: session.case_ref, alreadyCase: true };
+    const caseRef = await promoteSessionToCase(data.sessionId);
+    return { caseRef, alreadyCase: false };
+  });
+
+/** Creates a new case (session + ref) when booking without an existing fact-find. */
+export async function createCaseSessionForCustomer(
+  customerId: string,
+): Promise<{ id: string; case_ref: string | null }> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const caseRef = await allocateNextCaseRef(supabaseAdmin);
+  const { data, error } = await supabaseAdmin
+    .from("interview_sessions")
+    .insert({ customer_id: customerId, case_ref: caseRef, status: "in_progress" })
+    .select("id, case_ref")
+    .single();
+  if (error) {
+    if (isMissingCaseRefColumn(error)) throw caseRefMigrationRequiredError();
+    throw new Error(error.message);
+  }
+  return data;
+}
+
 export const listMySessions = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -378,15 +529,261 @@ export const listMySessions = createServerFn({ method: "GET" })
       .select("*")
       .order("started_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return data ?? [];
+    return (data ?? []).filter((s) => !(s as { deleted_at?: string | null }).deleted_at);
+  });
+
+export const listMyCases = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: sessions, error } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("id, case_ref, status, started_at, submitted_at, summary")
+      .eq("customer_id", context.userId)
+      .is("deleted_at", null)
+      .not("case_ref", "is", null)
+      .order("started_at", { ascending: false });
+    if (error) throw new Error(error.message);
+
+    const ids = (sessions ?? []).map((s) => s.id);
+    const apptMap = new Map<
+      string,
+      { startsAt: string; advisorName: string; status: string }
+    >();
+    const journeyMap = new Map<string, { completed: number; total: number }>();
+
+    if (ids.length > 0) {
+      const { data: appts } = await supabaseAdmin
+        .from("appointments")
+        .select("session_id, starts_at, status, advisor_id")
+        .in("session_id", ids)
+        .order("starts_at", { ascending: false });
+      const advisorIds = [...new Set((appts ?? []).map((a) => a.advisor_id).filter(Boolean))];
+      const advisorNames = new Map<string, string>();
+      if (advisorIds.length > 0) {
+        const { data: profiles } = await supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, email")
+          .in("id", advisorIds as string[]);
+        for (const p of profiles ?? []) {
+          advisorNames.set(p.id, p.full_name || p.email || "Advisor");
+        }
+      }
+      for (const a of appts ?? []) {
+        if (!a.session_id || apptMap.has(a.session_id)) continue;
+        apptMap.set(a.session_id, {
+          startsAt: a.starts_at,
+          status: a.status,
+          advisorName: advisorNames.get(a.advisor_id ?? "") ?? "Advisor",
+        });
+      }
+
+      const { data: milestones } = await supabaseAdmin
+        .from("customer_journey_milestones")
+        .select("session_id, completed_at")
+        .in("session_id", ids);
+      const total = JOURNEY_MILESTONE_KEYS.length;
+      for (const id of ids) journeyMap.set(id, { completed: 0, total });
+      for (const m of milestones ?? []) {
+        if (!m.completed_at) continue;
+        const cur = journeyMap.get(m.session_id);
+        if (cur) cur.completed += 1;
+      }
+    }
+
+    return (sessions ?? []).map((s) => ({
+      ...s,
+      appointment: apptMap.get(s.id) ?? null,
+      journey: journeyMap.get(s.id) ?? { completed: 0, total: JOURNEY_MILESTONE_KEYS.length },
+    }));
+  });
+
+export const updateCaseRef = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ sessionId: z.string().uuid(), caseRef: z.string().min(3).max(32) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const access = await resolveAdminAccess(context.userId, email);
+    if (!access.isOwner && !access.isSupervisor && !canAmend(access, "customers")) {
+      throw new Error("You do not have permission to amend case references.");
+    }
+
+    const ref = data.caseRef.trim().toUpperCase();
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: existing } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("case_ref")
+      .eq("id", data.sessionId)
+      .maybeSingle();
+    if (!existing?.case_ref) {
+      throw new Error("This record is still a fact-find — a case reference is set when an appointment is booked.");
+    }
+    const { error } = await supabaseAdmin
+      .from("interview_sessions")
+      .update({ case_ref: ref, updated_at: new Date().toISOString() })
+      .eq("id", data.sessionId);
+    if (error) {
+      if (error.code === "23505") throw new Error("That case reference is already in use.");
+      throw new Error(error.message);
+    }
+    return { ok: true };
+  });
+
+export type CustomerHubFactFind = {
+  id: string;
+  status: string;
+  startedAt: string;
+  channel: string | null;
+  assignedAdvisors: AssignedAdvisor[];
+  /** True when a confirmed appointment exists but case_ref was never assigned (legacy data). */
+  hasAppointment: boolean;
+};
+
+export type CustomerHubCase = CustomerHubFactFind & {
+  caseRef: string;
+  appointmentAt: string | null;
+};
+
+export type CustomerHubIntroducer = {
+  id: string;
+  companyName: string | null;
+  companyCode: string | null;
+  slug: string | null;
+} | null;
+
+export const getCustomerHub = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ customerId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertStaffCanAccessCustomer(context.userId, data.customerId);
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: sessions, error: sessErr } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("id, customer_id, status, started_at, case_ref, channel, deleted_at")
+      .eq("customer_id", data.customerId)
+      .is("deleted_at", null)
+      .order("started_at", { ascending: false });
+    if (sessErr) throw new Error(sessErr.message);
+
+    const active = (sessions ?? []).filter((s) => !s.deleted_at);
+    if (active.length === 0) {
+      const { data: profileOnly } = await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .eq("id", data.customerId)
+        .maybeSingle();
+      if (!profileOnly) throw new Error("Customer not found");
+    }
+
+    const sessionIds = active.map((s) => s.id);
+    const allocBySession = new Map<string, AssignedAdvisor[]>();
+    if (sessionIds.length > 0) {
+      const { data: allocs } = await supabaseAdmin
+        .from("session_advisors")
+        .select("session_id, advisor_id")
+        .in("session_id", sessionIds);
+      const advisorIds = [...new Set((allocs ?? []).map((a) => a.advisor_id))];
+      const advisorProfiles = new Map<string, AssignedAdvisor>();
+      if (advisorIds.length > 0) {
+        const { data: aProfiles } = await supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, email")
+          .in("id", advisorIds);
+        for (const p of aProfiles ?? []) advisorProfiles.set(p.id, p);
+      }
+      for (const a of allocs ?? []) {
+        const list = allocBySession.get(a.session_id) ?? [];
+        list.push(advisorProfiles.get(a.advisor_id) ?? { id: a.advisor_id, full_name: null, email: null });
+        allocBySession.set(a.session_id, list);
+      }
+    }
+
+    const apptBySession = new Map<string, string>();
+    if (sessionIds.length > 0) {
+      const { data: appts } = await supabaseAdmin
+        .from("appointments")
+        .select("session_id, starts_at, status")
+        .in("session_id", sessionIds)
+        .eq("status", "confirmed")
+        .order("starts_at", { ascending: false });
+      for (const a of appts ?? []) {
+        if (a.session_id && !apptBySession.has(a.session_id)) {
+          apptBySession.set(a.session_id, a.starts_at);
+        }
+      }
+    }
+
+    let introducer: CustomerHubIntroducer = null;
+    const { resolveIntroducerIdForCustomer } = await import("@/lib/introducer-attribution");
+    const resolvedId = await resolveIntroducerIdForCustomer(
+      supabaseAdmin,
+      data.customerId,
+      sessionIds[0] ?? null,
+    );
+    if (resolvedId) {
+      const { data: intro } = await supabaseAdmin
+        .from("introducers")
+        .select("id, company_name, company_code, slug")
+        .eq("id", resolvedId)
+        .maybeSingle();
+      if (intro) {
+        introducer = {
+          id: intro.id,
+          companyName: intro.company_name,
+          companyCode: (intro as { company_code?: string | null }).company_code ?? null,
+          slug: intro.slug,
+        };
+      }
+    }
+
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name, email, phone")
+      .eq("id", data.customerId)
+      .maybeSingle();
+
+    const factFinds: CustomerHubFactFind[] = [];
+    const cases: CustomerHubCase[] = [];
+    for (const s of active) {
+      const base = {
+        id: s.id,
+        status: s.status,
+        startedAt: s.started_at,
+        channel: s.channel ?? null,
+        assignedAdvisors: allocBySession.get(s.id) ?? [],
+        hasAppointment: apptBySession.has(s.id),
+      };
+      if (s.case_ref) {
+        cases.push({
+          ...base,
+          caseRef: s.case_ref,
+          appointmentAt: apptBySession.get(s.id) ?? null,
+        });
+      } else {
+        factFinds.push(base);
+      }
+    }
+
+    return {
+      customer: profile ?? { id: data.customerId, full_name: null, email: null, phone: null },
+      introducer,
+      factFinds,
+      cases,
+    };
   });
 
 export const createSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
       .from("interview_sessions")
-      .insert({ customer_id: context.userId })
+      .insert({ customer_id: context.userId, status: "in_progress" })
       .select()
       .single();
     if (error) throw new Error(error.message);
@@ -403,6 +800,19 @@ export const getSession = createServerFn({ method: "POST" })
       .eq("id", data.sessionId)
       .single();
     if (error) throw new Error(error.message);
+
+    const deletedAt = (session as { deleted_at?: string | null }).deleted_at;
+    if (deletedAt && session.customer_id !== context.userId) {
+      const email = (context.claims as { email?: string }).email;
+      const { resolveAdminAccess } = await import("@/lib/admin.functions");
+      const access = await resolveAdminAccess(context.userId, email);
+      if (!access.isOwner && !access.isSupervisor) {
+        throw new Error("This fact-find has been deleted.");
+      }
+    }
+    if (deletedAt && session.customer_id === context.userId) {
+      throw new Error("This fact-find has been removed.");
+    }
 
     // Allocation gate (app-layer): the owning customer and the main admin can
     // always view. A regular advisor may only view a fact-find allocated to them
@@ -502,26 +912,56 @@ export const deleteSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    // Authorize: must be advisor OR the owning customer
-    const { data: roleRows } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const isAdvisor = (roleRows ?? []).some((r) => r.role === "advisor");
-    const { data: session, error: sErr } = await context.supabase
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const access = await resolveAdminAccess(context.userId, email);
+    if (!access.isOwner && !access.isSupervisor && !canAmend(access, "customers")) {
+      throw new Error("You do not have permission to delete this record.");
+    }
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: session, error: sErr } = await supabaseAdmin
       .from("interview_sessions")
-      .select("id, customer_id")
+      .select("id, deleted_at, case_ref")
       .eq("id", data.sessionId)
       .maybeSingle();
     if (sErr) throw new Error(sErr.message);
     if (!session) throw new Error("Not found");
-    if (!isAdvisor && session.customer_id !== context.userId) throw new Error("Forbidden");
+    if ((session as { deleted_at?: string | null }).deleted_at) return { ok: true };
+
+    const now = new Date().toISOString();
+    const { error } = await supabaseAdmin
+      .from("interview_sessions")
+      .update({ deleted_at: now, deleted_by: context.userId, updated_at: now })
+      .eq("id", data.sessionId);
+    if (error && isMissingTableError(error)) {
+      throw new Error(
+        "Run the session soft-delete SQL migration to enable customer binning (supabase/migrations/20260704153000_session_soft_delete.sql).",
+      );
+    }
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const restoreSession = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const access = await resolveAdminAccess(context.userId, email);
+    if (!access.isOwner && !access.isSupervisor) {
+      throw new Error("Only the Owner or an Admin Supervisor can restore customers.");
+    }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await supabaseAdmin.from("interview_answers").delete().eq("session_id", data.sessionId);
-    await supabaseAdmin.from("interview_messages").delete().eq("session_id", data.sessionId);
-    await supabaseAdmin.from("advisor_notes").delete().eq("session_id", data.sessionId);
-    const { error } = await supabaseAdmin.from("interview_sessions").delete().eq("id", data.sessionId);
+    const { error } = await supabaseAdmin
+      .from("interview_sessions")
+      .update({ deleted_at: null, deleted_by: null, updated_at: new Date().toISOString() })
+      .eq("id", data.sessionId);
+    if (error && isMissingTableError(error)) {
+      throw new Error("Run the session soft-delete SQL migration to restore customers.");
+    }
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -585,34 +1025,20 @@ export const getMyRole = createServerFn({ method: "GET" })
       .eq("user_id", context.userId);
     let roles = (data ?? []).map((r) => r.role);
 
-    // Zero-SQL bootstrap: any email listed in ADMIN_EMAILS (comma-separated) is
-    // auto-granted the advisor + admin roles the first time they sign in. This
-    // seeds the main admin, who is also a full working advisor and can manage
-    // everyone else (and allocate fact-finds) from inside the app.
     const email = (context.claims as { email?: string }).email?.trim().toLowerCase();
-    const adminEmails = (process.env.ADMIN_EMAILS ?? "")
-      .split(",")
-      .map((e) => e.trim().toLowerCase())
-      .filter(Boolean);
-    if (email && adminEmails.includes(email)) {
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const adminAccess = await resolveAdminAccess(context.userId, email);
+
+    // Keep roles array in sync after owner bootstrap.
+    if (adminAccess.isAdmin && !roles.includes("admin")) roles = [...roles, "admin"];
+    if (adminAccess.isOwner && !roles.includes("advisor")) {
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-      if (!roles.includes("advisor")) {
-        await supabaseAdmin
-          .from("user_roles")
-          .upsert({ user_id: context.userId, role: "advisor" }, { onConflict: "user_id,role" });
-        roles = [...roles, "advisor"];
-      }
-      if (!roles.includes("admin")) {
-        // The 'admin' enum value only exists once the allocation migration has
-        // been applied. Swallow the error so sign-in still works beforehand.
-        const { error } = await supabaseAdmin
-          .from("user_roles")
-          .upsert({ user_id: context.userId, role: "admin" }, { onConflict: "user_id,role" });
-        if (!error) roles = [...roles, "admin"];
-      }
+      await supabaseAdmin
+        .from("user_roles")
+        .upsert({ user_id: context.userId, role: "advisor" }, { onConflict: "user_id,role" });
+      roles = [...roles, "advisor"];
     }
 
-    // Every advisor gets a unique short code (used by the admin to allocate).
     let advisorCode: string | null = null;
     if (roles.includes("advisor")) {
       try {
@@ -624,7 +1050,11 @@ export const getMyRole = createServerFn({ method: "GET" })
 
     return {
       isAdvisor: roles.includes("advisor"),
-      isMainAdmin: roles.includes("admin"),
+      isMainAdmin: adminAccess.isAdmin,
+      isOwner: adminAccess.isOwner,
+      isSupervisor: adminAccess.isSupervisor,
+      adminLevel: adminAccess.adminLevel,
+      adminAccess,
       advisorCode,
       roles,
     };
@@ -917,10 +1347,9 @@ export type AdvisorCustomerRow = {
   status: string;
   startedAt: string;
   channel: "voice" | "text";
-  // Why this customer surfaces for the advisor: an explicit allocation
-  // (session_advisors) or a booked appointment that is tied to this session.
   source: "allocated" | "appointment";
-  caseStatus: CaseStatus | null; // reserved for the future CRM layer
+  caseRef: string | null;
+  caseStatus: CaseStatus | null;
 };
 
 export const listAllSessionsForAdvisor = createServerFn({ method: "GET" })
@@ -977,9 +1406,13 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "GET" })
     const { data: sessions, error } = await sessionsQuery;
     if (error) throw new Error(error.message);
 
+    const activeSessions = (sessions ?? []).filter(
+      (s) => !(s as { deleted_at?: string | null }).deleted_at,
+    );
+
     // Resolve customer + assigned-advisor profile names. Phone is included so
     // the admin can search customers by it (falls back if the column is absent).
-    const customerIds = new Set((sessions ?? []).map((s) => s.customer_id));
+    const customerIds = new Set(activeSessions.map((s) => s.customer_id));
     const advisorIds = new Set(allocations.map((a) => a.advisor_id));
     const profileIds = Array.from(new Set([...customerIds, ...advisorIds]));
     let profiles: Array<AssignedAdvisor & { phone?: string | null }> = [];
@@ -1015,7 +1448,7 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "GET" })
       { last: string | null; next: string | null; attentionClearedAt: string | null }
     >();
     {
-      const sessionIds = (sessions ?? []).map((s) => s.id);
+      const sessionIds = activeSessions.map((s) => s.id);
       if (sessionIds.length > 0) {
         const { data: tracking, error: trackErr } = await supabaseAdmin
           .from("session_contact_tracking")
@@ -1044,7 +1477,7 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "GET" })
     // link) still flag the customer. Degrades to empty pre-migration.
     const callbackBySession = new Map<string, { id: string; window: string | null }>();
     {
-      const sessionList = sessions ?? [];
+      const sessionList = activeSessions;
       const sessionIds = sessionList.map((s) => s.id);
       const customerIds = Array.from(
         new Set(sessionList.map((s) => s.customer_id).filter(Boolean) as string[]),
@@ -1111,7 +1544,7 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "GET" })
       }
     }
 
-    return (sessions ?? []).map((s) => ({
+    return activeSessions.map((s) => ({
       ...s,
       customer: profileMap.get(s.customer_id) ?? null,
       assignedAdvisors: allocBySession.get(s.id) ?? [],
@@ -1232,28 +1665,29 @@ export const listAdvisorCustomers = createServerFn({ method: "GET" })
       status: string;
       started_at: string;
       channel?: string | null;
+      case_ref?: string | null;
+      deleted_at?: string | null;
     };
     let sessions: SessionRow[] = [];
     {
       const withChannel = await supabaseAdmin
         .from("interview_sessions")
-        .select("id, customer_id, status, started_at, channel")
+        .select("id, customer_id, status, started_at, channel, case_ref, deleted_at")
         .in("id", allIds)
         .order("started_at", { ascending: false });
       if (withChannel.error) {
         const { data: basic, error } = await supabaseAdmin
           .from("interview_sessions")
-          .select("id, customer_id, status, started_at")
+          .select("id, customer_id, status, started_at, case_ref, deleted_at")
           .in("id", allIds)
           .order("started_at", { ascending: false });
         if (error) throw new Error(error.message);
         sessions = (basic ?? []).map((s) => ({ ...s, channel: null }));
       } else {
-        // `channel` isn't in the generated types (added by a later migration),
-        // so the typed result is a query-error shape — cast through unknown.
         sessions = (withChannel.data ?? []) as unknown as SessionRow[];
       }
     }
+    sessions = sessions.filter((s) => !s.deleted_at);
 
     // Resolve customer profiles (phone may be absent pre-migration).
     const customerIds = Array.from(new Set(sessions.map((s) => s.customer_id)));
@@ -1282,6 +1716,7 @@ export const listAdvisorCustomers = createServerFn({ method: "GET" })
       startedAt: s.started_at,
       channel: s.channel === "text" ? "text" : "voice",
       source: allocatedIds.has(s.id) ? "allocated" : "appointment",
+      caseRef: s.case_ref ?? null,
       caseStatus: null,
     }));
   });
@@ -1658,9 +2093,17 @@ export type ContactHistoryEntry = {
     | "callback"
     | "sms"
     | "fact_find"
-    | "journey_milestone";
+    | "journey_milestone"
+    | "history_amend"
+    | "finance";
   body: string | null;
   occurredAt: string;
+  /** True when owner amended this contact-log row. */
+  amended?: boolean;
+  /** True when owner soft-deleted this contact-log row. */
+  deleted?: boolean;
+  /** Only contact-log UUIDs are amendable by owner. */
+  amendable?: boolean;
 };
 
 // Candidate string forms a UK number might have been stored as (sms_messages
@@ -1702,8 +2145,12 @@ export const listContactHistory = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<ContactHistoryEntry[]> => {
     const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("advisor")) throw new Error("Forbidden");
+    if (!roles.includes("advisor") && !roles.includes("admin")) throw new Error("Forbidden");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const { canAmendHistory } = await import("@/lib/admin-access");
+    const isOwner = canAmendHistory(await resolveAdminAccess(context.userId, email));
 
     const entries: ContactHistoryEntry[] = [];
 
@@ -1746,20 +2193,44 @@ export const listContactHistory = createServerFn({ method: "POST" })
     }
 
     {
-      const { data: logs, error } = await supabaseAdmin
+      let logs: Array<{
+        id: string;
+        entry_type: string;
+        body: string | null;
+        occurred_at: string;
+        amended_at?: string | null;
+        is_deleted?: boolean;
+      }> | null = null;
+      const withAmend = await supabaseAdmin
         .from("customer_contact_log")
-        .select("id, entry_type, body, occurred_at")
+        .select("id, entry_type, body, occurred_at, amended_at, is_deleted")
         .eq("session_id", data.sessionId);
-      if (error && !isMissingTableError(error)) throw new Error(error.message);
+      if (withAmend.error && isMissingTableError(withAmend.error)) {
+        const basic = await supabaseAdmin
+          .from("customer_contact_log")
+          .select("id, entry_type, body, occurred_at")
+          .eq("session_id", data.sessionId);
+        if (basic.error && !isMissingTableError(basic.error)) throw new Error(basic.error.message);
+        logs = basic.data;
+      } else if (withAmend.error) {
+        throw new Error(withAmend.error.message);
+      } else {
+        logs = withAmend.data;
+      }
       for (const l of logs ?? []) {
         // Call-backs are merged from callback_requests below; skip any legacy
         // 'callback' contact-log rows so they aren't shown twice in History.
         if (l.entry_type === "callback") continue;
+        const deleted = Boolean(l.is_deleted);
+        if (deleted && !isOwner) continue;
         entries.push({
           id: l.id,
           type: l.entry_type as ContactHistoryEntry["type"],
           body: l.body,
           occurredAt: l.occurred_at,
+          amended: Boolean(l.amended_at),
+          deleted,
+          amendable: true,
         });
       }
     }
@@ -1962,6 +2433,129 @@ export const confirmJourneyMilestone = createServerFn({ method: "POST" })
     return { ok: true, completedAt: now };
   });
 
+/** Admin-only: reverse a confirmed journey milestone. Advisors cannot reverse. */
+export const reverseJourneyMilestone = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        sessionId: z.string().uuid(),
+        milestoneKey: z.enum(JOURNEY_MILESTONE_KEYS),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const { canReverseJourney } = await import("@/lib/admin-access");
+    const access = await resolveAdminAccess(context.userId, email);
+    if (!canReverseJourney(access)) {
+      throw new Error("Only an admin can reverse journey milestones.");
+    }
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const label = JOURNEY_MILESTONE_LABELS[data.milestoneKey];
+    const { error } = await supabaseAdmin
+      .from("customer_journey_milestones")
+      .delete()
+      .eq("session_id", data.sessionId)
+      .eq("milestone_key", data.milestoneKey);
+    if (error) {
+      if (isMissingTableError(error)) throw new Error("Run the customer journey migration first.");
+      throw new Error(error.message);
+    }
+
+    await appendContactLog(
+      data.sessionId,
+      context.userId,
+      "journey_milestone",
+      `Journey milestone reversed: ${label}`,
+    );
+    return { ok: true };
+  });
+
+/** Owner-only: amend or soft-delete a contact-log history entry. */
+export const amendContactHistoryEntry = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        entryId: z.string().uuid(),
+        sessionId: z.string().uuid(),
+        body: z.string().min(1).max(2000).optional(),
+        delete: z.boolean().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const { canAmendHistory } = await import("@/lib/admin-access");
+    const access = await resolveAdminAccess(context.userId, email);
+    if (!canAmendHistory(access)) throw new Error("Only the owner can amend history.");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: row, error } = await supabaseAdmin
+      .from("customer_contact_log")
+      .select("id, body, session_id")
+      .eq("id", data.entryId)
+      .eq("session_id", data.sessionId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error("History entry not found (only contact-log entries can be amended).");
+
+    const now = new Date().toISOString();
+    if (data.delete) {
+      const { error: updErr } = await supabaseAdmin
+        .from("customer_contact_log")
+        .update({
+          is_deleted: true,
+          amended_at: now,
+          amended_by: context.userId,
+          original_body: row.body,
+          body: `[Deleted by owner] ${row.body}`,
+        })
+        .eq("id", data.entryId);
+      if (updErr) {
+        if (isMissingTableError(updErr)) {
+          throw new Error("Run the admin/finance migration to enable history amend.");
+        }
+        throw new Error(updErr.message);
+      }
+      await appendContactLog(
+        data.sessionId,
+        context.userId,
+        "history_amend",
+        `Owner deleted history entry: ${row.body.slice(0, 120)}`,
+      );
+      return { ok: true };
+    }
+
+    if (!data.body?.trim()) throw new Error("New body is required.");
+    const { error: updErr } = await supabaseAdmin
+      .from("customer_contact_log")
+      .update({
+        body: data.body.trim(),
+        amended_at: now,
+        amended_by: context.userId,
+        original_body: row.body,
+      })
+      .eq("id", data.entryId);
+    if (updErr) {
+      if (isMissingTableError(updErr)) {
+        throw new Error("Run the admin/finance migration to enable history amend.");
+      }
+      throw new Error(updErr.message);
+    }
+    await appendContactLog(
+      data.sessionId,
+      context.userId,
+      "history_amend",
+      `Owner amended history entry (was: ${row.body.slice(0, 80)})`,
+    );
+    return { ok: true };
+  });
+
 export const listNotes = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
@@ -2116,17 +2710,30 @@ type BinnedIntroducer = {
   deletedAt: string | null;
 };
 
-// List binned (soft-deleted) advisors and introducers for the "Recently
-// deleted" panel. Degrades to empty lists if the deleted_at columns don't exist
-// yet (pre-migration).
+type BinnedCustomer = {
+  sessionId: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  status: string;
+  startedAt: string;
+  deletedAt: string | null;
+};
+
+// List binned (soft-deleted) advisors, introducers, and customer fact-finds for
+// the "Recently deleted" panel. Owner / Admin Supervisor only.
 export const listBinnedStaff = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireAdmin(context.userId);
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const access = await resolveAdminAccess(context.userId, email);
+    if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const binnedAdvisors: BinnedAdvisor[] = [];
     const binnedIntroducers: BinnedIntroducer[] = [];
+    const binnedCustomers: BinnedCustomer[] = [];
 
     // Binned advisors: advisor_profiles with deleted_at set.
     const advRes = await supabaseAdmin
@@ -2192,7 +2799,45 @@ export const listBinnedStaff = createServerFn({ method: "GET" })
       });
     }
 
-    return { advisors: binnedAdvisors, introducers: binnedIntroducers };
+    const sessRes = await supabaseAdmin
+      .from("interview_sessions")
+      .select("id, customer_id, status, started_at, deleted_at")
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false });
+    if (sessRes.error && !isMissingTableError(sessRes.error)) {
+      throw new Error(sessRes.error.message);
+    }
+    const sessRows = (sessRes.data ?? []) as Array<{
+      id: string;
+      customer_id: string;
+      status: string;
+      started_at: string;
+      deleted_at: string | null;
+    }>;
+    const customerIds = Array.from(new Set(sessRows.map((r) => r.customer_id)));
+    const customerProfileMap = new Map<string, { full_name: string | null; email: string | null }>();
+    if (customerIds.length > 0) {
+      const { data: custProfiles } = await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", customerIds);
+      for (const p of custProfiles ?? []) {
+        customerProfileMap.set(p.id, { full_name: p.full_name, email: p.email });
+      }
+    }
+    for (const r of sessRows) {
+      const prof = customerProfileMap.get(r.customer_id);
+      binnedCustomers.push({
+        sessionId: r.id,
+        customerName: prof?.full_name ?? null,
+        customerEmail: prof?.email ?? null,
+        status: r.status,
+        startedAt: r.started_at,
+        deletedAt: r.deleted_at,
+      });
+    }
+
+    return { advisors: binnedAdvisors, introducers: binnedIntroducers, customers: binnedCustomers };
   });
 
 // Admin creates a shareable staff invite. Returns the invite token; the UI

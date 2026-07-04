@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AppShell } from "@/components/AppShell";
+import { TabPageNav } from "@/components/TabPageNav";
 import { createAppointmentAuth, getAvailableSlots, requestCallbackAuth } from "@/lib/booking.functions";
 import { CALLBACK_WINDOW_OPTIONS, CALLBACK_WINDOW_RANGES } from "@/components/PostCompletionBooking";
 import { getReferralSlug } from "@/lib/referral";
@@ -132,6 +133,7 @@ function DirectBookingPage() {
   return (
     <AppShell title="Direct booking">
       <div className="max-w-3xl mx-auto space-y-8">
+        <TabPageNav backTo="/home" backLabel="Home" />
         <div>
           <div className="flex items-center gap-2 font-semibold text-lg">
             <CalendarCheck className="w-5 h-5" />

@@ -24,12 +24,14 @@ import { Route as ApiAvatarTokenRouteImport } from './routes/api/avatar-token'
 import { Route as AuthenticatedIntroducerRouteImport } from './routes/_authenticated/introducer'
 import { Route as AuthenticatedHomeRouteImport } from './routes/_authenticated/home'
 import { Route as AuthenticatedDiaryRouteImport } from './routes/_authenticated/diary'
+import { Route as AuthenticatedCasesRouteImport } from './routes/_authenticated/cases'
 import { Route as AuthenticatedBookingRouteImport } from './routes/_authenticated/booking'
 import { Route as ApiSmsInboundRouteImport } from './routes/api/sms/inbound'
 import { Route as ApiAuthRequestPasswordResetRouteImport } from './routes/api/auth/request-password-reset'
 import { Route as AuthenticatedTextSessionIdRouteImport } from './routes/_authenticated/text.$sessionId'
 import { Route as AuthenticatedSessionsSessionIdRouteImport } from './routes/_authenticated/sessions.$sessionId'
 import { Route as AuthenticatedInterviewSessionIdRouteImport } from './routes/_authenticated/interview.$sessionId'
+import { Route as AuthenticatedCustomersCustomerIdRouteImport } from './routes/_authenticated/customers.$customerId'
 import { Route as AuthenticatedChatSessionIdRouteImport } from './routes/_authenticated/chat.$sessionId'
 
 const RegisterRoute = RegisterRouteImport.update({
@@ -106,6 +108,11 @@ const AuthenticatedDiaryRoute = AuthenticatedDiaryRouteImport.update({
   path: '/diary',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedCasesRoute = AuthenticatedCasesRouteImport.update({
+  id: '/cases',
+  path: '/cases',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedBookingRoute = AuthenticatedBookingRouteImport.update({
   id: '/booking',
   path: '/booking',
@@ -140,6 +147,12 @@ const AuthenticatedInterviewSessionIdRoute =
     path: '/interview/$sessionId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedCustomersCustomerIdRoute =
+  AuthenticatedCustomersCustomerIdRouteImport.update({
+    id: '/customers/$customerId',
+    path: '/customers/$customerId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedChatSessionIdRoute =
   AuthenticatedChatSessionIdRouteImport.update({
     id: '/chat/$sessionId',
@@ -152,6 +165,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRouteWithChildren
   '/register': typeof RegisterRoute
   '/booking': typeof AuthenticatedBookingRoute
+  '/cases': typeof AuthenticatedCasesRoute
   '/diary': typeof AuthenticatedDiaryRoute
   '/home': typeof AuthenticatedHomeRoute
   '/introducer': typeof AuthenticatedIntroducerRoute
@@ -164,6 +178,7 @@ export interface FileRoutesByFullPath {
   '/go/$slug': typeof GoSlugRoute
   '/raf/$code': typeof RafCodeRoute
   '/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
+  '/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
   '/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
@@ -175,6 +190,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRouteWithChildren
   '/register': typeof RegisterRoute
   '/booking': typeof AuthenticatedBookingRoute
+  '/cases': typeof AuthenticatedCasesRoute
   '/diary': typeof AuthenticatedDiaryRoute
   '/home': typeof AuthenticatedHomeRoute
   '/introducer': typeof AuthenticatedIntroducerRoute
@@ -187,6 +203,7 @@ export interface FileRoutesByTo {
   '/go/$slug': typeof GoSlugRoute
   '/raf/$code': typeof RafCodeRoute
   '/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
+  '/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
   '/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
@@ -200,6 +217,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRouteWithChildren
   '/register': typeof RegisterRoute
   '/_authenticated/booking': typeof AuthenticatedBookingRoute
+  '/_authenticated/cases': typeof AuthenticatedCasesRoute
   '/_authenticated/diary': typeof AuthenticatedDiaryRoute
   '/_authenticated/home': typeof AuthenticatedHomeRoute
   '/_authenticated/introducer': typeof AuthenticatedIntroducerRoute
@@ -212,6 +230,7 @@ export interface FileRoutesById {
   '/go/$slug': typeof GoSlugRoute
   '/raf/$code': typeof RafCodeRoute
   '/_authenticated/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
+  '/_authenticated/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/_authenticated/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
   '/_authenticated/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
   '/_authenticated/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
@@ -225,6 +244,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/register'
     | '/booking'
+    | '/cases'
     | '/diary'
     | '/home'
     | '/introducer'
@@ -237,6 +257,7 @@ export interface FileRouteTypes {
     | '/go/$slug'
     | '/raf/$code'
     | '/chat/$sessionId'
+    | '/customers/$customerId'
     | '/interview/$sessionId'
     | '/sessions/$sessionId'
     | '/text/$sessionId'
@@ -248,6 +269,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/register'
     | '/booking'
+    | '/cases'
     | '/diary'
     | '/home'
     | '/introducer'
@@ -260,6 +282,7 @@ export interface FileRouteTypes {
     | '/go/$slug'
     | '/raf/$code'
     | '/chat/$sessionId'
+    | '/customers/$customerId'
     | '/interview/$sessionId'
     | '/sessions/$sessionId'
     | '/text/$sessionId'
@@ -272,6 +295,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/register'
     | '/_authenticated/booking'
+    | '/_authenticated/cases'
     | '/_authenticated/diary'
     | '/_authenticated/home'
     | '/_authenticated/introducer'
@@ -284,6 +308,7 @@ export interface FileRouteTypes {
     | '/go/$slug'
     | '/raf/$code'
     | '/_authenticated/chat/$sessionId'
+    | '/_authenticated/customers/$customerId'
     | '/_authenticated/interview/$sessionId'
     | '/_authenticated/sessions/$sessionId'
     | '/_authenticated/text/$sessionId'
@@ -414,6 +439,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDiaryRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/cases': {
+      id: '/_authenticated/cases'
+      path: '/cases'
+      fullPath: '/cases'
+      preLoaderRoute: typeof AuthenticatedCasesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/booking': {
       id: '/_authenticated/booking'
       path: '/booking'
@@ -456,6 +488,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedInterviewSessionIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/customers/$customerId': {
+      id: '/_authenticated/customers/$customerId'
+      path: '/customers/$customerId'
+      fullPath: '/customers/$customerId'
+      preLoaderRoute: typeof AuthenticatedCustomersCustomerIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/chat/$sessionId': {
       id: '/_authenticated/chat/$sessionId'
       path: '/chat/$sessionId'
@@ -468,10 +507,12 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedBookingRoute: typeof AuthenticatedBookingRoute
+  AuthenticatedCasesRoute: typeof AuthenticatedCasesRoute
   AuthenticatedDiaryRoute: typeof AuthenticatedDiaryRoute
   AuthenticatedHomeRoute: typeof AuthenticatedHomeRoute
   AuthenticatedIntroducerRoute: typeof AuthenticatedIntroducerRoute
   AuthenticatedChatSessionIdRoute: typeof AuthenticatedChatSessionIdRoute
+  AuthenticatedCustomersCustomerIdRoute: typeof AuthenticatedCustomersCustomerIdRoute
   AuthenticatedInterviewSessionIdRoute: typeof AuthenticatedInterviewSessionIdRoute
   AuthenticatedSessionsSessionIdRoute: typeof AuthenticatedSessionsSessionIdRoute
   AuthenticatedTextSessionIdRoute: typeof AuthenticatedTextSessionIdRoute
@@ -479,10 +520,12 @@ interface AuthenticatedRouteRouteChildren {
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedBookingRoute: AuthenticatedBookingRoute,
+  AuthenticatedCasesRoute: AuthenticatedCasesRoute,
   AuthenticatedDiaryRoute: AuthenticatedDiaryRoute,
   AuthenticatedHomeRoute: AuthenticatedHomeRoute,
   AuthenticatedIntroducerRoute: AuthenticatedIntroducerRoute,
   AuthenticatedChatSessionIdRoute: AuthenticatedChatSessionIdRoute,
+  AuthenticatedCustomersCustomerIdRoute: AuthenticatedCustomersCustomerIdRoute,
   AuthenticatedInterviewSessionIdRoute: AuthenticatedInterviewSessionIdRoute,
   AuthenticatedSessionsSessionIdRoute: AuthenticatedSessionsSessionIdRoute,
   AuthenticatedTextSessionIdRoute: AuthenticatedTextSessionIdRoute,

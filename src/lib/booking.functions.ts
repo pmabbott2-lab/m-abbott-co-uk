@@ -10,7 +10,7 @@ import {
   sendSms,
   textChannelInviteMessage,
 } from "@/lib/sms.server";
-import { clearSessionAttention } from "@/lib/sessions.functions";
+import { clearSessionAttention, assertStaffCanAccessCustomer } from "@/lib/sessions.functions";
 
 const SLOT_MINUTES = 30;
 const BOOKING_HORIZON_DAYS = 28;
@@ -37,6 +37,17 @@ async function getPrimaryAdvisorId(): Promise<string> {
   if (error) throw new Error(error.message);
   if (!data) throw new Error("No advisor configured. Add an advisor role in Supabase first.");
   return data.user_id;
+}
+
+async function resolveBookingAdvisorId(staffUserId?: string): Promise<string> {
+  if (!staffUserId) return getPrimaryAdvisorId();
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: roles } = await supabaseAdmin
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", staffUserId);
+  if ((roles ?? []).some((r) => r.role === "advisor")) return staffUserId;
+  return getPrimaryAdvisorId();
 }
 
 // Resolve a display name for the assigned advisor (used in confirmation SMS).
@@ -100,10 +111,15 @@ async function logSms(opts: {
 
 export const getAvailableSlots = createServerFn({ method: "GET" })
   .inputValidator((d: unknown) =>
-    z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).parse(d),
+    z
+      .object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        advisorId: z.string().uuid().optional(),
+      })
+      .parse(d),
   )
   .handler(async ({ data }) => {
-    const advisorId = await getPrimaryAdvisorId();
+    const advisorId = data.advisorId ?? (await getPrimaryAdvisorId());
     await ensureDefaultAvailability(advisorId);
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -158,6 +174,8 @@ const appointmentInput = z.object({
   slug: z.string().min(1).optional(),
   leadId: z.string().uuid().optional(),
   sessionId: z.string().uuid().optional(),
+  customerId: z.string().uuid().optional(),
+  advisorId: z.string().uuid().optional(),
   channel: z.enum(["voice", "text", "direct_booking"]).optional(),
   customerName: z.string().min(2),
   customerPhone: z.string().min(7),
@@ -181,9 +199,9 @@ async function resolveIntroducer(slug?: string) {
 
 async function bookAppointment(
   data: z.infer<typeof appointmentInput>,
-  userId?: string,
+  actingUserId?: string,
 ) {
-  const advisorId = await getPrimaryAdvisorId();
+  const advisorId = data.advisorId ?? (await resolveBookingAdvisorId(actingUserId));
   const startsAt = new Date(data.startsAt);
   const endsAt = new Date(startsAt.getTime() + SLOT_MINUTES * 60 * 1000);
 
@@ -194,12 +212,12 @@ async function bookAppointment(
   let introducerId: string | null = introducer?.id ?? null;
   const leadId: string | null = data.leadId ?? null;
 
-  if (userId) {
+  if (actingUserId) {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: roles } = await supabaseAdmin
       .from("user_roles")
       .select("role")
-      .eq("user_id", userId);
+      .eq("user_id", actingUserId);
     if ((roles ?? []).some((r) => r.role === "introducer")) {
       leadSource = "introducer_portal";
       referralChannel = "manual";
@@ -207,14 +225,14 @@ async function bookAppointment(
         const { data: ownIntro } = await supabaseAdmin
           .from("introducers")
           .select("id")
-          .eq("user_id", userId)
+          .eq("user_id", actingUserId)
           .maybeSingle();
         introducerId = ownIntro?.id ?? null;
       }
     }
   }
 
-  if (introducer && !userId) {
+  if (introducer && !actingUserId) {
     leadSource = "referral_link";
     referralChannel = "direct_booking";
   }
@@ -251,15 +269,39 @@ async function bookAppointment(
     .single();
   if (error) throw new Error(error.message);
 
+  // A fresh appointment (no linked session) opens a new case for the customer.
+  let linkedSessionId = data.sessionId ?? null;
+  const targetCustomerId = data.customerId ?? actingUserId ?? null;
+  if (!linkedSessionId && targetCustomerId) {
+    try {
+      const { createCaseSessionForCustomer } = await import("@/lib/sessions.functions");
+      const newCase = await createCaseSessionForCustomer(targetCustomerId);
+      linkedSessionId = newCase.id;
+      await supabaseAdmin
+        .from("appointments")
+        .update({ session_id: linkedSessionId })
+        .eq("id", appointment.id);
+    } catch (e) {
+      console.error("create case for appointment failed", e);
+    }
+  }
+
   // Auto-allocate: booking a fact-find with an advisor assigns that session to
   // them so it shows up on their dashboard. Swallow duplicate / missing-table
   // errors (the session_advisors table may not exist until the migration runs).
-  if (data.sessionId) {
+  const sessionForAlloc = linkedSessionId ?? data.sessionId;
+  if (sessionForAlloc) {
+    try {
+      const { promoteSessionToCase } = await import("@/lib/sessions.functions");
+      await promoteSessionToCase(sessionForAlloc);
+    } catch (e) {
+      console.error("promote session to case failed", e);
+    }
     try {
       await supabaseAdmin
         .from("session_advisors")
         .upsert(
-          { session_id: data.sessionId, advisor_id: advisorId, assigned_by: userId ?? null },
+          { session_id: sessionForAlloc, advisor_id: advisorId, assigned_by: actingUserId ?? null },
           { onConflict: "session_id,advisor_id" },
         );
     } catch (e) {
@@ -274,6 +316,25 @@ async function bookAppointment(
       .eq("id", leadId);
   }
 
+  let customerIdForIntro = targetCustomerId;
+  if (!customerIdForIntro && sessionForAlloc) {
+    const { data: sess } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("customer_id")
+      .eq("id", sessionForAlloc)
+      .maybeSingle();
+    customerIdForIntro = sess?.customer_id ?? null;
+  }
+  if (customerIdForIntro && introducerId) {
+    const { ensureCustomerIntroducerLink } = await import("@/lib/introducer-attribution");
+    await ensureCustomerIntroducerLink(
+      supabaseAdmin,
+      customerIdForIntro,
+      introducerId,
+      "booking",
+    );
+  }
+
   if (data.sendSms !== false && isTwilioConfigured()) {
     try {
       const advisorName = await getAdvisorName(advisorId);
@@ -281,7 +342,7 @@ async function bookAppointment(
         customerName: data.customerName,
         startsAt,
         advisorName,
-        bookingUrl: data.sessionId ? `${getAppBaseUrl()}/sessions/${data.sessionId}` : undefined,
+        bookingUrl: sessionForAlloc ? `${getAppBaseUrl()}/sessions/${sessionForAlloc}` : undefined,
       });
       const { sid } = await sendSms({ to: data.customerPhone, body: message });
       await logSms({
@@ -298,11 +359,11 @@ async function bookAppointment(
     }
   }
 
-  if (data.sessionId && userId) {
-    await clearSessionAttention(data.sessionId, userId, "appointment_booked");
+  if (sessionForAlloc && actingUserId) {
+    await clearSessionAttention(sessionForAlloc, actingUserId, "appointment_booked");
   }
 
-  return appointment;
+  return { ...appointment, session_id: linkedSessionId ?? appointment.session_id };
 }
 
 export const createAppointment = createServerFn({ method: "POST" })
@@ -349,6 +410,97 @@ export const bookSessionAppointment = createServerFn({ method: "POST" })
         customerEmail: data.customerEmail,
         startsAt: data.startsAt,
         slug: data.slug,
+      },
+      context.userId,
+    );
+  });
+
+export const getStaffBookingAdvisorId = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => ({
+    advisorId: await resolveBookingAdvisorId(context.userId),
+  }));
+
+export const bookCustomerAppointmentAsStaff = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        customerId: z.string().uuid(),
+        sessionId: z.string().uuid().optional(),
+        customerName: z.string().min(2),
+        customerPhone: z.string().min(7),
+        customerEmail: z.string().email().optional().or(z.literal("")),
+        startsAt: z.string().datetime(),
+        notes: z.string().max(500).optional(),
+        sendSms: z.boolean().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertStaffCanAccessCustomer(context.userId, data.customerId);
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    let sessionId = data.sessionId ?? null;
+
+    if (sessionId) {
+      const { data: session, error } = await supabaseAdmin
+        .from("interview_sessions")
+        .select("id, customer_id, case_ref")
+        .eq("id", sessionId)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!session || session.customer_id !== data.customerId) {
+        throw new Error("That fact-find does not belong to this customer.");
+      }
+      if (session.case_ref) {
+        throw new Error("This record is already a case — open it from the cases list.");
+      }
+      const { data: existingAppt } = await supabaseAdmin
+        .from("appointments")
+        .select("id")
+        .eq("session_id", sessionId)
+        .eq("status", "confirmed")
+        .limit(1);
+      if (existingAppt?.length) {
+        throw new Error(
+          "This fact-find already has an appointment — use Create case to assign a case reference.",
+        );
+      }
+    } else {
+      const { data: sessions } = await supabaseAdmin
+        .from("interview_sessions")
+        .select("id")
+        .eq("customer_id", data.customerId)
+        .is("deleted_at", null)
+        .is("case_ref", null)
+        .order("started_at", { ascending: false });
+      const candidateIds = (sessions ?? []).map((s) => s.id);
+      if (candidateIds.length > 0) {
+        const { data: booked } = await supabaseAdmin
+          .from("appointments")
+          .select("session_id")
+          .in("session_id", candidateIds)
+          .eq("status", "confirmed");
+        const bookedSet = new Set((booked ?? []).map((b) => b.session_id));
+        sessionId = candidateIds.find((id) => !bookedSet.has(id)) ?? null;
+      }
+    }
+
+    const advisorId = await resolveBookingAdvisorId(context.userId);
+
+    return bookAppointment(
+      {
+        sessionId: sessionId ?? undefined,
+        customerId: data.customerId,
+        advisorId,
+        channel: "direct_booking",
+        customerName: data.customerName,
+        customerPhone: data.customerPhone,
+        customerEmail: data.customerEmail,
+        startsAt: data.startsAt,
+        notes: data.notes,
+        sendSms: data.sendSms ?? true,
       },
       context.userId,
     );
@@ -414,9 +566,18 @@ export const getSessionBooking = createServerFn({ method: "GET" })
       .select("role")
       .eq("user_id", context.userId);
     const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
-    if (!isStaff) throw new Error("Forbidden");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    // Customers may view booking/call-back status for their own session.
+    if (!isStaff) {
+      const { data: session } = await supabaseAdmin
+        .from("interview_sessions")
+        .select("customer_id")
+        .eq("id", data.sessionId)
+        .maybeSingle();
+      if (!session || session.customer_id !== context.userId) throw new Error("Forbidden");
+    }
 
     type ApptRow = {
       id: string;

@@ -2,6 +2,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { AppShell } from "@/components/AppShell";
+import { TabPageNav } from "@/components/TabPageNav";
 import { listAdvisorAppointments } from "@/lib/booking.functions";
 import { getMyRole } from "@/lib/sessions.functions";
 import { format } from "date-fns";
@@ -37,6 +38,7 @@ function AdvisorDiary() {
 
   return (
     <AppShell title="Diary">
+      <TabPageNav backTo="/home" backLabel="Dashboard" />
       <h2 className="text-2xl font-semibold mb-2">Upcoming appointments</h2>
       <p className="text-sm text-muted-foreground mb-6">
         Bookings from direct booking and introducer portal. The voice fact-find app is unchanged.

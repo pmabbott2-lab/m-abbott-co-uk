@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { TabPageNav } from "@/components/TabPageNav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -136,6 +137,7 @@ function IntroducerPortal() {
   return (
     <AppShell title="Introducer portal">
       <div className="space-y-8">
+        <TabPageNav backTo="/home" backLabel="Home" />
         <div>
           <h2 className="text-2xl font-semibold">Introducer portal</h2>
           <p className="text-muted-foreground text-sm mt-1">
@@ -214,60 +216,71 @@ function IntroducerPortal() {
         <section className="space-y-3">
           <h3 className="font-medium">Your referrals</h3>
           <p className="text-sm text-muted-foreground">
-            Limited view — customer name, journey stage, lead source, advisor and contact dates only.
+            Customer name, contact details, journey stage, lead source, advisor and contact dates.
           </p>
-          <div className="rounded-2xl border bg-card overflow-hidden">
-            {referrals.length === 0 && (
+          <div className="rounded-2xl border bg-card divide-y">
+            {referralsQ.isLoading && (
+              <div className="p-6 text-sm text-muted-foreground">Loading referrals…</div>
+            )}
+            {!referralsQ.isLoading && referrals.length === 0 && (
               <div className="p-6 text-sm text-muted-foreground">No referrals yet.</div>
             )}
-            {referrals.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-muted/40 text-left">
-                      <th className="p-3 font-medium">Customer</th>
-                      <th className="p-3 font-medium">Stage</th>
-                      <th className="p-3 font-medium">Lead source</th>
-                      <th className="p-3 font-medium">Advisor</th>
-                      <th className="p-3 font-medium">Days at stage</th>
-                      <th className="p-3 font-medium">Last contact</th>
-                      <th className="p-3 font-medium" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {referrals.map((r) => (
-                      <tr key={`${r.kind}-${r.id}`}>
-                        <td className="p-3 font-medium">{r.customerName}</td>
-                        <td className="p-3">{r.journeyStage}</td>
-                        <td className="p-3 text-muted-foreground">{r.leadSource}</td>
-                        <td className="p-3">{r.advisorName ?? "—"}</td>
-                        <td className="p-3">{r.daysAtStage}</td>
-                        <td className="p-3 text-muted-foreground">
-                          {r.lastContactDate ? format(new Date(r.lastContactDate), "d MMM yyyy") : "—"}
-                        </td>
-                        <td className="p-3">
-                          {r.leadId && r.journeyStage === "Not started" && (
-                            <div className="flex gap-2">
-                              <Link to="/book/$slug" params={{ slug: profile.slug }} search={{ lead: r.leadId }}>
-                                <Button size="sm" variant="secondary">Book</Button>
-                              </Link>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={sendSms.isPending}
-                                onClick={() => sendSms.mutate(r.leadId!)}
-                              >
-                                <MessageSquare className="w-3.5 h-3.5" />
-                              </Button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {referrals.map((r) => (
+              <div key={`${r.kind}-${r.id}`} className="p-4 sm:p-5 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                  <div className="min-w-0 space-y-2">
+                    <div className="font-semibold text-base">{r.customerName || "Unnamed customer"}</div>
+                    <dl className="grid sm:grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                      {r.customerPhone && (
+                        <>
+                          <dt className="text-muted-foreground">Phone</dt>
+                          <dd>{r.customerPhone}</dd>
+                        </>
+                      )}
+                      {r.customerEmail && (
+                        <>
+                          <dt className="text-muted-foreground">Email</dt>
+                          <dd className="break-all">{r.customerEmail}</dd>
+                        </>
+                      )}
+                      <dt className="text-muted-foreground">Stage</dt>
+                      <dd>{r.journeyStage}</dd>
+                      <dt className="text-muted-foreground">Lead source</dt>
+                      <dd>{r.leadSource}</dd>
+                      <dt className="text-muted-foreground">Advisor</dt>
+                      <dd>{r.advisorName ?? "—"}</dd>
+                      <dt className="text-muted-foreground">Days at stage</dt>
+                      <dd>{r.daysAtStage}</dd>
+                      <dt className="text-muted-foreground">Last contact</dt>
+                      <dd>
+                        {r.lastContactDate
+                          ? format(new Date(r.lastContactDate), "d MMM yyyy")
+                          : "—"}
+                      </dd>
+                    </dl>
+                  </div>
+                  {r.leadId && r.journeyStage === "Not started" && (
+                    <div className="flex flex-wrap gap-2 shrink-0">
+                      <Link to="/book/$slug" params={{ slug: profile.slug }} search={{ lead: r.leadId }}>
+                        <Button size="sm" variant="secondary">
+                          <Calendar className="w-3.5 h-3.5 mr-1.5" />
+                          Book
+                        </Button>
+                      </Link>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={sendSms.isPending}
+                        onClick={() => sendSms.mutate(r.leadId!)}
+                      >
+                        <MessageSquare className="w-3.5 h-3.5 mr-1.5" />
+                        Text link
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
+            ))}
           </div>
         </section>
       </div>

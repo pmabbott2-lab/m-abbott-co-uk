@@ -251,13 +251,15 @@ export const listIntroducerReferrals = createServerFn({ method: "GET" })
       await Promise.all([
         supabaseAdmin
           .from("introducer_leads")
-          .select("id, customer_name, status, lead_source, channel, created_at, appointment_id")
+          .select(
+            "id, customer_name, customer_email, customer_phone, status, lead_source, channel, created_at, appointment_id",
+          )
           .eq("introducer_id", introducer.id)
           .order("created_at", { ascending: false }),
         supabaseAdmin
           .from("appointments")
           .select(
-            "id, status, lead_source, referral_channel, starts_at, customer_name, session_id, advisor_id, created_at",
+            "id, status, lead_source, referral_channel, starts_at, customer_name, customer_email, customer_phone, session_id, advisor_id, created_at",
           )
           .eq("introducer_id", introducer.id)
           .order("starts_at", { ascending: false }),
@@ -329,6 +331,8 @@ export const listIntroducerReferrals = createServerFn({ method: "GET" })
     type IntroducerReferralRow = {
       id: string;
       customerName: string;
+      customerPhone: string | null;
+      customerEmail: string | null;
       journeyStage: string;
       leadSource: string;
       advisorName: string | null;
@@ -363,6 +367,8 @@ export const listIntroducerReferrals = createServerFn({ method: "GET" })
         kind: "lead",
         leadId: lead.id,
         customerName: lead.customer_name,
+        customerPhone: lead.customer_phone ?? null,
+        customerEmail: lead.customer_email ?? null,
         journeyStage: lead.status === "booked" ? "Appointment booked" : "Not started",
         leadSource: leadSourceLabel(lead.lead_source, lead.channel),
         advisorName: null,
@@ -385,6 +391,8 @@ export const listIntroducerReferrals = createServerFn({ method: "GET" })
         kind: "appointment",
         appointmentId: appt.id,
         customerName: appt.customer_name,
+        customerPhone: appt.customer_phone ?? null,
+        customerEmail: appt.customer_email ?? null,
         journeyStage: stage,
         leadSource: leadSourceLabel(appt.lead_source, appt.referral_channel),
         advisorName: appt.advisor_id ? advisorNames.get(appt.advisor_id) ?? null : null,
