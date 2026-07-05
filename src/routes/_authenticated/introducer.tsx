@@ -18,7 +18,9 @@ import {
 import { sendLeadBookingSms } from "@/lib/booking.functions";
 import { referralLinkForSlug } from "@/lib/referral";
 import { format } from "date-fns";
-import { Calendar, Check, Copy, Hash, Link2, MessageSquare, UserPlus } from "lucide-react";
+import { Calendar, Check, Copy, Hash, Link2, MessageSquare, PoundSterling, UserPlus } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MyCommissionStatementPanel } from "@/components/MyCommissionStatementPanel";
 
 export const Route = createFileRoute("/_authenticated/introducer")({
   component: IntroducerPortal,
@@ -136,7 +138,7 @@ function IntroducerPortal() {
 
   return (
     <AppShell title="Introducer portal">
-      <div className="space-y-8">
+      <div className="space-y-6">
         <TabPageNav backTo="/home" backLabel="Home" />
         <div>
           <h2 className="text-2xl font-semibold">Introducer portal</h2>
@@ -146,6 +148,16 @@ function IntroducerPortal() {
           </p>
         </div>
 
+        <Tabs defaultValue="overview">
+          <TabsList className="mb-4">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="commission">
+              <PoundSterling className="w-4 h-4 mr-1.5" />
+              My commission
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="overview" className="space-y-8 mt-0">
         {companyCode && (
           <section className="rounded-2xl border bg-card p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
@@ -283,6 +295,15 @@ function IntroducerPortal() {
             ))}
           </div>
         </section>
+          </TabsContent>
+
+          <TabsContent value="commission" className="mt-0">
+            <MyCommissionStatementPanel
+              title="My introducer commission"
+              description="Commission from posted fees on cases linked to customers you introduced. Pending until marked paid by admin."
+            />
+          </TabsContent>
+        </Tabs>
       </div>
     </AppShell>
   );

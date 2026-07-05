@@ -24,6 +24,8 @@ import { checkIsIntroducer } from "@/lib/introducer.functions";
 import { claimReferral, createReferralLink, textReferralLink, textRafInviteToFriend, getPublicShareBaseUrl, listReferralLinks, listAllReferrals, updateReferralBonusStatus, searchCustomers, listMyReferralActivity, ensureMyReferralLink } from "@/lib/referrals.functions";
 import { getRafCode, clearRafCookie, rafLinkForCode, rafShareMessage } from "@/lib/referral";
 import { CommissionPayoutsPanel } from "@/components/CommissionPayoutsPanel";
+import { MyCommissionStatementPanel } from "@/components/MyCommissionStatementPanel";
+import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -3209,6 +3211,7 @@ function Home() {
     const tabCount =
       2 +
       (isIntroducer ? 1 : 0) +
+      1 +
       (isMainAdmin ? 1 : 0) +
       (showCommissionPayouts ? 1 : 0) +
       (showManage ? 1 : 0) +
@@ -3281,6 +3284,10 @@ function Home() {
                   Introducer
                 </TabsTrigger>
               )}
+              <TabsTrigger value="my-commission">
+                <PoundSterling className="w-4 h-4 mr-1.5" />
+                My commission
+              </TabsTrigger>
               {showCommissionPayouts && (
                 <TabsTrigger value="commission">
                   <PoundSterling className="w-4 h-4 mr-1.5" />
@@ -3439,6 +3446,10 @@ function Home() {
               </div>
             </TabsContent>
           )}
+
+          <TabsContent value="my-commission">
+            <MyCommissionStatementPanel />
+          </TabsContent>
 
           {showCommissionPayouts && (
             <TabsContent value="commission">

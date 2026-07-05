@@ -1,0 +1,214 @@
+/* Mortgage Go — brokerage marketing mockup (FCA-aware structure) */
+:root {
+  --navy: #1a2f4f;
+  --navy-soft: #243d63;
+  --green: #3d9e47;
+  --green-bright: #52b85c;
+  --green-soft: #e8f5ea;
+  --cream: #fafbfc;
+  --ink: #1c2838;
+  --muted: #5c6778;
+  --line: #dde3ea;
+  --white: #ffffff;
+  --warn-bg: #fff8e6;
+  --warn-border: #e8c96a;
+  --max: 1120px;
+  --font: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font);
+  color: var(--ink);
+  background: var(--white);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+img { max-width: 100%; height: auto; display: block; }
+
+a { color: var(--navy-soft); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { color: var(--green); }
+
+.container { max-width: var(--max); margin: 0 auto; padding: 0 1.5rem; }
+
+/* ---- Regulatory top strip ---- */
+.reg-strip {
+  background: var(--navy);
+  color: rgba(255,255,255,0.88);
+  font-size: 0.72rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.reg-strip .container {
+  display: flex; flex-wrap: wrap; gap: 0.35rem 1.25rem; align-items: center;
+}
+.reg-strip strong { color: #fff; font-weight: 600; }
+
+/* ---- Header ---- */
+.site-header {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(255,255,255,0.96);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(8px);
+}
+.header-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; padding: 0.85rem 0;
+}
+.logo-link { display: flex; align-items: center; gap: 0.75rem; text-decoration: none; color: inherit; }
+.logo-link img { height: 52px; width: auto; }
+.logo-text { display: none; }
+@media (min-width: 480px) {
+  .logo-text { display: block; }
+  .logo-text .name { font-size: 1.15rem; font-weight: 800; color: var(--navy); line-height: 1.1; }
+  .logo-text .tag { font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
+}
+
+.nav { display: none; gap: 1.5rem; align-items: center; font-size: 0.92rem; font-weight: 500; }
+.nav a { text-decoration: none; color: var(--muted); }
+.nav a:hover, .nav a.active { color: var(--navy); }
+@media (min-width: 768px) { .nav { display: flex; } }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0.65rem 1.15rem; border-radius: 8px; font-weight: 700; font-size: 0.9rem;
+  text-decoration: none; border: none; cursor: pointer; transition: background 0.15s;
+}
+.btn-primary { background: var(--green); color: #fff; }
+.btn-primary:hover { background: var(--green-bright); color: #fff; }
+.btn-outline { background: transparent; color: var(--navy); border: 1.5px solid var(--line); }
+.btn-outline:hover { border-color: var(--green); color: var(--green); }
+
+/* ---- Hero ---- */
+.hero {
+  padding: 3.5rem 0 3rem;
+  background: linear-gradient(180deg, var(--green-soft) 0%, var(--white) 55%);
+}
+.hero-grid {
+  display: grid; gap: 2.5rem; align-items: center;
+}
+@media (min-width: 900px) { .hero-grid { grid-template-columns: 1.1fr 0.9fr; } }
+
+.eyebrow {
+  display: inline-block; font-size: 0.72rem; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--green); background: var(--white);
+  border: 1px solid var(--line); padding: 0.3rem 0.65rem; border-radius: 999px;
+  margin-bottom: 1rem;
+}
+.hero h1 {
+  font-size: clamp(2rem, 4.5vw, 2.85rem);
+  line-height: 1.12; font-weight: 800; color: var(--navy);
+  letter-spacing: -0.02em;
+}
+.hero h1 em { font-style: normal; color: var(--green); }
+.hero .lead { margin-top: 1rem; font-size: 1.08rem; color: var(--muted); max-width: 34rem; }
+.hero-actions { margin-top: 1.5rem; display: flex; flex-wrap: wrap; gap: 0.75rem; }
+
+.hero-visual {
+  background: var(--white); border: 1px solid var(--line); border-radius: 16px;
+  padding: 1.25rem; box-shadow: 0 12px 40px rgba(26,47,79,0.08);
+}
+.hero-visual img.avatar { border-radius: 12px; width: 100%; aspect-ratio: 1; object-fit: cover; object-position: 50% 15%; }
+.hero-visual .cap { margin-top: 0.75rem; font-size: 0.85rem; color: var(--muted); text-align: center; }
+.hero-visual .cap strong { color: var(--navy); }
+
+/* ---- FCA callout ---- */
+.fca-callout {
+  margin: 2rem 0 0;
+  background: var(--warn-bg); border: 1px solid var(--warn-border);
+  border-radius: 10px; padding: 0.85rem 1rem; font-size: 0.82rem; color: #5a4a20;
+}
+.fca-callout strong { display: block; margin-bottom: 0.25rem; color: #3d3210; }
+
+/* ---- Sections ---- */
+section { padding: 3.5rem 0; }
+section.alt { background: var(--cream); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+
+.section-head { margin-bottom: 2rem; max-width: 40rem; }
+.section-head h2 { font-size: 1.65rem; font-weight: 800; color: var(--navy); }
+.section-head p { margin-top: 0.5rem; color: var(--muted); font-size: 1rem; }
+.section-head .bar {
+  width: 2.5rem; height: 3px; background: var(--green); border-radius: 2px; margin-bottom: 0.75rem;
+}
+
+.card-grid { display: grid; gap: 1rem; }
+@media (min-width: 640px) { .card-grid.cols-2 { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 900px) { .card-grid.cols-3 { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 900px) { .card-grid.cols-4 { grid-template-columns: repeat(4, 1fr); } }
+
+.card {
+  background: var(--white); border: 1px solid var(--line); border-radius: 14px;
+  padding: 1.25rem;
+}
+.card h3 { font-size: 1rem; font-weight: 700; color: var(--navy); margin-bottom: 0.35rem; }
+.card p { font-size: 0.88rem; color: var(--muted); }
+.card .icon {
+  width: 2.25rem; height: 2.25rem; border-radius: 8px;
+  background: var(--navy); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.85rem; font-weight: 800; margin-bottom: 0.65rem;
+}
+.card .icon.green { background: var(--green); }
+
+.steps { display: grid; gap: 1rem; }
+@media (min-width: 768px) { .steps { grid-template-columns: repeat(3, 1fr); } }
+.step {
+  background: var(--navy); color: #fff; border-radius: 14px; padding: 1.25rem;
+}
+.step .num { font-size: 1.75rem; font-weight: 800; color: var(--green-bright); line-height: 1; }
+.step h3 { font-size: 0.95rem; font-weight: 700; margin-top: 0.35rem; }
+.step p { font-size: 0.82rem; color: rgba(255,255,255,0.78); margin-top: 0.35rem; }
+
+/* ---- CTA band ---- */
+.cta-band {
+  background: var(--navy); color: #fff; padding: 2.75rem 0;
+}
+.cta-band .inner {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1.25rem;
+}
+.cta-band h2 { font-size: 1.5rem; font-weight: 800; line-height: 1.2; }
+.cta-band h2 span { color: var(--green-bright); }
+
+/* ---- Footer ---- */
+.site-footer {
+  background: #121f33; color: rgba(255,255,255,0.75);
+  padding: 2.5rem 0 1.5rem; font-size: 0.82rem;
+}
+.footer-grid {
+  display: grid; gap: 2rem;
+}
+@media (min-width: 768px) { .footer-grid { grid-template-columns: 1.4fr 1fr 1fr; } }
+.site-footer h4 { color: #fff; font-size: 0.85rem; font-weight: 700; margin-bottom: 0.65rem; }
+.site-footer ul { list-style: none; }
+.site-footer li { margin-bottom: 0.35rem; }
+.site-footer a { color: rgba(255,255,255,0.72); text-decoration: none; }
+.site-footer a:hover { color: var(--green-bright); }
+
+.reg-block {
+  margin-top: 2rem; padding-top: 1.25rem; border-top: 1px solid rgba(255,255,255,0.12);
+  font-size: 0.75rem; line-height: 1.55; color: rgba(255,255,255,0.55);
+}
+.reg-block p + p { margin-top: 0.65rem; }
+
+/* ---- Page-specific ---- */
+.page-hero {
+  padding: 2.75rem 0 2rem;
+  background: var(--cream); border-bottom: 1px solid var(--line);
+}
+.page-hero h1 { font-size: clamp(1.75rem, 3.5vw, 2.35rem); font-weight: 800; color: var(--navy); }
+.page-hero p { margin-top: 0.65rem; color: var(--muted); max-width: 38rem; }
+
+.disclosure-box {
+  background: var(--white); border: 1px solid var(--line); border-radius: 12px;
+  padding: 1.25rem; font-size: 0.88rem; color: var(--muted);
+}
+.disclosure-box h3 { font-size: 0.95rem; color: var(--navy); margin-bottom: 0.5rem; }
+.disclosure-box ul { margin: 0.5rem 0 0 1.1rem; }
+.disclosure-box li { margin-bottom: 0.35rem; }
+
+.job-card { border-left: 3px solid var(--green); }

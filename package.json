@@ -11,6 +11,11 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "setup": "bash scripts/setup-mac.sh",
+    "start:site": "bash ~/bin/mortgage-hub-stable.sh start",
+    "stop:site": "bash ~/bin/mortgage-hub-stable.sh stop",
+    "refresh:site": "bash ~/bin/mortgage-hub-stable.sh rebuild",
+    "status:site": "bash ~/bin/mortgage-hub-stable.sh status",
+    "install:stable": "bash scripts/install-stable-site.sh",
     "set-openai-key": "bash scripts/set-openai-key.sh",
     "bootstrap:supabase": "bash scripts/bootstrap-supabase.sh",
     "verify:supabase": "node scripts/verify-supabase-env.mjs"

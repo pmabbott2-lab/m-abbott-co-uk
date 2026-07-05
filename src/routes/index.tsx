@@ -39,6 +39,16 @@ function Landing() {
       return;
     }
 
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      setChecking(false);
+    };
+
+    // Never leave visitors on a blank screen if auth check hangs (e.g. slow network).
+    const timeout = window.setTimeout(finish, 4000);
+
     // Email confirmation / magic links may land here with the login tokens in
     // the URL. Supabase parses them asynchronously and fires SIGNED_IN — forward
     // the user into the app the moment a session exists.
@@ -46,15 +56,27 @@ function Landing() {
       if (session) navigate({ to: "/home" });
     });
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/home" });
-      else setChecking(false);
-    });
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (data.session) navigate({ to: "/home" });
+        else finish();
+      })
+      .catch(() => finish());
 
-    return () => subscription.unsubscribe();
+    return () => {
+      window.clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, [navigate]);
 
-  if (checking) return <div className="min-h-screen" />;
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">Loading Mortgage Hub…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">

@@ -702,6 +702,148 @@ export async function ensureRafCommissionLedgerEntry(
   }
 }
 
+type RawCommissionLedgerRow = {
+  id: string;
+  session_id: string | null;
+  fee_type: string | null;
+  amount_pence: number;
+  commission_pct: number | null;
+  beneficiary_user_id: string | null;
+  beneficiary_role: string | null;
+  referral_id: string | null;
+  payout_status: string | null;
+  payout_note: string | null;
+  payout_at: string | null;
+  created_at: string;
+  note?: string | null;
+};
+
+async function enrichCommissionLedgerRows(
+  supabaseAdmin: Awaited<
+    ReturnType<typeof import("@/integrations/supabase/client.server")>
+  >["supabaseAdmin"],
+  rows: RawCommissionLedgerRow[],
+): Promise<CommissionPayoutRow[]> {
+  const userIds = new Set<string>();
+  const sessionIds = new Set<string>();
+  const referralIds = new Set<string>();
+  for (const r of rows) {
+    if (r.beneficiary_user_id) userIds.add(r.beneficiary_user_id);
+    if (r.session_id) sessionIds.add(r.session_id);
+    if (r.referral_id) referralIds.add(r.referral_id);
+  }
+
+  const profileMap = new Map<string, string>();
+  if (userIds.size > 0) {
+    const { data: profiles } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", Array.from(userIds));
+    for (const p of profiles ?? []) {
+      profileMap.set(p.id, p.full_name || p.email || "Unknown");
+    }
+  }
+
+  const caseRefMap = new Map<string, string>();
+  if (sessionIds.size > 0) {
+    const { data: sessions } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("id, case_ref")
+      .in("id", Array.from(sessionIds));
+    for (const s of sessions ?? []) {
+      if (s.case_ref) caseRefMap.set(s.id, s.case_ref);
+    }
+  }
+
+  const referralMap = new Map<string, string>();
+  if (referralIds.size > 0) {
+    const { data: refs } = await supabaseAdmin
+      .from("referrals")
+      .select("id, referred_email")
+      .in("id", Array.from(referralIds));
+    for (const ref of refs ?? []) {
+      referralMap.set(ref.id, ref.referred_email ?? "Friend");
+    }
+  }
+
+  return rows.map((r) => {
+    const role = r.beneficiary_role ?? "advisor";
+    let beneficiaryName =
+      (r.beneficiary_user_id && profileMap.get(r.beneficiary_user_id)) || "";
+    if (!beneficiaryName && role === "referrer" && r.note) {
+      const match = String(r.note).match(/referrer ([^·]+)/i);
+      beneficiaryName = match?.[1]?.trim() ?? "RAF referrer";
+    }
+    if (!beneficiaryName) beneficiaryName = BENEFICIARY_ROLE_LABELS[role] ?? role;
+
+    return {
+      id: r.id,
+      sessionId: r.session_id,
+      caseRef: r.session_id ? caseRefMap.get(r.session_id) ?? null : null,
+      feeType: r.fee_type,
+      amountPence: r.amount_pence,
+      commissionPct: r.commission_pct != null ? Number(r.commission_pct) : null,
+      beneficiaryRole: role,
+      beneficiaryUserId: r.beneficiary_user_id,
+      beneficiaryName,
+      referralId: r.referral_id,
+      referredFriendLabel: r.referral_id ? referralMap.get(r.referral_id) ?? null : null,
+      payoutStatus: (r.payout_status as PayoutStatus) ?? "pending",
+      payoutNote: r.payout_note ?? null,
+      payoutAt: r.payout_at ?? null,
+      createdAt: r.created_at,
+    };
+  });
+}
+
+/** Read-only commission statement for the signed-in user (advisor, introducer, or RAF referrer). */
+export const listMyCommissionStatement = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        payoutStatus: z.enum(["pending", "paid", "rejected"]).optional(),
+      })
+      .parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: eligibleRefs } = await supabaseAdmin
+      .from("referrals")
+      .select("id")
+      .eq("referrer_user_id", context.userId)
+      .eq("bonus_status", "eligible")
+      .limit(100);
+    for (const r of eligibleRefs ?? []) {
+      await ensureRafCommissionLedgerEntry(r.id, context.userId);
+    }
+
+    let query = supabaseAdmin
+      .from("finance_ledger")
+      .select(
+        "id, session_id, fee_type, amount_pence, commission_pct, beneficiary_user_id, beneficiary_role, referral_id, payout_status, payout_note, payout_at, created_at, note",
+      )
+      .eq("kind", "commission")
+      .eq("beneficiary_user_id", context.userId)
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    if (data.payoutStatus) query = query.eq("payout_status", data.payoutStatus);
+
+    const { data: rows, error } = await query;
+    if (error) {
+      if (isMissingTable(error)) return { rows: [] as CommissionPayoutRow[], migrationRequired: true };
+      throw new Error(error.message);
+    }
+
+    const enriched = await enrichCommissionLedgerRows(
+      supabaseAdmin,
+      (rows ?? []) as RawCommissionLedgerRow[],
+    );
+    return { rows: enriched, migrationRequired: false };
+  });
+
 export const listCommissionPayouts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
@@ -749,76 +891,10 @@ export const listCommissionPayouts = createServerFn({ method: "GET" })
       throw new Error(error.message);
     }
 
-    const userIds = new Set<string>();
-    const sessionIds = new Set<string>();
-    const referralIds = new Set<string>();
-    for (const r of rows ?? []) {
-      if (r.beneficiary_user_id) userIds.add(r.beneficiary_user_id);
-      if (r.session_id) sessionIds.add(r.session_id);
-      if (r.referral_id) referralIds.add(r.referral_id);
-    }
-
-    const profileMap = new Map<string, string>();
-    if (userIds.size > 0) {
-      const { data: profiles } = await supabaseAdmin
-        .from("profiles")
-        .select("id, full_name, email")
-        .in("id", Array.from(userIds));
-      for (const p of profiles ?? []) {
-        profileMap.set(p.id, p.full_name || p.email || "Unknown");
-      }
-    }
-
-    const caseRefMap = new Map<string, string>();
-    if (sessionIds.size > 0) {
-      const { data: sessions } = await supabaseAdmin
-        .from("interview_sessions")
-        .select("id, case_ref")
-        .in("id", Array.from(sessionIds));
-      for (const s of sessions ?? []) {
-        if (s.case_ref) caseRefMap.set(s.id, s.case_ref);
-      }
-    }
-
-    const referralMap = new Map<string, string>();
-    if (referralIds.size > 0) {
-      const { data: refs } = await supabaseAdmin
-        .from("referrals")
-        .select("id, referred_email")
-        .in("id", Array.from(referralIds));
-      for (const ref of refs ?? []) {
-        referralMap.set(ref.id, ref.referred_email ?? "Friend");
-      }
-    }
-
-    const enriched: CommissionPayoutRow[] = (rows ?? []).map((r) => {
-      const role = r.beneficiary_role ?? "advisor";
-      let beneficiaryName =
-        (r.beneficiary_user_id && profileMap.get(r.beneficiary_user_id)) || "";
-      if (!beneficiaryName && role === "referrer" && r.note) {
-        const match = String(r.note).match(/referrer ([^·]+)/i);
-        beneficiaryName = match?.[1]?.trim() ?? "RAF referrer";
-      }
-      if (!beneficiaryName) beneficiaryName = BENEFICIARY_ROLE_LABELS[role] ?? role;
-
-      return {
-        id: r.id,
-        sessionId: r.session_id,
-        caseRef: r.session_id ? caseRefMap.get(r.session_id) ?? null : null,
-        feeType: r.fee_type,
-        amountPence: r.amount_pence,
-        commissionPct: r.commission_pct != null ? Number(r.commission_pct) : null,
-        beneficiaryRole: role,
-        beneficiaryUserId: r.beneficiary_user_id,
-        beneficiaryName,
-        referralId: r.referral_id,
-        referredFriendLabel: r.referral_id ? referralMap.get(r.referral_id) ?? null : null,
-        payoutStatus: (r.payout_status as PayoutStatus) ?? "pending",
-        payoutNote: r.payout_note ?? null,
-        payoutAt: r.payout_at ?? null,
-        createdAt: r.created_at,
-      };
-    });
+    const enriched = await enrichCommissionLedgerRows(
+      supabaseAdmin,
+      (rows ?? []) as RawCommissionLedgerRow[],
+    );
 
     return { rows: enriched, migrationRequired: false };
   });
