@@ -10,6 +10,7 @@ import {
   sendJourneyMilestoneSms,
 } from "@/lib/sms.server";
 import { canAmend } from "@/lib/admin-access";
+import type { OwnerCustomerExportRow } from "@/lib/report-export.types";
 
 // Each customer file (session) can be allocated to at most this many advisors.
 const MAX_ADVISORS_PER_SESSION = 3;
@@ -3088,6 +3089,191 @@ export const getStaffInvite = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<ResolvedInvite> => {
     const { resolved } = await resolveInviteByToken(data.token);
     return resolved;
+  });
+
+/** Owner-only master customer report with fees and commission totals. */
+export const exportOwnerCustomerReport = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const access = await resolveAdminAccess(context.userId, email);
+    if (!access.isOwner) throw new Error("Owner only");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const customerIdSet = new Set<string>();
+    const { data: roleRows } = await supabaseAdmin.from("user_roles").select("user_id").eq("role", "customer");
+    for (const r of roleRows ?? []) customerIdSet.add(r.user_id);
+
+    const { data: sessions, error: sessErr } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("id, customer_id, status, case_ref, started_at, deleted_at")
+      .is("deleted_at", null)
+      .order("started_at", { ascending: false });
+    if (sessErr) throw new Error(sessErr.message);
+
+    const sessionsByCustomer = new Map<string, NonNullable<typeof sessions>>();
+    const sessionToCustomer = new Map<string, string>();
+    for (const s of sessions ?? []) {
+      if (!s.customer_id) continue;
+      customerIdSet.add(s.customer_id);
+      sessionToCustomer.set(s.id, s.customer_id);
+      const list = sessionsByCustomer.get(s.customer_id) ?? [];
+      list.push(s);
+      sessionsByCustomer.set(s.customer_id, list);
+    }
+
+    const customerIds = [...customerIdSet];
+    if (customerIds.length === 0) return { rows: [] as OwnerCustomerExportRow[] };
+
+    let profiles: Array<{
+      id: string;
+      full_name: string | null;
+      email: string | null;
+      phone: string | null;
+      address?: string | null;
+    }> = [];
+    {
+      const withAddress = await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, email, phone, address")
+        .in("id", customerIds);
+      if (withAddress.error && isMissingTableError(withAddress.error)) {
+        const { data: basic } = await supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, email, phone")
+          .in("id", customerIds);
+        profiles = (basic ?? []).map((p) => ({ ...p, address: null }));
+      } else {
+        if (withAddress.error) throw new Error(withAddress.error.message);
+        profiles = withAddress.data ?? [];
+      }
+    }
+    const profileMap = new Map(profiles.map((p) => [p.id, p]));
+
+    const introNameByCustomer = new Map<string, string>();
+    {
+      const { data: links } = await supabaseAdmin
+        .from("customer_introducer_links")
+        .select("customer_id, introducer_id");
+      const introIds = [...new Set((links ?? []).map((l) => l.introducer_id))];
+      const introNameById = new Map<string, string>();
+      if (introIds.length > 0) {
+        const { data: intros } = await supabaseAdmin
+          .from("introducers")
+          .select("id, company_name")
+          .in("id", introIds);
+        for (const i of intros ?? []) introNameById.set(i.id, i.company_name ?? "Introducer");
+      }
+      for (const l of links ?? []) {
+        introNameByCustomer.set(l.customer_id, introNameById.get(l.introducer_id) ?? "Introducer");
+      }
+    }
+
+    const advisorNamesBySession = new Map<string, string[]>();
+    const sessionIds = (sessions ?? []).map((s) => s.id);
+    if (sessionIds.length > 0) {
+      const { data: allocs } = await supabaseAdmin
+        .from("session_advisors")
+        .select("session_id, advisor_id")
+        .in("session_id", sessionIds);
+      const advisorIds = [...new Set((allocs ?? []).map((a) => a.advisor_id))];
+      const advisorNameById = new Map<string, string>();
+      if (advisorIds.length > 0) {
+        const { data: aProfiles } = await supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, email")
+          .in("id", advisorIds);
+        for (const p of aProfiles ?? []) advisorNameById.set(p.id, p.full_name || p.email || "Advisor");
+      }
+      for (const a of allocs ?? []) {
+        const list = advisorNamesBySession.get(a.session_id) ?? [];
+        const name = advisorNameById.get(a.advisor_id);
+        if (name && !list.includes(name)) list.push(name);
+        advisorNamesBySession.set(a.session_id, list);
+      }
+    }
+
+    const feesByCustomer = new Map<string, number>();
+    const advisorCommByCustomer = new Map<string, number>();
+    const introCommByCustomer = new Map<string, number>();
+    const pendingCommByCustomer = new Map<string, number>();
+    const paidCommByCustomer = new Map<string, number>();
+
+    if (sessionIds.length > 0) {
+      const { data: ledger, error: ledErr } = await supabaseAdmin
+        .from("finance_ledger")
+        .select("session_id, kind, amount_pence, beneficiary_role, payout_status, is_reversal")
+        .in("session_id", sessionIds);
+      if (ledErr && !isMissingTableError(ledErr)) throw new Error(ledErr.message);
+
+      for (const row of ledger ?? []) {
+        if (!row.session_id) continue;
+        const cid = sessionToCustomer.get(row.session_id);
+        if (!cid) continue;
+        const amt = Number(row.amount_pence) || 0;
+        const reversal = Boolean(row.is_reversal) || row.kind === "delete" || row.kind === "amend";
+        const signed = reversal ? -Math.abs(amt) : amt;
+
+        if (row.kind === "post") {
+          feesByCustomer.set(cid, (feesByCustomer.get(cid) ?? 0) + signed);
+        }
+        if (row.kind === "commission") {
+          const role = row.beneficiary_role ?? "";
+          if (role === "advisor") {
+            advisorCommByCustomer.set(cid, (advisorCommByCustomer.get(cid) ?? 0) + signed);
+          } else if (role === "introducer") {
+            introCommByCustomer.set(cid, (introCommByCustomer.get(cid) ?? 0) + signed);
+          }
+          if (row.payout_status === "paid") {
+            paidCommByCustomer.set(cid, (paidCommByCustomer.get(cid) ?? 0) + signed);
+          } else if (row.payout_status === "pending") {
+            pendingCommByCustomer.set(cid, (pendingCommByCustomer.get(cid) ?? 0) + signed);
+          }
+        }
+      }
+    }
+
+    const gbp = (pence: number) => (pence / 100).toFixed(2);
+
+    const rows: OwnerCustomerExportRow[] = customerIds
+      .map((customerId) => {
+        const profile = profileMap.get(customerId);
+        const custSessions = sessionsByCustomer.get(customerId) ?? [];
+        const caseRefs = custSessions
+          .map((s) => s.case_ref)
+          .filter(Boolean)
+          .join(", ");
+        const caseCount = custSessions.filter((s) => s.case_ref).length;
+        const advisorSet = new Set<string>();
+        for (const s of custSessions) {
+          for (const name of advisorNamesBySession.get(s.id) ?? []) advisorSet.add(name);
+        }
+        const latest = custSessions[0];
+
+        return {
+          customerId,
+          fullName: profile?.full_name ?? "",
+          email: profile?.email ?? "",
+          phone: profile?.phone ?? "",
+          address: profile?.address ?? "",
+          introducer: introNameByCustomer.get(customerId) ?? "",
+          caseRefs,
+          caseCount,
+          factFindCount: custSessions.length,
+          latestStatus: latest?.status ?? "",
+          assignedAdvisors: [...advisorSet].join(", "),
+          totalFeesGbp: gbp(feesByCustomer.get(customerId) ?? 0),
+          advisorCommissionGbp: gbp(advisorCommByCustomer.get(customerId) ?? 0),
+          introducerCommissionGbp: gbp(introCommByCustomer.get(customerId) ?? 0),
+          pendingCommissionGbp: gbp(pendingCommByCustomer.get(customerId) ?? 0),
+          paidCommissionGbp: gbp(paidCommByCustomer.get(customerId) ?? 0),
+        };
+      })
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+
+    return { rows };
   });
 
 // Consume an invite after the new user has signed up: grant the proper staff

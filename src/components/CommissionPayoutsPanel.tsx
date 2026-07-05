@@ -11,7 +11,9 @@ import {
   type CommissionPayoutRow,
 } from "@/lib/finance.functions";
 import { Button } from "@/components/ui/button";
-import { ResponsiveTableWrap } from "@/components/ResponsiveTableWrap";
+import { ReportExportBox } from "@/components/ReportExportBox";
+import { ReportTableScroll } from "@/components/ReportTableScroll";
+import { commissionRowsToSheet } from "@/lib/report-mappers";
 import { PoundSterling } from "lucide-react";
 import { toast } from "sonner";
 
@@ -38,17 +40,24 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
       }),
   });
 
+  const allExportQ = useQuery({
+    queryKey: ["commission-export-all"],
+    queryFn: () => listFn({ data: {} }),
+  });
+
   const update = useMutation({
     mutationFn: (vars: { ledgerId: string; payoutStatus: PayoutStatus }) =>
       updateFn({ data: vars }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["commission-payouts"] });
+      qc.invalidateQueries({ queryKey: ["commission-export-all"] });
       toast.success("Payout status updated");
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not update"),
   });
 
   const rows = payoutsQ.data?.rows ?? [];
+  const exportSheet = commissionRowsToSheet(allExportQ.data?.rows ?? []);
   const totals = rows.reduce(
     (acc, r) => {
       acc[r.payoutStatus] = (acc[r.payoutStatus] ?? 0) + r.amountPence;
@@ -67,7 +76,8 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
+      <div className="space-y-4 min-w-0">
       <div>
         <h3 className="font-semibold text-lg flex items-center gap-2">
           <PoundSterling className="w-5 h-5" />
@@ -128,7 +138,7 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
         </p>
       )}
 
-      <ResponsiveTableWrap>
+      <ReportTableScroll visibleRows={10}>
         {payoutsQ.isLoading && (
           <div className="p-6 text-sm text-muted-foreground">Loading commission…</div>
         )}
@@ -142,12 +152,12 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="p-3 font-medium">When</th>
-                <th className="p-3 font-medium">Type</th>
-                <th className="p-3 font-medium">Payee</th>
-                <th className="p-3 font-medium">Case / context</th>
-                <th className="p-3 font-medium text-right">Amount</th>
-                <th className="p-3 font-medium">Status</th>
+                <th className="p-3 font-medium sticky top-0 bg-muted/40">When</th>
+                <th className="p-3 font-medium sticky top-0 bg-muted/40">Type</th>
+                <th className="p-3 font-medium sticky top-0 bg-muted/40">Payee</th>
+                <th className="p-3 font-medium sticky top-0 bg-muted/40">Case / context</th>
+                <th className="p-3 font-medium text-right sticky top-0 bg-muted/40">Amount</th>
+                <th className="p-3 font-medium sticky top-0 bg-muted/40">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -163,7 +173,16 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
             </tbody>
           </table>
         )}
-      </ResponsiveTableWrap>
+      </ReportTableScroll>
+      </div>
+      <div className="self-start pt-1">
+        <ReportExportBox
+          filename={`commission-all-${new Date().toISOString().slice(0, 10)}`}
+          label="Reports"
+          sheets={[exportSheet]}
+          pdfTitle="All commission"
+        />
+      </div>
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { listMySessions, createSession, getMyRole, listAllSessionsForAdvisor, deleteSession, restoreSession, listUsersWithRoles, setAdvisorRole, setIntroducerRole, listAdvisors, listAdvisorCustomers, allocateSession, unallocateSession, bulkAllocateSessions, softDeleteAdvisor, restoreAdvisor, softDeleteIntroducer, restoreIntroducer, listBinnedStaff, createStaffInvite, listStaffInvites, revokeStaffInvite, listMyCases } from "@/lib/sessions.functions";
 import { listAdmins, setAdminLevel, setAdminPermissions, listUsersForAdminGrant } from "@/lib/admin.functions";
-import { listFinanceLedger, setCommissionRate, getCommissionRate, getRafBonusAmount, listCommissionStaff, listCommissionRateHistory, FEE_TYPE_LABELS, RAF_BONUS_POUNDS } from "@/lib/finance.functions";
+import { listFinanceLedger, setCommissionRate, getCommissionRate, getRafBonusAmount, listCommissionStaff, listCommissionRateHistory, listCommissionPayouts, FEE_TYPE_LABELS, RAF_BONUS_POUNDS } from "@/lib/finance.functions";
 import {
   ADMIN_LEVEL_LABELS,
   DEFAULT_GENERAL_PERMISSIONS,
@@ -29,6 +29,10 @@ import { StaffCustomerBookingCard } from "@/components/StaffCustomerBookingCard"
 import { AdvisorViewBanner } from "@/components/AdvisorViewBanner";
 import { ManageListControls, ManageListScroll, type ManageListSort } from "@/components/ManageListControls";
 import { TestAccountsCard } from "@/components/TestAccountsCard";
+import { ReportExportBox } from "@/components/ReportExportBox";
+import { ReportTableScroll } from "@/components/ReportTableScroll";
+import { OwnerCustomerExportBox } from "@/components/OwnerCustomerExportBox";
+import { commissionRowsToSheet, ledgerRowsToSheet } from "@/lib/report-mappers";
 import { getAdvisorView } from "@/lib/advisor-view";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -56,7 +60,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Mic, MessageSquare, FileText, ArrowRight, Trash2, RotateCcw, ShieldCheck, ShieldOff, CalendarCheck, CalendarDays, Link2, UserPlus, UserMinus, Users, UserCog, Search, Hash, KeyRound, Copy, Check, Clock, Mail, Gift, Send, Phone, Briefcase, ChevronRight, PhoneCall, Inbox, PoundSterling } from "lucide-react";
+import { Mic, MessageSquare, FileText, ArrowRight, Trash2, RotateCcw, ShieldCheck, ShieldOff, CalendarCheck, CalendarDays, Link2, UserPlus, UserMinus, Users, UserCog, Search, Hash, KeyRound, Copy, Check, Clock, Mail, Gift, Send, Phone, Briefcase, ChevronRight, PhoneCall, Inbox, PoundSterling, Eye } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -455,7 +459,12 @@ function OwnerFinanceReport() {
   const getRateFn = useServerFn(getCommissionRate);
   const historyFn = useServerFn(listCommissionRateHistory);
   const rafBonusFn = useServerFn(getRafBonusAmount);
+  const commissionExportFn = useServerFn(listCommissionPayouts);
   const ledgerQ = useQuery({ queryKey: ["finance-ledger"], queryFn: () => ledgerFn() });
+  const commissionExportQ = useQuery({
+    queryKey: ["finance-export-commission"],
+    queryFn: () => commissionExportFn({ data: {} }),
+  });
   const rafBonusQ = useQuery({ queryKey: ["raf-bonus-amount"], queryFn: () => rafBonusFn() });
   const [rateRole, setRateRole] = useState<"advisor" | "introducer">("advisor");
   const [rateUserId, setRateUserId] = useState("");
@@ -550,6 +559,15 @@ function OwnerFinanceReport() {
   const staff = staffQ.data ?? [];
   const rafBonusPounds =
     rafBonusQ.data?.amountPence != null ? rafBonusQ.data.amountPence / 100 : RAF_BONUS_POUNDS;
+  const exportSheets = [
+    ledgerRowsToSheet(rows),
+    commissionRowsToSheet(commissionExportQ.data?.rows ?? []),
+  ];
+  const exportPdfSections = exportSheets.map((s) => ({
+    title: s.name,
+    headers: s.headers,
+    rows: s.rows,
+  }));
 
   if (ledgerQ.data?.migrationRequired) {
     return (
@@ -560,7 +578,8 @@ function OwnerFinanceReport() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-4">
+      <div className="space-y-6 min-w-0">
     <div className="rounded-2xl border bg-card p-6 space-y-4">
       <div>
         <h3 className="font-semibold text-lg">Commission rates</h3>
@@ -658,16 +677,18 @@ function OwnerFinanceReport() {
       {rateUserId && (historyQ.data ?? []).length > 0 && (
         <div className="rounded-lg border p-4 space-y-2">
           <h4 className="text-sm font-medium">Rate change history</h4>
-          <ul className="text-xs space-y-1.5 text-muted-foreground">
-            {(historyQ.data ?? []).map((h, i) => (
-              <li key={i}>
-                {format(new Date(h.created_at), "d MMM yyyy HH:mm")} ·{" "}
-                {FEE_TYPE_LABELS[h.fee_type as keyof typeof FEE_TYPE_LABELS] ?? h.fee_type}:{" "}
-                {h.pct_from != null ? `${h.pct_from}% → ` : "new "}
-                {h.pct_to}%
-              </li>
-            ))}
-          </ul>
+          <ReportTableScroll visibleRows={10}>
+            <ul className="text-xs space-y-1.5 text-muted-foreground p-1">
+              {(historyQ.data ?? []).map((h, i) => (
+                <li key={i}>
+                  {format(new Date(h.created_at), "d MMM yyyy HH:mm")} ·{" "}
+                  {FEE_TYPE_LABELS[h.fee_type as keyof typeof FEE_TYPE_LABELS] ?? h.fee_type}:{" "}
+                  {h.pct_from != null ? `${h.pct_from}% → ` : "new "}
+                  {h.pct_to}%
+                </li>
+              ))}
+            </ul>
+          </ReportTableScroll>
         </div>
       )}
     </div>
@@ -692,15 +713,15 @@ function OwnerFinanceReport() {
       {rows.length === 0 && !ledgerQ.isLoading && (
         <p className="text-sm text-muted-foreground">No finance transactions yet.</p>
       )}
-      <div className="overflow-x-auto">
+      <ReportTableScroll visibleRows={10}>
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b text-left text-muted-foreground">
-              <th className="p-2 font-medium">When</th>
-              <th className="p-2 font-medium">Kind</th>
-              <th className="p-2 font-medium">Type</th>
-              <th className="p-2 font-medium text-right">Amount</th>
-              <th className="p-2 font-medium">Note</th>
+            <tr className="border-b text-left text-muted-foreground bg-muted/40">
+              <th className="p-2 font-medium sticky top-0 bg-muted/40">When</th>
+              <th className="p-2 font-medium sticky top-0 bg-muted/40">Kind</th>
+              <th className="p-2 font-medium sticky top-0 bg-muted/40">Type</th>
+              <th className="p-2 font-medium text-right sticky top-0 bg-muted/40">Amount</th>
+              <th className="p-2 font-medium sticky top-0 bg-muted/40">Note</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -727,8 +748,17 @@ function OwnerFinanceReport() {
             })}
           </tbody>
         </table>
-      </div>
+      </ReportTableScroll>
     </div>
+      </div>
+      <div className="self-start pt-1">
+        <ReportExportBox
+          filename={`finance-report-${new Date().toISOString().slice(0, 10)}`}
+          label="Reports"
+          sheets={exportSheets}
+          pdfSections={exportPdfSections}
+        />
+      </div>
     </div>
   );
 }
@@ -3181,6 +3211,7 @@ function Home() {
     canView(adminAccess, "raf");
   const showAccessTab = isOwner || isSupervisor;
   const showFinanceReport = canViewFinanceReport(adminAccess);
+  const showAdvisorViewTab = (isOwner || isSupervisor) && isMainAdmin;
 
   const introducerQ = useQuery({ queryKey: ["is-introducer"], queryFn: () => introducerFn() });
   const isIntroducer = introducerQ.data?.isIntroducer ?? false;
@@ -3309,6 +3340,7 @@ function Home() {
       (isIntroducer ? 1 : 0) +
       1 +
       (isMainAdmin ? 1 : 0) +
+      (showAdvisorViewTab ? 1 : 0) +
       (showCommissionPayouts ? 1 : 0) +
       (showManage ? 1 : 0) +
       (showAccessTab ? 1 : 0) +
@@ -3316,15 +3348,6 @@ function Home() {
 
     return (
       <AppShell title="Advisor dashboard">
-        {(isOwner || isSupervisor) && (
-          <AdvisorViewBanner
-            canUse={isMainAdmin}
-            onViewChange={() => {
-              setAdvisorViewTick((n) => n + 1);
-              invalidateSessions();
-            }}
-          />
-        )}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <div className="flex items-center gap-3 flex-wrap">
             <h2 className="text-2xl font-semibold">
@@ -3383,6 +3406,12 @@ function Home() {
                   Advisors
                 </TabsTrigger>
               )}
+              {showAdvisorViewTab && (
+                <TabsTrigger value="advisor-view">
+                  <Eye className="w-4 h-4 mr-1.5" />
+                  Advisor view
+                </TabsTrigger>
+              )}
               {isIntroducer && (
                 <TabsTrigger value="introducer">
                   <Link2 className="w-4 h-4 mr-1.5" />
@@ -3421,6 +3450,7 @@ function Home() {
           )}
 
           <TabsContent value="customers">
+            <div className="flex flex-col gap-4">
             {isMainAdmin && (
               <div className="space-y-3 mb-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -3519,6 +3549,12 @@ function Home() {
                 />
               ))}
             </div>
+            {isOwner && (
+              <div className="self-start pt-1">
+                <OwnerCustomerExportBox />
+              </div>
+            )}
+            </div>
           </TabsContent>
 
           <TabsContent value="contacts">
@@ -3528,6 +3564,22 @@ function Home() {
           {isMainAdmin && (
             <TabsContent value="advisors">
               <AdvisorsCard />
+            </TabsContent>
+          )}
+
+          {showAdvisorViewTab && (
+            <TabsContent value="advisor-view">
+              <AdvisorViewBanner
+                canUse
+                onViewChange={() => {
+                  setAdvisorViewTick((n) => n + 1);
+                  invalidateSessions();
+                }}
+              />
+              <p className="text-sm text-muted-foreground mt-4">
+                When advisor view is active, open the <strong>Customers</strong> tab to see that
+                advisor&apos;s dashboard, diary, and cases.
+              </p>
             </TabsContent>
           )}
 

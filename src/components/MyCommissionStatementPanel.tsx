@@ -9,7 +9,9 @@ import {
   type PayoutStatus,
 } from "@/lib/finance.functions";
 import { Button } from "@/components/ui/button";
-import { ResponsiveTableWrap } from "@/components/ResponsiveTableWrap";
+import { ReportExportBox } from "@/components/ReportExportBox";
+import { ReportTableScroll } from "@/components/ReportTableScroll";
+import { commissionRowsToSheet } from "@/lib/report-mappers";
 import { PoundSterling } from "lucide-react";
 
 type StatusFilter = "all" | PayoutStatus;
@@ -35,7 +37,13 @@ export function MyCommissionStatementPanel({
       }),
   });
 
+  const exportAllQ = useQuery({
+    queryKey: ["my-commission-export"],
+    queryFn: () => listFn({ data: {} }),
+  });
+
   const rows = statementQ.data?.rows ?? [];
+  const exportSheet = commissionRowsToSheet(exportAllQ.data?.rows ?? []);
   const totals = rows.reduce(
     (acc, r) => {
       acc[r.payoutStatus] = (acc[r.payoutStatus] ?? 0) + r.amountPence;
@@ -53,7 +61,8 @@ export function MyCommissionStatementPanel({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
+      <div className="space-y-4 min-w-0">
       <div>
         <h3 className="font-semibold text-lg flex items-center gap-2">
           <PoundSterling className="w-5 h-5" />
@@ -90,7 +99,7 @@ export function MyCommissionStatementPanel({
         </p>
       )}
 
-      <ResponsiveTableWrap>
+      <ReportTableScroll visibleRows={10}>
         {statementQ.isLoading && (
           <div className="p-6 text-sm text-muted-foreground">Loading your commission…</div>
         )}
@@ -104,11 +113,11 @@ export function MyCommissionStatementPanel({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="p-3 font-medium">When</th>
-                <th className="p-3 font-medium">Type</th>
-                <th className="p-3 font-medium">Case / context</th>
-                <th className="p-3 font-medium text-right">Amount</th>
-                <th className="p-3 font-medium">Status</th>
+                <th className="p-3 font-medium sticky top-0 bg-muted/40">When</th>
+                <th className="p-3 font-medium sticky top-0 bg-muted/40">Type</th>
+                <th className="p-3 font-medium sticky top-0 bg-muted/40">Case / context</th>
+                <th className="p-3 font-medium text-right sticky top-0 bg-muted/40">Amount</th>
+                <th className="p-3 font-medium sticky top-0 bg-muted/40">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -169,7 +178,16 @@ export function MyCommissionStatementPanel({
             </tbody>
           </table>
         )}
-      </ResponsiveTableWrap>
+      </ReportTableScroll>
+      </div>
+      <div className="self-start pt-1">
+        <ReportExportBox
+          filename={`my-commission-${new Date().toISOString().slice(0, 10)}`}
+          label="Reports"
+          sheets={[exportSheet]}
+          pdfTitle={title}
+        />
+      </div>
     </div>
   );
 }

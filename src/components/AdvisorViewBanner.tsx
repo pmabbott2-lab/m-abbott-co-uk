@@ -27,7 +27,7 @@ export function AdvisorViewBanner({
 
   if (active) {
     return (
-      <div className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="text-sm">
           <span className="font-medium">Advisor view</span>
           <span className="text-muted-foreground"> — viewing as {active.advisorName}</span>
@@ -50,7 +50,7 @@ export function AdvisorViewBanner({
   const advisors = advisorsQ.data ?? [];
 
   return (
-    <div className="mb-4 rounded-xl border bg-muted/30 p-4 space-y-3">
+    <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
       <div className="flex items-center gap-2 text-sm font-medium">
         <Eye className="w-4 h-4" />
         View as advisor
