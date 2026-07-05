@@ -216,7 +216,7 @@ export function CustomerHubBookingDialog({
                     <Input id="hub-book-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="hub-book-email">Email (optional)</Label>
+                    <Label htmlFor="hub-book-email">Email</Label>
                     <Input
                       id="hub-book-email"
                       type="email"

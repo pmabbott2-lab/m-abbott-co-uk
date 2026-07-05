@@ -9,6 +9,7 @@ import {
   type PayoutStatus,
 } from "@/lib/finance.functions";
 import { Button } from "@/components/ui/button";
+import { ResponsiveTableWrap } from "@/components/ResponsiveTableWrap";
 import { PoundSterling } from "lucide-react";
 
 type StatusFilter = "all" | PayoutStatus;
@@ -16,7 +17,7 @@ type StatusFilter = "all" | PayoutStatus;
 /** Read-only commission statement for advisors, introducers, and RAF referrers. */
 export function MyCommissionStatementPanel({
   title = "My commission",
-  description = "Commission earned from cases you worked on, introducer referrals, or Refer-a-Friend bonuses. Status updates when admin marks payouts paid.",
+  description = "Commission earned from cases you worked on, introducer referrals, or Refer-a-Friend bonuses.",
 }: {
   title?: string;
   description?: string;
@@ -89,7 +90,7 @@ export function MyCommissionStatementPanel({
         </p>
       )}
 
-      <div className="rounded-2xl border bg-card overflow-x-auto">
+      <ResponsiveTableWrap>
         {statementQ.isLoading && (
           <div className="p-6 text-sm text-muted-foreground">Loading your commission…</div>
         )}
@@ -126,6 +127,12 @@ export function MyCommissionStatementPanel({
                   row.commissionPct != null && row.beneficiaryRole !== "referrer"
                     ? ` · ${row.commissionPct}%`
                     : "";
+                const statusDate =
+                  row.payoutStatus === "paid" && row.payoutAt
+                    ? format(new Date(row.payoutAt), "d/M/yyyy")
+                    : row.payoutStatus === "rejected" && row.payoutAt
+                      ? format(new Date(row.payoutAt), "d/M/yyyy")
+                      : null;
 
                 return (
                   <tr
@@ -150,6 +157,11 @@ export function MyCommissionStatementPanel({
                     </td>
                     <td className="p-3 text-xs font-medium">
                       {PAYOUT_STATUS_LABELS[row.payoutStatus]}
+                      {statusDate && (
+                        <span className="block text-muted-foreground font-normal capitalize">
+                          {row.payoutStatus} {statusDate}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -157,7 +169,7 @@ export function MyCommissionStatementPanel({
             </tbody>
           </table>
         )}
-      </div>
+      </ResponsiveTableWrap>
     </div>
   );
 }

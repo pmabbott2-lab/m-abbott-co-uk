@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { format, formatDistanceToNow } from "date-fns";
@@ -11,14 +12,16 @@ import {
   User,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { TabPageNav } from "@/components/TabPageNav";
 import { CustomerHubBookingDialog } from "@/components/CustomerHubBookingDialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   getCustomerHub,
   deleteSession,
   getMyRole,
   promoteSessionToCaseAsStaff,
+  updateCustomerContact,
   type CustomerHubCase,
   type CustomerHubFactFind,
 } from "@/lib/sessions.functions";
@@ -59,6 +62,12 @@ function CustomerHubPage() {
     roleQ.data?.isSupervisor ||
     canAmend(adminAccess, "customers");
 
+  const canEditContact =
+    roleQ.data?.isAdvisor ||
+    roleQ.data?.isOwner ||
+    roleQ.data?.isSupervisor ||
+    canAmend(adminAccess, "customers");
+
   if (hubQ.isLoading || roleQ.isLoading) {
     return (
       <AppShell title="Customer">
@@ -88,10 +97,8 @@ function CustomerHubPage() {
   };
 
   return (
-    <AppShell title={displayName}>
+    <AppShell title={displayName} backTo="/home" backLabel="Dashboard">
       <div className="max-w-3xl mx-auto space-y-6">
-        <TabPageNav backTo="/home" backLabel="Dashboard" />
-
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <h2 className="text-2xl font-semibold flex items-center gap-2">
@@ -115,23 +122,12 @@ function CustomerHubPage() {
           />
         </div>
 
-        <div className="rounded-2xl border bg-card p-5 space-y-4">
-          <h3 className="font-semibold">Contact details</h3>
-          <dl className="grid sm:grid-cols-3 gap-3 text-sm">
-            <div>
-              <dt className="text-xs text-muted-foreground">Name</dt>
-              <dd className="font-medium">{customer.full_name ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Email</dt>
-              <dd className="font-medium break-all">{customer.email ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Mobile</dt>
-              <dd className="font-medium">{customer.phone ?? "—"}</dd>
-            </div>
-          </dl>
-        </div>
+        <CustomerContactSection
+          customerId={customerId}
+          customer={customer}
+          canEdit={canEditContact}
+          onSaved={invalidateHub}
+        />
 
         <div className="rounded-2xl border bg-card p-5 space-y-3">
           <h3 className="font-semibold flex items-center gap-2">
@@ -413,5 +409,120 @@ function DeleteRecordButton({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+function CustomerContactSection({
+  customerId,
+  customer,
+  canEdit,
+  onSaved,
+}: {
+  customerId: string;
+  customer: {
+    full_name: string | null;
+    email: string | null;
+    phone: string | null;
+    address?: string | null;
+  };
+  canEdit: boolean;
+  onSaved: () => void;
+}) {
+  const updateFn = useServerFn(updateCustomerContact);
+  const [editing, setEditing] = useState(false);
+  const [fullName, setFullName] = useState(customer.full_name ?? "");
+  const [email, setEmail] = useState(customer.email ?? "");
+  const [phone, setPhone] = useState(customer.phone ?? "");
+  const [address, setAddress] = useState(customer.address ?? "");
+
+  useEffect(() => {
+    setFullName(customer.full_name ?? "");
+    setEmail(customer.email ?? "");
+    setPhone(customer.phone ?? "");
+    setAddress(customer.address ?? "");
+  }, [customer]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      updateFn({
+        data: {
+          customerId,
+          fullName: fullName.trim(),
+          email: email.trim(),
+          phone: phone.trim(),
+          address,
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Contact details updated");
+      setEditing(false);
+      onSaved();
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not save"),
+  });
+
+  return (
+    <div className="rounded-2xl border bg-card p-5 space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-semibold">Contact details</h3>
+        {canEdit && !editing && (
+          <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+            Edit
+          </Button>
+        )}
+      </div>
+      {!editing ? (
+        <dl className="grid sm:grid-cols-2 gap-3 text-sm">
+          <div>
+            <dt className="text-xs text-muted-foreground">Name</dt>
+            <dd className="font-medium">{customer.full_name ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">Email</dt>
+            <dd className="font-medium break-all">{customer.email ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">Mobile</dt>
+            <dd className="font-medium">{customer.phone ?? "—"}</dd>
+          </div>
+          <div className="sm:col-span-2">
+            <dt className="text-xs text-muted-foreground">Address</dt>
+            <dd className="font-medium">{customer.address ?? "—"}</dd>
+          </div>
+        </dl>
+      ) : (
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="cust-name">Name</Label>
+            <Input id="cust-name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
+          </div>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="cust-email">Email</Label>
+              <Input id="cust-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cust-phone">Mobile</Label>
+              <Input id="cust-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="cust-address">Address</Label>
+            <Input id="cust-address" value={address} onChange={(e) => setAddress(e.target.value)} />
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
+              {save.isPending ? "Saving…" : "Save"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Email and mobile sync to the CRM tab on each case when you open the customer record.
+      </p>
+    </div>
   );
 }

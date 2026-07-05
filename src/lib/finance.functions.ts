@@ -264,7 +264,9 @@ export const submitSessionFees = createServerFn({ method: "POST" })
           beneficiary_user_id: a.advisor_id,
           beneficiary_role: "advisor",
           commission_pct: pct,
-          payout_status: "pending",
+          payout_status: "paid",
+          payout_at: now,
+          payout_by: context.userId,
           created_by: context.userId,
         });
       }

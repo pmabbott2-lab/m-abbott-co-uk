@@ -1,4 +1,4 @@
-import { createFileRoute, redirect, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
@@ -7,10 +7,9 @@ import { TabPageNav } from "@/components/TabPageNav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { IntroducerCustomerBookingCard } from "@/components/IntroducerCustomerBookingCard";
 import {
   checkIsIntroducer,
-  createManualLead,
   getIntroducerProfile,
   listIntroducerReferrals,
   updateIntroducerProfile,
@@ -18,7 +17,7 @@ import {
 import { sendLeadBookingSms } from "@/lib/booking.functions";
 import { referralLinkForSlug } from "@/lib/referral";
 import { format } from "date-fns";
-import { Calendar, Check, Copy, Hash, Link2, MessageSquare, PoundSterling, UserPlus } from "lucide-react";
+import { Calendar, Check, Copy, Hash, Link2, MessageSquare, PoundSterling } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MyCommissionStatementPanel } from "@/components/MyCommissionStatementPanel";
 
@@ -46,12 +45,10 @@ function CopyLinkButton({ url, label }: { url: string; label: string }) {
 
 function IntroducerPortal() {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   const roleFn = useServerFn(checkIsIntroducer);
   const profileFn = useServerFn(getIntroducerProfile);
   const updateFn = useServerFn(updateIntroducerProfile);
   const leadsFn = useServerFn(listIntroducerReferrals);
-  const createLeadFn = useServerFn(createManualLead);
   const smsFn = useServerFn(sendLeadBookingSms);
 
   const roleQ = useQuery({ queryKey: ["is-introducer"], queryFn: () => roleFn() });
@@ -68,10 +65,6 @@ function IntroducerPortal() {
 
   const [companyName, setCompanyName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [customerEmail, setCustomerEmail] = useState("");
-  const [notes, setNotes] = useState("");
 
   useEffect(() => {
     if (profileQ.data) {
@@ -83,27 +76,6 @@ function IntroducerPortal() {
   const updateProfile = useMutation({
     mutationFn: () => updateFn({ data: { companyName, contactEmail } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["introducer-profile"] }),
-  });
-
-  const createLead = useMutation({
-    mutationFn: () =>
-      createLeadFn({
-        data: { customerName, customerPhone, customerEmail, notes },
-      }),
-    onSuccess: (lead) => {
-      setCustomerName("");
-      setCustomerPhone("");
-      setCustomerEmail("");
-      setNotes("");
-      qc.invalidateQueries({ queryKey: ["introducer-referrals"] });
-      if (profileQ.data) {
-        navigate({
-          to: "/book/$slug",
-          params: { slug: profileQ.data.slug },
-          search: { lead: lead.id },
-        });
-      }
-    },
   });
 
   const sendSms = useMutation({
@@ -205,24 +177,16 @@ function IntroducerPortal() {
         </section>
 
         <section className="rounded-2xl border bg-card p-6 space-y-4">
-          <div className="flex items-center gap-2 font-medium">
-            <UserPlus className="w-4 h-4" />
-            Book an appointment for a customer
+          <div>
+            <h3 className="font-medium">Book an appointment for a customer</h3>
+            <p className="text-sm text-muted-foreground mt-1">
+              Book directly or send a link. The customer receives text and email confirmation with
+              options to complete the fact-find by voice, by typing, or to confirm attendance only.
+            </p>
           </div>
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="customerName">Customer name</Label>
-              <Input id="customerName" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="customerPhone">Phone</Label>
-              <Input id="customerPhone" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} />
-            </div>
-          </div>
-          <Button disabled={createLead.isPending || !customerName || !customerPhone} onClick={() => createLead.mutate()}>
-            <Calendar className="w-4 h-4 mr-2" />
-            {createLead.isPending ? "Opening diary…" : "Book an appointment for a customer"}
-          </Button>
+          <IntroducerCustomerBookingCard
+            onBooked={() => qc.invalidateQueries({ queryKey: ["introducer-referrals"] })}
+          />
         </section>
 
         <section className="space-y-3">

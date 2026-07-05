@@ -29,7 +29,7 @@ function randomAdvisorCode(): string {
 
 // Ensure the given advisor has a unique code, generating one on first use.
 // Returns null if the advisor_profiles table doesn't exist yet (pre-migration).
-async function ensureAdvisorCode(userId: string): Promise<string | null> {
+export async function ensureAdvisorCode(userId: string): Promise<string | null> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data: existing, error: existingErr } = await supabaseAdmin
     .from("advisor_profiles")
@@ -117,9 +117,27 @@ export async function assertStaffCanAccessCustomer(
   const roles = await getRolesForUser(staffUserId);
   const isMainAdmin = roles.includes("admin");
   const isAdvisor = roles.includes("advisor");
-  if (!isMainAdmin && !isAdvisor) throw new Error("Forbidden");
 
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { resolveAdminAccess } = await import("@/lib/admin.functions");
+  const { canAmend } = await import("@/lib/admin-access");
+  const { data: staffProfile } = await supabaseAdmin
+    .from("profiles")
+    .select("email")
+    .eq("id", staffUserId)
+    .maybeSingle();
+  const access = await resolveAdminAccess(staffUserId, staffProfile?.email ?? undefined);
+
+  if (
+    !isMainAdmin &&
+    !isAdvisor &&
+    !access.isOwner &&
+    !access.isSupervisor &&
+    !canAmend(access, "customers")
+  ) {
+    throw new Error("Forbidden");
+  }
+
   const { data: sessions, error } = await supabaseAdmin
     .from("interview_sessions")
     .select("id")
@@ -128,11 +146,11 @@ export async function assertStaffCanAccessCustomer(
   if (error) throw new Error(error.message);
 
   const sessionIds = (sessions ?? []).map((s) => s.id);
-  if (sessionIds.length === 0 && !isMainAdmin) {
+  if (sessionIds.length === 0 && !isMainAdmin && !access.isOwner && !access.isSupervisor) {
     throw new Error("Customer not found");
   }
 
-  if (!isMainAdmin && isAdvisor) {
+  if (!isMainAdmin && !access.isOwner && !access.isSupervisor && isAdvisor) {
     let allowed = false;
     if (sessionIds.length > 0) {
       const { data: alloc } = await supabaseAdmin
@@ -741,11 +759,31 @@ export const getCustomerHub = createServerFn({ method: "POST" })
       }
     }
 
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("id, full_name, email, phone")
-      .eq("id", data.customerId)
-      .maybeSingle();
+    let profile: {
+      id: string;
+      full_name: string | null;
+      email: string | null;
+      phone: string | null;
+      address?: string | null;
+    } | null = null;
+    {
+      const withAddress = await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, email, phone, address")
+        .eq("id", data.customerId)
+        .maybeSingle();
+      if (withAddress.error && isMissingTableError(withAddress.error)) {
+        const { data: basic } = await supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, email, phone")
+          .eq("id", data.customerId)
+          .maybeSingle();
+        profile = basic ? { ...basic, address: null } : null;
+      } else {
+        if (withAddress.error) throw new Error(withAddress.error.message);
+        profile = withAddress.data;
+      }
+    }
 
     const factFinds: CustomerHubFactFind[] = [];
     const cases: CustomerHubCase[] = [];
@@ -770,11 +808,62 @@ export const getCustomerHub = createServerFn({ method: "POST" })
     }
 
     return {
-      customer: profile ?? { id: data.customerId, full_name: null, email: null, phone: null },
+      customer: profile ?? {
+        id: data.customerId,
+        full_name: null,
+        email: null,
+        phone: null,
+        address: null,
+      },
       introducer,
       factFinds,
       cases,
     };
+  });
+
+export const updateCustomerContact = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        customerId: z.string().uuid(),
+        fullName: z.string().min(2).optional(),
+        email: z.string().email().optional(),
+        phone: z.string().min(7).optional(),
+        address: z.string().max(500).optional().or(z.literal("")),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertStaffCanAccessCustomer(context.userId, data.customerId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { normaliseUkPhone } = await import("@/lib/sms.server");
+
+    const patch: Record<string, string | null> = {};
+    if (data.fullName !== undefined) patch.full_name = data.fullName;
+    if (data.email !== undefined) patch.email = data.email;
+    if (data.phone !== undefined) patch.phone = normaliseUkPhone(data.phone);
+    if (data.address !== undefined) patch.address = data.address.trim() || null;
+
+    if (Object.keys(patch).length === 0) return { ok: true as const };
+
+    const { error } = await supabaseAdmin.from("profiles").update(patch).eq("id", data.customerId);
+    if (error) {
+      if (data.address !== undefined && isMissingTableError(error)) {
+        const { address: _a, ...withoutAddress } = patch;
+        if (Object.keys(withoutAddress).length > 0) {
+          const { error: retryErr } = await supabaseAdmin
+            .from("profiles")
+            .update(withoutAddress)
+            .eq("id", data.customerId);
+          if (retryErr) throw new Error(retryErr.message);
+        }
+      } else {
+        throw new Error(error.message);
+      }
+    }
+
+    return { ok: true as const };
   });
 
 export const createSession = createServerFn({ method: "POST" })
@@ -856,21 +945,27 @@ export const getSession = createServerFn({ method: "POST" })
       .from("interview_answers")
       .select("*")
       .eq("session_id", data.sessionId);
-    let customer: { id: string; full_name: string | null; email: string | null; phone: string | null } | null = null;
+    let customer: {
+      id: string;
+      full_name: string | null;
+      email: string | null;
+      phone: string | null;
+      address?: string | null;
+    } | null = null;
     if (session?.customer_id) {
       const { data: profile, error: profileError } = await context.supabase
         .from("profiles")
-        .select("id, full_name, email, phone")
+        .select("id, full_name, email, phone, address")
         .eq("id", session.customer_id)
         .maybeSingle();
       if (profileError) {
-        // The `phone` column may not exist yet (migration not applied) — fall back.
+        // The `phone` / `address` columns may not exist yet — fall back.
         const { data: basic } = await context.supabase
           .from("profiles")
-          .select("id, full_name, email")
+          .select("id, full_name, email, phone")
           .eq("id", session.customer_id)
           .maybeSingle();
-        customer = basic ? { ...basic, phone: null } : null;
+        customer = basic ? { ...basic, address: null } : null;
       } else {
         customer = profile ?? null;
       }
@@ -1239,6 +1334,10 @@ async function grantIntroducerRole(
   return resolvedCode;
 }
 
+export async function grantIntroducerRoleForTestAccount(userId: string): Promise<void> {
+  await grantIntroducerRole(userId, "new", undefined);
+}
+
 export const setIntroducerRole = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
@@ -1352,14 +1451,26 @@ export type AdvisorCustomerRow = {
   caseStatus: CaseStatus | null;
 };
 
-export const listAllSessionsForAdvisor = createServerFn({ method: "GET" })
+export const listAllSessionsForAdvisor = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) =>
+    z.object({ viewAsAdvisorId: z.string().uuid().optional() }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const adminAccess = await resolveAdminAccess(context.userId, email);
+    const viewAsMode = Boolean(data.viewAsAdvisorId);
+
     const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("advisor")) {
+    if (viewAsMode) {
+      if (!adminAccess.isOwner && !adminAccess.isSupervisor) throw new Error("Forbidden");
+    } else if (!roles.includes("advisor") && !adminAccess.isAdmin) {
       throw new Error("Forbidden");
     }
-    const isMainAdmin = roles.includes("admin");
+
+    const effectiveUserId = viewAsMode ? data.viewAsAdvisorId! : context.userId;
+    const isMainAdmin = !viewAsMode && roles.includes("admin") && adminAccess.isAdmin;
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     // Pull every allocation row up front (used to augment + to scope regular
@@ -1393,10 +1504,10 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "GET" })
 
     if (!isMainAdmin) {
       const myAllocated = new Set(
-        allocations.filter((a) => a.advisor_id === context.userId).map((a) => a.session_id),
+        allocations.filter((a) => a.advisor_id === effectiveUserId).map((a) => a.session_id),
       );
       for (const a of appointments) {
-        if (a.advisor_id === context.userId && a.session_id) myAllocated.add(a.session_id);
+        if (a.advisor_id === effectiveUserId && a.session_id) myAllocated.add(a.session_id);
       }
       const visibleIds = Array.from(myAllocated);
       if (visibleIds.length === 0) return [];

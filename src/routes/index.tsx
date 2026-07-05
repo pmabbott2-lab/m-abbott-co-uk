@@ -24,6 +24,7 @@ export const Route = createFileRoute("/")({
 function Landing() {
   const navigate = useNavigate();
   const [checking, setChecking] = useState(true);
+  const [slowLoad, setSlowLoad] = useState(false);
 
   useEffect(() => {
     if (isPasswordRecoveryUrl()) {
@@ -46,34 +47,57 @@ function Landing() {
       setChecking(false);
     };
 
-    // Never leave visitors on a blank screen if auth check hangs (e.g. slow network).
-    const timeout = window.setTimeout(finish, 4000);
+    const timeout = window.setTimeout(() => {
+      finish();
+      setSlowLoad(true);
+    }, 4000);
 
-    // Email confirmation / magic links may land here with the login tokens in
-    // the URL. Supabase parses them asynchronously and fires SIGNED_IN — forward
-    // the user into the app the moment a session exists.
+    // Hard fallback if client routing or Supabase hangs after login.
+    const hardRedirect = window.setTimeout(() => {
+      void supabase.auth.getSession().then(({ data }) => {
+        if (data.session) window.location.assign("/home");
+      });
+    }, 8000);
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) navigate({ to: "/home" });
+      if (session) {
+        navigate({ to: "/home" });
+        finish();
+      }
     });
 
     supabase.auth
       .getSession()
       .then(({ data }) => {
-        if (data.session) navigate({ to: "/home" });
-        else finish();
+        if (data.session) {
+          navigate({ to: "/home" });
+          finish();
+        } else {
+          finish();
+        }
       })
       .catch(() => finish());
 
     return () => {
       window.clearTimeout(timeout);
+      window.clearTimeout(hardRedirect);
       subscription.unsubscribe();
     };
   }, [navigate]);
 
   if (checking) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-4 px-6 text-center">
         <p className="text-sm text-muted-foreground">Loading Mortgage Hub…</p>
+        {slowLoad && (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">This is taking longer than usual.</p>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Link to="/auth"><Button size="sm" variant="outline">Sign in</Button></Link>
+              <Button size="sm" onClick={() => window.location.assign("/home")}>Go to dashboard</Button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

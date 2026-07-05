@@ -11,6 +11,7 @@ import {
   type CommissionPayoutRow,
 } from "@/lib/finance.functions";
 import { Button } from "@/components/ui/button";
+import { ResponsiveTableWrap } from "@/components/ResponsiveTableWrap";
 import { PoundSterling } from "lucide-react";
 import { toast } from "sonner";
 
@@ -70,7 +71,7 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
       <div>
         <h3 className="font-semibold text-lg flex items-center gap-2">
           <PoundSterling className="w-5 h-5" />
-          Commission payouts
+          Commission mgmt
         </h3>
         <p className="text-sm text-muted-foreground mt-1">
           Commission from posted customer fees (advisor &amp; introducer %) and Refer-a-Friend bonuses.
@@ -127,7 +128,7 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
         </p>
       )}
 
-      <div className="rounded-2xl border bg-card overflow-x-auto">
+      <ResponsiveTableWrap>
         {payoutsQ.isLoading && (
           <div className="p-6 text-sm text-muted-foreground">Loading commission…</div>
         )}
@@ -162,7 +163,7 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
             </tbody>
           </table>
         )}
-      </div>
+      </ResponsiveTableWrap>
     </div>
   );
 }

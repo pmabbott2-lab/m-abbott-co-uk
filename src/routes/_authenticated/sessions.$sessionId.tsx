@@ -35,9 +35,9 @@ import {
   logCallbackAttempt,
   resolveCallback,
   markContactOpened,
+  getAppointmentForSession,
 } from "@/lib/booking.functions";
 import { AppShell } from "@/components/AppShell";
-import { TabPageNav } from "@/components/TabPageNav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { format } from "date-fns";
@@ -70,6 +70,12 @@ function SessionDetail() {
     queryFn: () => bookingFn({ data: { sessionId } }),
     enabled: Boolean(q.data) && (roleQ.data?.isAdvisor ?? false),
   });
+  const apptFn = useServerFn(getAppointmentForSession);
+  const customerApptQ = useQuery({
+    queryKey: ["session-appointment", sessionId],
+    queryFn: () => apptFn({ data: { sessionId } }),
+    enabled: Boolean(q.data) && !(roleQ.data?.isAdvisor ?? false),
+  });
 
   const submit = useMutation({
     mutationFn: () => submitFn({ data: { sessionId } }),
@@ -95,7 +101,6 @@ function SessionDetail() {
   const caseRef = (session as { case_ref?: string | null }).case_ref ?? null;
   const isCase = Boolean(caseRef);
   const customerId = (session as { customer_id?: string }).customer_id ?? customer?.id;
-  const advisorBackTo = customerId ? `/customers/${customerId}` : "/home";
   const customerDisplayName = customer?.full_name || customer?.email || "Customer";
   const hasAppointment = Boolean(bookingQ.data?.appointment);
 
@@ -116,12 +121,43 @@ function SessionDetail() {
   };
 
   return (
-    <AppShell title={isAdvisor ? "Customer fact-find" : "Your fact-find"}>
+    <AppShell
+      title={isAdvisor ? "Customer fact-find" : "Your fact-find"}
+      backTo={isAdvisor && customerId ? "/customers/$customerId" : isAdvisor ? "/home" : "/cases"}
+      backParams={isAdvisor && customerId ? { customerId } : undefined}
+      backLabel={isAdvisor ? "Customer" : "Your cases"}
+    >
       <div className="max-w-3xl mx-auto space-y-6">
-        <TabPageNav
-          backTo={isAdvisor ? advisorBackTo : "/cases"}
-          backLabel={isAdvisor ? "Customer" : "Your cases"}
-        />
+
+        {!isAdvisor && customerApptQ.data && session.status !== "submitted" && (
+          <div className="rounded-2xl border bg-card p-5 space-y-3">
+            <h3 className="font-semibold">Your upcoming appointment</h3>
+            <p className="text-sm text-muted-foreground">
+              Confirmed for{" "}
+              {format(new Date(customerApptQ.data.starts_at), "EEE d MMM yyyy, HH:mm")}. Choose how
+              you&apos;d like to prepare — or confirm attendance only.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" asChild>
+                <Link to="/interview/$sessionId" params={{ sessionId }}>
+                  Spoken fact-find
+                </Link>
+              </Button>
+              <Button size="sm" variant="outline" asChild>
+                <Link to="/chat/$sessionId" params={{ sessionId }}>
+                  Type fact-find
+                </Link>
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => toast.success("Attendance confirmed — see you at your appointment")}
+              >
+                Confirm attendance only
+              </Button>
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
@@ -180,6 +216,12 @@ function SessionDetail() {
 
           {isAdvisor && isCase && (
             <TabsContent value="crm" className="space-y-6 mt-4">
+              <ContactCard customer={customer} />
+              {customerId && (
+                <Link to="/customers/$customerId" params={{ customerId }}>
+                  <Button variant="outline" size="sm">Open customer record</Button>
+                </Link>
+              )}
               <CaseRefEditor
                 sessionId={sessionId}
                 caseRef={caseRef}
@@ -1328,13 +1370,26 @@ function CustomerFinanceCard({
 function ContactCard({
   customer,
 }: {
-  customer: { full_name: string | null; email: string | null; phone: string | null } | null;
+  customer: {
+    full_name: string | null;
+    email: string | null;
+    phone: string | null;
+    address?: string | null;
+  } | null;
 }) {
   const items: Array<{ label: string; value: string }> = [];
   if (customer?.full_name) items.push({ label: "Name", value: customer.full_name });
   if (customer?.email) items.push({ label: "Email", value: customer.email });
   if (customer?.phone) items.push({ label: "Mobile", value: customer.phone });
-  if (items.length === 0) return null;
+  if (customer?.address) items.push({ label: "Address", value: customer.address });
+  if (items.length === 0) {
+    return (
+      <div className="rounded-2xl border bg-card p-5">
+        <h3 className="font-semibold mb-1">Contact details</h3>
+        <p className="text-sm text-muted-foreground">No contact details on file for this customer yet.</p>
+      </div>
+    );
+  }
   return (
     <div className="rounded-2xl border bg-card p-5">
       <h3 className="font-semibold mb-1">Contact details</h3>

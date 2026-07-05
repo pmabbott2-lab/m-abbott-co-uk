@@ -18,6 +18,11 @@ import {
 import { getAuthCallbackUrl, getPasswordResetUrl, isLocalDev } from "@/lib/app-url";
 import { isLoginMfaSuspended } from "@/lib/auth-mfa-config";
 import { fetchUserRoles, requiresAuthenticatorMfa, requiresSmsLoginVerification } from "@/lib/auth-roles";
+
+function hasTestLoginBypass(session: Session): boolean {
+  const meta = session.user.app_metadata as { test_email_bypass?: boolean } | undefined;
+  return Boolean(meta?.test_email_bypass);
+}
 import { isValidUkMobile, normaliseUkPhone } from "@/lib/phone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -181,6 +186,10 @@ function AuthPage() {
     const roles = await fetchUserRoles(session.user.id);
     if (!requiresSmsLoginVerification(roles)) return false;
     if (isLoginSmsVerified(session)) return false;
+    if (hasTestLoginBypass(session)) {
+      markLoginSmsVerified(session);
+      return false;
+    }
 
     setSmsBlocking(true);
     setMode("sms-login-challenge");
@@ -224,6 +233,10 @@ function AuthPage() {
       return false;
     }
     if (isLoginSmsVerified(session)) return false;
+    if (hasTestLoginBypass(session)) {
+      markLoginSmsVerified(session);
+      return false;
+    }
     return beginCustomerSmsChallenge(session);
   };
 

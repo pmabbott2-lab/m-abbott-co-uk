@@ -197,6 +197,166 @@ async function resolveIntroducer(slug?: string) {
   return data;
 }
 
+function slugifyStaffName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
+/** Introducer row for staff booking attribution (does not grant introducer portal role). */
+async function ensureStaffIntroducerRecord(staffUserId: string): Promise<string> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: existing } = await supabaseAdmin
+    .from("introducers")
+    .select("id, active")
+    .eq("user_id", staffUserId)
+    .maybeSingle();
+  if (existing?.id) {
+    if (existing.active === false) {
+      await supabaseAdmin.from("introducers").update({ active: true }).eq("id", existing.id);
+    }
+    return existing.id;
+  }
+
+  const { data: profile } = await supabaseAdmin
+    .from("profiles")
+    .select("full_name, email")
+    .eq("id", staffUserId)
+    .maybeSingle();
+  const ownName = profile?.full_name?.trim() || profile?.email?.split("@")[0] || "advisor";
+  const root = slugifyStaffName(ownName) || "advisor";
+  let slug = root;
+  for (let i = 0; i < 100; i += 1) {
+    const candidate = i === 0 ? root : `${root}-${i}`;
+    const { data: clash } = await supabaseAdmin
+      .from("introducers")
+      .select("id")
+      .eq("slug", candidate)
+      .maybeSingle();
+    if (!clash) {
+      slug = candidate;
+      break;
+    }
+  }
+
+  const { data: inserted, error } = await supabaseAdmin
+    .from("introducers")
+    .insert({
+      user_id: staffUserId,
+      company_name: ownName,
+      slug,
+      contact_email: profile?.email ?? null,
+      active: true,
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  return inserted.id;
+}
+
+async function resolveOrCreateCustomerProfile(data: {
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string;
+}): Promise<string> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const phone = normaliseUkPhone(data.customerPhone);
+  const email = data.customerEmail.trim().toLowerCase();
+
+  if (email) {
+    const { data: byEmail } = await supabaseAdmin
+      .from("profiles")
+      .select("id")
+      .ilike("email", email)
+      .maybeSingle();
+    if (byEmail?.id) {
+      await supabaseAdmin
+        .from("profiles")
+        .update({ full_name: data.customerName, phone, email })
+        .eq("id", byEmail.id);
+      return byEmail.id;
+    }
+  }
+
+  if (phone) {
+    const { data: byPhone } = await supabaseAdmin
+      .from("profiles")
+      .select("id")
+      .eq("phone", phone)
+      .maybeSingle();
+    if (byPhone?.id) {
+      await supabaseAdmin
+        .from("profiles")
+        .update({ full_name: data.customerName, email: email || undefined })
+        .eq("id", byPhone.id);
+      return byPhone.id;
+    }
+  }
+
+  const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
+    email,
+    email_confirm: true,
+    user_metadata: { full_name: data.customerName, phone },
+  });
+  if (error) throw new Error(error.message);
+
+  const userId = created.user.id;
+  await supabaseAdmin.from("profiles").upsert({
+    id: userId,
+    full_name: data.customerName,
+    email,
+    phone,
+  });
+  await supabaseAdmin
+    .from("user_roles")
+    .upsert({ user_id: userId, role: "customer" }, { onConflict: "user_id,role" });
+  return userId;
+}
+
+async function sendBookingConfirmations(opts: {
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string;
+  startsAt: Date;
+  advisorName: string;
+  sessionId?: string | null;
+  appointmentId?: string;
+}) {
+  const setupUrl = opts.sessionId
+    ? `${getAppBaseUrl()}/sessions/${opts.sessionId}`
+    : `${getAppBaseUrl()}/home`;
+  const message = bookingConfirmationMessage({
+    customerName: opts.customerName,
+    startsAt: opts.startsAt,
+    advisorName: opts.advisorName,
+    bookingUrl: setupUrl,
+  });
+
+  if (isTwilioConfigured()) {
+    try {
+      const { sid } = await sendSms({ to: opts.customerPhone, body: message });
+      await logSms({
+        direction: "outbound",
+        from: process.env.TWILIO_PHONE_NUMBER!,
+        to: opts.customerPhone,
+        body: message,
+        twilioSid: sid,
+        appointmentId: opts.appointmentId,
+      });
+    } catch (e) {
+      console.error("SMS confirmation failed:", e);
+    }
+  }
+
+  if (opts.customerEmail) {
+    console.info(
+      `[booking-email] To: ${opts.customerEmail} | ${opts.customerName} | ${setupUrl}`,
+    );
+  }
+}
+
 async function bookAppointment(
   data: z.infer<typeof appointmentInput>,
   actingUserId?: string,
@@ -229,6 +389,14 @@ async function bookAppointment(
           .maybeSingle();
         introducerId = ownIntro?.id ?? null;
       }
+    } else if (
+      (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin") &&
+      data.channel === "direct_booking"
+    ) {
+      // Staff booking: credit the acting advisor/admin as introducer on the case.
+      leadSource = "introducer_portal";
+      referralChannel = "manual";
+      introducerId = await ensureStaffIntroducerRecord(actingUserId);
     }
   }
 
@@ -335,27 +503,20 @@ async function bookAppointment(
     );
   }
 
-  if (data.sendSms !== false && isTwilioConfigured()) {
+  if (data.sendSms !== false || data.customerEmail) {
     try {
       const advisorName = await getAdvisorName(advisorId);
-      const message = bookingConfirmationMessage({
+      await sendBookingConfirmations({
         customerName: data.customerName,
+        customerPhone: data.customerPhone,
+        customerEmail: data.customerEmail || "",
         startsAt,
         advisorName,
-        bookingUrl: sessionForAlloc ? `${getAppBaseUrl()}/sessions/${sessionForAlloc}` : undefined,
-      });
-      const { sid } = await sendSms({ to: data.customerPhone, body: message });
-      await logSms({
-        direction: "outbound",
-        from: process.env.TWILIO_PHONE_NUMBER!,
-        to: data.customerPhone,
-        body: message,
-        twilioSid: sid,
+        sessionId: sessionForAlloc,
         appointmentId: appointment.id,
-        leadId: leadId ?? undefined,
       });
     } catch (e) {
-      console.error("SMS confirmation failed:", e);
+      console.error("booking confirmation failed:", e);
     }
   }
 
@@ -430,7 +591,7 @@ export const bookCustomerAppointmentAsStaff = createServerFn({ method: "POST" })
         sessionId: z.string().uuid().optional(),
         customerName: z.string().min(2),
         customerPhone: z.string().min(7),
-        customerEmail: z.string().email().optional().or(z.literal("")),
+        customerEmail: z.string().email(),
         startsAt: z.string().datetime(),
         notes: z.string().max(500).optional(),
         sendSms: z.boolean().optional(),
@@ -1128,24 +1289,40 @@ export const markContactOpened = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-export const listAdvisorAppointments = createServerFn({ method: "GET" })
+export const listAdvisorAppointments = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) =>
+    z.object({ viewAsAdvisorId: z.string().uuid().optional() }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const access = await resolveAdminAccess(context.userId, email);
     const { data: roles } = await context.supabase
       .from("user_roles")
       .select("role")
       .eq("user_id", context.userId);
-    if (!(roles ?? []).some((r) => r.role === "advisor")) throw new Error("Forbidden");
+    const roleList = (roles ?? []).map((r) => r.role);
 
-    const { data, error } = await context.supabase
+    let advisorId = context.userId;
+    if (data.viewAsAdvisorId) {
+      if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+      advisorId = data.viewAsAdvisorId;
+    } else if (!roleList.includes("advisor") && !access.isAdmin) {
+      throw new Error("Forbidden");
+    }
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: appts, error } = await supabaseAdmin
       .from("appointments")
       .select("*")
+      .eq("advisor_id", advisorId)
       .gte("starts_at", new Date().toISOString())
       .eq("status", "confirmed")
       .order("starts_at", { ascending: true })
       .limit(50);
     if (error) throw new Error(error.message);
-    return data ?? [];
+    return appts ?? [];
   });
 
 export const listIntroducerAppointments = createServerFn({ method: "GET" })
@@ -1242,4 +1419,341 @@ export const getLeadForBooking = createServerFn({ method: "GET" })
       customerPhone: lead.customer_phone ?? "",
       customerEmail: lead.customer_email ?? "",
     };
+  });
+
+async function assertStaffBookingAccess(userId: string): Promise<void> {
+  const { getRolesForUser } = await import("@/lib/sessions.functions");
+  const roles = await getRolesForUser(userId);
+  if (roles.includes("advisor")) return;
+  const { resolveAdminAccess } = await import("@/lib/admin.functions");
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: profile } = await supabaseAdmin
+    .from("profiles")
+    .select("email")
+    .eq("id", userId)
+    .maybeSingle();
+  const access = await resolveAdminAccess(userId, profile?.email ?? undefined);
+  if (access.isAdmin) return;
+  throw new Error("Forbidden");
+}
+
+export const bookNewCustomerAsStaff = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        customerName: z.string().min(2),
+        customerPhone: z.string().min(7),
+        customerEmail: z.string().email(),
+        startsAt: z.string().datetime(),
+        notes: z.string().max(500).optional(),
+        sendSms: z.boolean().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertStaffBookingAccess(context.userId);
+    const customerId = await resolveOrCreateCustomerProfile({
+      customerName: data.customerName,
+      customerPhone: data.customerPhone,
+      customerEmail: data.customerEmail,
+    });
+    const advisorId = await resolveBookingAdvisorId(context.userId);
+    return bookAppointment(
+      {
+        customerId,
+        advisorId,
+        channel: "direct_booking",
+        customerName: data.customerName,
+        customerPhone: data.customerPhone,
+        customerEmail: data.customerEmail,
+        startsAt: data.startsAt,
+        notes: data.notes,
+        sendSms: data.sendSms ?? true,
+      },
+      context.userId,
+    );
+  });
+
+export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        customerName: z.string().min(2),
+        customerPhone: z.string().min(7),
+        customerEmail: z.string().email(),
+        sendSms: z.boolean().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertStaffBookingAccess(context.userId);
+    if (data.sendSms !== false && !isTwilioConfigured()) {
+      throw new Error("SMS is not configured — copy the booking link instead.");
+    }
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const introducerId = await ensureStaffIntroducerRecord(context.userId);
+    const { data: introducer, error: introErr } = await supabaseAdmin
+      .from("introducers")
+      .select("slug, company_name")
+      .eq("id", introducerId)
+      .single();
+    if (introErr) throw new Error(introErr.message);
+
+    const phone = normaliseUkPhone(data.customerPhone);
+    const { data: lead, error: leadErr } = await supabaseAdmin
+      .from("introducer_leads")
+      .insert({
+        introducer_id: introducerId,
+        customer_name: data.customerName,
+        customer_phone: phone,
+        customer_email: data.customerEmail,
+        status: "new",
+        channel: "text",
+      })
+      .select("id")
+      .single();
+    if (leadErr) throw new Error(leadErr.message);
+
+    const bookUrl = `${getAppBaseUrl()}/book/${introducer.slug}?lead=${lead.id}`;
+    const body = textChannelInviteMessage({
+      customerName: data.customerName,
+      bookUrl,
+      introducerName: introducer.company_name ?? "Your advisor",
+    });
+
+    if (data.sendSms !== false && isTwilioConfigured()) {
+      const { sid } = await sendSms({ to: phone, body });
+      await logSms({
+        direction: "outbound",
+        from: process.env.TWILIO_PHONE_NUMBER!,
+        to: phone,
+        body,
+        twilioSid: sid,
+        leadId: lead.id,
+      });
+      await supabaseAdmin
+        .from("introducer_leads")
+        .update({ status: "contacted" })
+        .eq("id", lead.id);
+    }
+
+    console.info(`[booking-email] Invite to ${data.customerEmail}: ${bookUrl}`);
+
+    return { ok: true as const, bookUrl, mailto: `mailto:${encodeURIComponent(data.customerEmail)}?subject=${encodeURIComponent("Book your mortgage appointment")}&body=${encodeURIComponent(`Hi ${data.customerName},\n\nPlease book a time using this link:\n\n${bookUrl}`)}` };
+  });
+
+async function assertIntroducerBookingAccess(userId: string): Promise<string> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: roles } = await supabaseAdmin
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId);
+  if (!(roles ?? []).some((r) => r.role === "introducer")) {
+    throw new Error("Forbidden");
+  }
+  const { data: introducer, error } = await supabaseAdmin
+    .from("introducers")
+    .select("id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!introducer) throw new Error("Introducer profile not set up yet.");
+  return introducer.id;
+}
+
+export const bookNewCustomerAsIntroducer = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        customerName: z.string().min(2),
+        customerPhone: z.string().min(7),
+        customerEmail: z.string().email(),
+        startsAt: z.string().datetime(),
+        notes: z.string().max(500).optional(),
+        sendSms: z.boolean().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertIntroducerBookingAccess(context.userId);
+    const customerId = await resolveOrCreateCustomerProfile({
+      customerName: data.customerName,
+      customerPhone: data.customerPhone,
+      customerEmail: data.customerEmail,
+    });
+    const advisorId = await resolveBookingAdvisorId();
+    return bookAppointment(
+      {
+        customerId,
+        advisorId,
+        channel: "direct_booking",
+        customerName: data.customerName,
+        customerPhone: data.customerPhone,
+        customerEmail: data.customerEmail,
+        startsAt: data.startsAt,
+        notes: data.notes,
+        sendSms: data.sendSms ?? true,
+      },
+      context.userId,
+    );
+  });
+
+export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        customerName: z.string().min(2),
+        customerPhone: z.string().min(7),
+        customerEmail: z.string().email(),
+        sendSms: z.boolean().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const introducerId = await assertIntroducerBookingAccess(context.userId);
+    if (data.sendSms !== false && !isTwilioConfigured()) {
+      throw new Error("SMS is not configured — copy the booking link instead.");
+    }
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: introducer, error: introErr } = await supabaseAdmin
+      .from("introducers")
+      .select("slug, company_name")
+      .eq("id", introducerId)
+      .single();
+    if (introErr) throw new Error(introErr.message);
+
+    const phone = normaliseUkPhone(data.customerPhone);
+    const { data: lead, error: leadErr } = await supabaseAdmin
+      .from("introducer_leads")
+      .insert({
+        introducer_id: introducerId,
+        customer_name: data.customerName,
+        customer_phone: phone,
+        customer_email: data.customerEmail,
+        status: "new",
+        channel: "text",
+      })
+      .select("id")
+      .single();
+    if (leadErr) throw new Error(leadErr.message);
+
+    const bookUrl = `${getAppBaseUrl()}/book/${introducer.slug}?lead=${lead.id}`;
+    const body = textChannelInviteMessage({
+      customerName: data.customerName,
+      bookUrl,
+      introducerName: introducer.company_name ?? "Your introducer",
+    });
+
+    if (data.sendSms !== false && isTwilioConfigured()) {
+      const { sid } = await sendSms({ to: phone, body });
+      await logSms({
+        direction: "outbound",
+        from: process.env.TWILIO_PHONE_NUMBER!,
+        to: phone,
+        body,
+        twilioSid: sid,
+        leadId: lead.id,
+      });
+      await supabaseAdmin
+        .from("introducer_leads")
+        .update({ status: "contacted" })
+        .eq("id", lead.id);
+    }
+
+    console.info(`[booking-email] Invite to ${data.customerEmail}: ${bookUrl}`);
+
+    return {
+      ok: true as const,
+      bookUrl,
+      mailto: `mailto:${encodeURIComponent(data.customerEmail)}?subject=${encodeURIComponent("Book your mortgage appointment")}&body=${encodeURIComponent(`Hi ${data.customerName},\n\nPlease book a time using this link:\n\n${bookUrl}`)}`,
+    };
+  });
+
+export const rescheduleAppointment = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        appointmentId: z.string().uuid(),
+        startsAt: z.string().datetime(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: appt, error: apptErr } = await supabaseAdmin
+      .from("appointments")
+      .select("*")
+      .eq("id", data.appointmentId)
+      .maybeSingle();
+    if (apptErr) throw new Error(apptErr.message);
+    if (!appt || appt.status !== "confirmed") throw new Error("Appointment not found");
+
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const access = await resolveAdminAccess(context.userId, email);
+    const { data: roles } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    const roleList = (roles ?? []).map((r) => r.role);
+    const isAdvisor = roleList.includes("advisor");
+    const isStaff = isAdvisor || access.isAdmin;
+
+    let allowed = isStaff && appt.advisor_id === context.userId;
+    if (!allowed && access.isOwner) allowed = true;
+    if (!allowed && access.isSupervisor) allowed = true;
+    if (!allowed && appt.session_id) {
+      const { data: session } = await supabaseAdmin
+        .from("interview_sessions")
+        .select("customer_id")
+        .eq("id", appt.session_id)
+        .maybeSingle();
+      if (session?.customer_id === context.userId) allowed = true;
+    }
+    if (!allowed) throw new Error("Forbidden");
+
+    const startsAt = new Date(data.startsAt);
+    const endsAt = new Date(startsAt.getTime() + SLOT_MINUTES * 60 * 1000);
+
+    const { data: conflict } = await supabaseAdmin
+      .from("appointments")
+      .select("id")
+      .eq("advisor_id", appt.advisor_id)
+      .eq("status", "confirmed")
+      .eq("starts_at", startsAt.toISOString())
+      .neq("id", appt.id)
+      .maybeSingle();
+    if (conflict) throw new Error("That time slot is no longer available. Please choose another.");
+
+    const { error: updErr } = await supabaseAdmin
+      .from("appointments")
+      .update({ starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString() })
+      .eq("id", appt.id);
+    if (updErr) throw new Error(updErr.message);
+
+    if (appt.customer_phone) {
+      try {
+        const advisorName = await getAdvisorName(appt.advisor_id);
+        await sendBookingConfirmations({
+          customerName: appt.customer_name,
+          customerPhone: appt.customer_phone,
+          customerEmail: appt.customer_email ?? "",
+          startsAt,
+          advisorName,
+          sessionId: appt.session_id,
+          appointmentId: appt.id,
+        });
+      } catch (e) {
+        console.error("reschedule confirmation failed", e);
+      }
+    }
+
+    return { ok: true as const };
   });

@@ -25,6 +25,11 @@ import { claimReferral, createReferralLink, textReferralLink, textRafInviteToFri
 import { getRafCode, clearRafCookie, rafLinkForCode, rafShareMessage } from "@/lib/referral";
 import { CommissionPayoutsPanel } from "@/components/CommissionPayoutsPanel";
 import { MyCommissionStatementPanel } from "@/components/MyCommissionStatementPanel";
+import { StaffCustomerBookingCard } from "@/components/StaffCustomerBookingCard";
+import { AdvisorViewBanner } from "@/components/AdvisorViewBanner";
+import { ManageListControls, ManageListScroll, type ManageListSort } from "@/components/ManageListControls";
+import { TestAccountsCard } from "@/components/TestAccountsCard";
+import { getAdvisorView } from "@/lib/advisor-view";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -459,6 +464,10 @@ function OwnerFinanceReport() {
   const [pctMortgage, setPctMortgage] = useState("10");
   const [pctInsurance, setPctInsurance] = useState("10");
   const [pctOther, setPctOther] = useState("10");
+  const [introPctFee, setIntroPctFee] = useState("10");
+  const [introPctMortgage, setIntroPctMortgage] = useState("10");
+  const [introPctInsurance, setIntroPctInsurance] = useState("10");
+  const [introPctOther, setIntroPctOther] = useState("10");
 
   const staffQ = useQuery({
     queryKey: ["commission-staff", rateRole, staffSearch],
@@ -469,6 +478,12 @@ function OwnerFinanceReport() {
     queryKey: ["commission-rate", rateUserId, rateRole],
     queryFn: () => getRateFn({ data: { userId: rateUserId, role: rateRole } }),
     enabled: Boolean(rateUserId),
+  });
+
+  const existingIntroRateQ = useQuery({
+    queryKey: ["commission-rate", rateUserId, "introducer"],
+    queryFn: () => getRateFn({ data: { userId: rateUserId, role: "introducer" } }),
+    enabled: Boolean(rateUserId) && rateRole === "advisor",
   });
 
   const historyQ = useQuery({
@@ -490,9 +505,18 @@ function OwnerFinanceReport() {
     if (r.pctOtherFee != null) setPctOther(String(r.pctOtherFee));
   }, [existingRateQ.data, rateUserId]);
 
+  useEffect(() => {
+    const r = existingIntroRateQ.data;
+    if (!r || !rateUserId || rateRole !== "advisor") return;
+    if (r.pctFee != null) setIntroPctFee(String(r.pctFee));
+    if (r.pctMortgageFee != null) setIntroPctMortgage(String(r.pctMortgageFee));
+    if (r.pctInsuranceFee != null) setIntroPctInsurance(String(r.pctInsuranceFee));
+    if (r.pctOtherFee != null) setIntroPctOther(String(r.pctOtherFee));
+  }, [existingIntroRateQ.data, rateUserId, rateRole]);
+
   const setRate = useMutation({
-    mutationFn: () =>
-      setRateFn({
+    mutationFn: async () => {
+      await setRateFn({
         data: {
           userId: rateUserId,
           role: rateRole,
@@ -501,7 +525,20 @@ function OwnerFinanceReport() {
           pctInsuranceFee: Number(pctInsurance),
           pctOtherFee: Number(pctOther),
         },
-      }),
+      });
+      if (rateRole === "advisor") {
+        await setRateFn({
+          data: {
+            userId: rateUserId,
+            role: "introducer",
+            pctFee: Number(introPctFee),
+            pctMortgageFee: Number(introPctMortgage),
+            pctInsuranceFee: Number(introPctInsurance),
+            pctOtherFee: Number(introPctOther),
+          },
+        });
+      }
+    },
     onSuccess: () => {
       toast.success("Commission rates saved — applies to new fees only");
       historyQ.refetch();
@@ -570,7 +607,11 @@ function OwnerFinanceReport() {
         </select>
       </div>
       {rateUserId && (
+        <>
         <div className="grid sm:grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-4">
+          <div className="sm:col-span-2 text-sm font-medium">
+            {rateRole === "advisor" ? "Advisor commission %" : "Introducer commission %"}
+          </div>
           <div className="space-y-1">
             <Label>{FEE_TYPE_LABELS.fee} %</Label>
             <Input type="number" min="0" max="100" step="0.1" value={pctFee} onChange={(e) => setPctFee(e.target.value)} />
@@ -588,6 +629,28 @@ function OwnerFinanceReport() {
             <Input type="number" min="0" max="100" step="0.1" value={pctOther} onChange={(e) => setPctOther(e.target.value)} />
           </div>
         </div>
+        {rateRole === "advisor" && (
+          <div className="grid sm:grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-4">
+            <div className="sm:col-span-2 text-sm font-medium">Introducer commission % (when this advisor refers)</div>
+            <div className="space-y-1">
+              <Label>{FEE_TYPE_LABELS.fee} %</Label>
+              <Input type="number" min="0" max="100" step="0.1" value={introPctFee} onChange={(e) => setIntroPctFee(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label>{FEE_TYPE_LABELS.mortgage_fee} %</Label>
+              <Input type="number" min="0" max="100" step="0.1" value={introPctMortgage} onChange={(e) => setIntroPctMortgage(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label>{FEE_TYPE_LABELS.insurance_fee} %</Label>
+              <Input type="number" min="0" max="100" step="0.1" value={introPctInsurance} onChange={(e) => setIntroPctInsurance(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label>{FEE_TYPE_LABELS.other_fee} %</Label>
+              <Input type="number" min="0" max="100" step="0.1" value={introPctOther} onChange={(e) => setIntroPctOther(e.target.value)} />
+            </div>
+          </div>
+        )}
+        </>
       )}
       <Button disabled={!rateUserId || setRate.isPending} onClick={() => setRate.mutate()}>
         Save commission rates
@@ -700,39 +763,45 @@ function AdvisorAccessCard() {
   const users = usersQ.data ?? [];
 
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<ManageListSort>("alpha");
   const q = search.trim().toLowerCase();
-  const filteredUsers = users.filter((u) => {
-    if (!q) return true;
-    return [u.full_name, u.email].filter(Boolean).join(" ").toLowerCase().includes(q);
-  });
+  const advisorUsers = users.filter((u) => u.isAdvisor);
+  const filteredUsers = advisorUsers
+    .filter((u) => {
+      if (!q) return true;
+      return [u.full_name, u.email].filter(Boolean).join(" ").toLowerCase().includes(q);
+    })
+    .sort((a, b) => {
+      if (sort === "alpha") {
+        return (a.full_name || a.email || "").localeCompare(b.full_name || b.email || "");
+      }
+      return 0;
+    });
 
   return (
     <div className="mt-10">
       <h3 className="text-sm font-medium text-muted-foreground mb-3">Team access</h3>
       <div className="rounded-2xl border bg-card overflow-hidden">
         <div className="p-4 text-xs text-muted-foreground border-b">
-          Advisors can view every customer&apos;s fact-find. Grant access to colleagues below.
+          Advisors can view allocated customers and book appointments. Add new advisors using invite
+          links below — existing advisors can be removed or moved to the deleted bin.
         </div>
-        <div className="p-3 border-b">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Search people by name or email…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-        </div>
-        <div className="max-h-[640px] overflow-y-auto divide-y">
+        <ManageListControls
+          search={search}
+          onSearchChange={setSearch}
+          sort={sort}
+          onSortChange={setSort}
+          searchPlaceholder="Search advisors by name or email…"
+        />
+        <ManageListScroll>
         {usersQ.isLoading && <div className="p-4 text-sm text-muted-foreground">Loading people…</div>}
         {usersQ.isError && (
           <div className="p-4 text-sm text-muted-foreground">Couldn&apos;t load the people list.</div>
         )}
-        {!usersQ.isLoading && users.length === 0 && (
-          <div className="p-4 text-sm text-muted-foreground">No accounts yet.</div>
+        {!usersQ.isLoading && advisorUsers.length === 0 && (
+          <div className="p-4 text-sm text-muted-foreground">No advisors yet — send an invite link.</div>
         )}
-        {!usersQ.isLoading && users.length > 0 && filteredUsers.length === 0 && (
+        {!usersQ.isLoading && advisorUsers.length > 0 && filteredUsers.length === 0 && (
           <div className="p-4 text-sm text-muted-foreground">No matches.</div>
         )}
         {filteredUsers.map((u) => (
@@ -772,19 +841,10 @@ function AdvisorAccessCard() {
                   />
                 )}
               </>
-            ) : (
-              <Button
-                size="sm"
-                disabled={setRole.isPending && setRole.variables?.userId === u.id}
-                onClick={() => setRole.mutate({ userId: u.id, makeAdvisor: true })}
-              >
-                <ShieldCheck className="w-4 h-4 mr-1.5" />
-                Make advisor
-              </Button>
-            )}
+            ) : null}
           </div>
         ))}
-        </div>
+        </ManageListScroll>
       </div>
     </div>
   );
@@ -921,11 +981,20 @@ function IntroducerAccessCard() {
   const users = usersQ.data ?? [];
 
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<ManageListSort>("alpha");
   const q = search.trim().toLowerCase();
-  const filteredUsers = users.filter((u) => {
-    if (!q) return true;
-    return [u.full_name, u.email].filter(Boolean).join(" ").toLowerCase().includes(q);
-  });
+  const introducerUsers = users;
+  const filteredUsers = introducerUsers
+    .filter((u) => {
+      if (!q) return true;
+      return [u.full_name, u.email].filter(Boolean).join(" ").toLowerCase().includes(q);
+    })
+    .sort((a, b) => {
+      if (sort === "alpha") {
+        return (a.full_name || a.email || "").localeCompare(b.full_name || b.email || "");
+      }
+      return 0;
+    });
 
   return (
     <div className="mt-10">
@@ -935,26 +1004,22 @@ function IntroducerAccessCard() {
           Introducers get a referral portal with shareable links and lead tracking. Multiple
           introducers can share a company via its 4-digit code so referrals credit the company.
         </div>
-        <div className="p-3 border-b">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Search people by name or email…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-        </div>
-        <div className="max-h-[640px] overflow-y-auto divide-y">
+        <ManageListControls
+          search={search}
+          onSearchChange={setSearch}
+          sort={sort}
+          onSortChange={setSort}
+          searchPlaceholder="Search introducers by name or email…"
+        />
+        <ManageListScroll>
         {usersQ.isLoading && <div className="p-4 text-sm text-muted-foreground">Loading people…</div>}
         {usersQ.isError && (
           <div className="p-4 text-sm text-muted-foreground">Couldn&apos;t load the people list.</div>
         )}
-        {!usersQ.isLoading && users.length === 0 && (
-          <div className="p-4 text-sm text-muted-foreground">No accounts yet.</div>
+        {!usersQ.isLoading && introducerUsers.length === 0 && (
+          <div className="p-4 text-sm text-muted-foreground">No introducers yet.</div>
         )}
-        {!usersQ.isLoading && users.length > 0 && filteredUsers.length === 0 && (
+        {!usersQ.isLoading && introducerUsers.length > 0 && filteredUsers.length === 0 && (
           <div className="p-4 text-sm text-muted-foreground">No matches.</div>
         )}
         {filteredUsers.map((u) => (
@@ -1001,7 +1066,7 @@ function IntroducerAccessCard() {
             )}
           </div>
         ))}
-        </div>
+        </ManageListScroll>
       </div>
     </div>
   );
@@ -1053,9 +1118,29 @@ function RecentlyDeletedCard() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not restore"),
   });
 
-  const advisors = binnedQ.data?.advisors ?? [];
-  const introducers = binnedQ.data?.introducers ?? [];
-  const customers = binnedQ.data?.customers ?? [];
+  const [deletedSearch, setDeletedSearch] = useState("");
+  const [deletedSort, setDeletedSort] = useState<ManageListSort>("date");
+  const deletedQ = deletedSearch.trim().toLowerCase();
+  const sortDeleted = <T extends { customerName?: string | null; customerEmail?: string | null; full_name?: string | null; email?: string | null }>(
+    items: T[],
+    nameFn: (i: T) => string,
+  ) =>
+    [...items]
+      .filter((i) => {
+        if (!deletedQ) return true;
+        return nameFn(i).toLowerCase().includes(deletedQ);
+      })
+      .sort((a, b) => {
+        if (deletedSort === "alpha") return nameFn(a).localeCompare(nameFn(b));
+        return 0;
+      });
+
+  const advisors = sortDeleted(binnedQ.data?.advisors ?? [], (a) => a.full_name || a.email || "");
+  const introducers = sortDeleted(binnedQ.data?.introducers ?? [], (i) => i.full_name || i.email || "");
+  const customers = sortDeleted(
+    binnedQ.data?.customers ?? [],
+    (c) => c.customerName || c.customerEmail || "",
+  );
   const isEmpty = advisors.length === 0 && introducers.length === 0 && customers.length === 0;
 
   return (
@@ -1070,6 +1155,14 @@ function RecentlyDeletedCard() {
           the Owner or an Admin Supervisor. Restoring reinstates access; data is never permanently
           removed from the bin.
         </div>
+        <ManageListControls
+          search={deletedSearch}
+          onSearchChange={setDeletedSearch}
+          sort={deletedSort}
+          onSortChange={setDeletedSort}
+          searchPlaceholder="Search deleted records…"
+        />
+        <ManageListScroll>
         {binnedQ.isLoading && <div className="p-4 text-sm text-muted-foreground">Loading bin…</div>}
         {binnedQ.isError && (
           <div className="p-4 text-sm text-destructive">
@@ -1159,6 +1252,7 @@ function RecentlyDeletedCard() {
             </Button>
           </div>
         ))}
+        </ManageListScroll>
       </div>
     </div>
   );
@@ -3096,6 +3190,8 @@ function Home() {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<"recent" | "next_contact">("recent");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [advisorViewTick, setAdvisorViewTick] = useState(0);
+  const advisorViewId = getAdvisorView()?.advisorId;
 
   const sessionsQ = useQuery({
     queryKey: ["my-sessions"],
@@ -3110,9 +3206,9 @@ function Home() {
   });
 
   const allQ = useQuery({
-    queryKey: ["all-sessions"],
-    queryFn: () => allFn(),
-    enabled: !roleQ.isLoading && isAdvisor,
+    queryKey: ["all-sessions", advisorViewId, advisorViewTick],
+    queryFn: () => allFn({ data: { viewAsAdvisorId: advisorViewId } }),
+    enabled: !roleQ.isLoading && (isAdvisor || (isMainAdmin && !isOwner)),
   });
 
   // Opening a customer with a pending call-back marks it seen for this advisor,
@@ -3173,7 +3269,7 @@ function Home() {
     );
   }
 
-  if (isAdvisor) {
+  if (isAdvisor || (isMainAdmin && !isOwner)) {
     const q = search.trim().toLowerCase();
     const sessions = (allQ.data ?? [])
       .filter((s) => {
@@ -3220,6 +3316,15 @@ function Home() {
 
     return (
       <AppShell title="Advisor dashboard">
+        {(isOwner || isSupervisor) && (
+          <AdvisorViewBanner
+            canUse={isMainAdmin}
+            onViewChange={() => {
+              setAdvisorViewTick((n) => n + 1);
+              invalidateSessions();
+            }}
+          />
+        )}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <div className="flex items-center gap-3 flex-wrap">
             <h2 className="text-2xl font-semibold">
@@ -3238,20 +3343,20 @@ function Home() {
             )}
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => create.mutate("voice")} disabled={create.isPending}>
-              <Mic className="w-4 h-4 mr-2" />
-              {create.isPending && create.variables === "voice" ? "Starting…" : "Spoken"}
-            </Button>
-            <Button variant="outline" onClick={() => create.mutate("chat")} disabled={create.isPending}>
-              <MessageSquare className="w-4 h-4 mr-2" />
-              {create.isPending && create.variables === "chat" ? "Starting…" : "Type"}
-            </Button>
-            <Link to="/booking">
-              <Button variant="outline">
-                <CalendarCheck className="w-4 h-4 mr-2" />
-                Book
-              </Button>
-            </Link>
+            {isOwner ? (
+              <>
+                <Button onClick={() => create.mutate("voice")} disabled={create.isPending}>
+                  <Mic className="w-4 h-4 mr-2" />
+                  {create.isPending && create.variables === "voice" ? "Starting…" : "Spoken"}
+                </Button>
+                <Button variant="outline" onClick={() => create.mutate("chat")} disabled={create.isPending}>
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                  {create.isPending && create.variables === "chat" ? "Starting…" : "Type"}
+                </Button>
+              </>
+            ) : (
+              <StaffCustomerBookingCard onBooked={invalidateSessions} />
+            )}
             <Link to="/diary">
               <Button variant="secondary">
                 <CalendarDays className="w-4 h-4 mr-2" />
@@ -3263,7 +3368,7 @@ function Home() {
 
         <Tabs defaultValue="customers">
           {tabCount > 1 && (
-            <TabsList className="mb-4 flex h-auto w-full flex-wrap justify-start gap-1">
+            <TabsList className="mb-4 mx-auto flex h-auto w-full max-w-4xl flex-wrap justify-center gap-1 p-1">
               <TabsTrigger value="customers">
                 <Users className="w-4 h-4 mr-1.5" />
                 Customers
@@ -3291,7 +3396,7 @@ function Home() {
               {showCommissionPayouts && (
                 <TabsTrigger value="commission">
                   <PoundSterling className="w-4 h-4 mr-1.5" />
-                  Commission
+                  Commission mgmt
                 </TabsTrigger>
               )}
               {showManage && (
@@ -3460,6 +3565,7 @@ function Home() {
           {showManage && (
             <TabsContent value="manage">
               <div className="space-y-6">
+                {isOwner && <TestAccountsCard />}
                 {canView(adminAccess, "invites") && <InviteStaffCard />}
                 {canView(adminAccess, "advisors") && <AdvisorAccessCard />}
                 {canView(adminAccess, "introducers") && <IntroducerAccessCard />}
