@@ -22,6 +22,8 @@
     "bootstrap:supabase": "bash scripts/bootstrap-supabase.sh",
     "verify:supabase": "node scripts/verify-supabase-env.mjs",
     "configure:twilio-voice": "node scripts/configure-twilio-voice.mjs",
+    "fix:env-url": "node scripts/fix-env-app-base-url.mjs",
+    "backfill:voicemails": "node scripts/backfill-twilio-voicemails.mjs",
     "build:marketing": "node marketing/build-all.mjs"
   },
   "dependencies": {
