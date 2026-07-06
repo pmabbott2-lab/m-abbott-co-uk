@@ -1,18 +1,55 @@
 // Server-only Twilio SMS helpers. Credentials stay in environment variables.
 
-export function getTwilioConfig() {
+/** Branded alphanumeric sender shown to recipients (UK networks that support it). */
+export const SMS_SENDER_LABEL = "MortgageHub";
+
+export function getTwilioCredentials() {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const fromNumber = process.env.TWILIO_PHONE_NUMBER;
-  if (!accountSid || !authToken || !fromNumber) {
-    throw new Error("Twilio is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER.");
+  if (!accountSid || !authToken) {
+    throw new Error("Twilio is not configured. Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN.");
   }
-  return { accountSid, authToken, fromNumber };
+  return { accountSid, authToken };
+}
+
+export function getTwilioMessagingServiceSid(): string {
+  const sid = process.env.TWILIO_MESSAGING_SERVICE_SID?.trim();
+  if (!sid) {
+    throw new Error("Twilio SMS is not configured. Set TWILIO_MESSAGING_SERVICE_SID.");
+  }
+  return sid;
+}
+
+/** Voice / landline caller ID — not used for outbound SMS. */
+export function getTwilioVoiceNumber(): string {
+  return process.env.TWILIO_VOICE_PHONE_NUMBER?.trim() || process.env.TWILIO_PHONE_NUMBER?.trim() || "";
+}
+
+/** Twilio credentials + voice number (recording download, click-to-call). */
+export function getTwilioConfig() {
+  const credentials = getTwilioCredentials();
+  const fromNumber = getTwilioVoiceNumber();
+  if (!fromNumber) {
+    throw new Error("Voice number not configured. Set TWILIO_VOICE_PHONE_NUMBER or TWILIO_PHONE_NUMBER.");
+  }
+  return { ...credentials, fromNumber };
+}
+
+export function getSmsSenderLabel(): string {
+  return process.env.TWILIO_SMS_SENDER_LABEL?.trim() || SMS_SENDER_LABEL;
 }
 
 export function isTwilioConfigured(): boolean {
   return Boolean(
-    process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER,
+    process.env.TWILIO_ACCOUNT_SID &&
+      process.env.TWILIO_AUTH_TOKEN &&
+      process.env.TWILIO_MESSAGING_SERVICE_SID?.trim(),
+  );
+}
+
+export function isTwilioVoiceNumberConfigured(): boolean {
+  return Boolean(
+    process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && getTwilioVoiceNumber(),
   );
 }
 
@@ -28,7 +65,8 @@ export async function sendSms(opts: {
   to: string;
   body: string;
 }): Promise<{ sid: string }> {
-  const { accountSid, authToken, fromNumber } = getTwilioConfig();
+  const { accountSid, authToken } = getTwilioCredentials();
+  const messagingServiceSid = getTwilioMessagingServiceSid();
   const to = normaliseUkPhone(opts.to);
   const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
 
@@ -40,7 +78,7 @@ export async function sendSms(opts: {
     },
     body: new URLSearchParams({
       To: to,
-      From: fromNumber,
+      MessagingServiceSid: messagingServiceSid,
       Body: opts.body,
     }),
   });
@@ -160,7 +198,7 @@ export async function sendJourneyMilestoneSms(
     try {
       await supabaseAdmin.from("sms_messages").insert({
         direction: "outbound",
-        from_number: process.env.TWILIO_PHONE_NUMBER!,
+        from_number: getSmsSenderLabel(),
         to_number: phone,
         body,
         twilio_sid: sid,
@@ -199,7 +237,7 @@ export async function sendInterviewCompleteSms(customerId: string, sessionId: st
     try {
       await supabaseAdmin.from("sms_messages").insert({
         direction: "outbound",
-        from_number: process.env.TWILIO_PHONE_NUMBER!,
+        from_number: getSmsSenderLabel(),
         to_number: phone,
         body,
         twilio_sid: sid,

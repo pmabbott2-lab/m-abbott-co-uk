@@ -39,6 +39,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { formatDobDisplay } from "@/lib/dob-parse";
 
 export const Route = createFileRoute("/_authenticated/customers/$customerId")({
   component: CustomerHubPage,
@@ -424,6 +425,7 @@ function CustomerContactSection({
     email: string | null;
     phone: string | null;
     address?: string | null;
+    date_of_birth?: string | null;
   };
   canEdit: boolean;
   onSaved: () => void;
@@ -484,6 +486,12 @@ function CustomerContactSection({
           <div>
             <dt className="text-xs text-muted-foreground">Mobile</dt>
             <dd className="font-medium">{customer.phone ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">Date of birth</dt>
+            <dd className="font-medium">
+              {customer.date_of_birth ? formatDobDisplay(customer.date_of_birth) : "—"}
+            </dd>
           </div>
           <div className="sm:col-span-2">
             <dt className="text-xs text-muted-foreground">Address</dt>

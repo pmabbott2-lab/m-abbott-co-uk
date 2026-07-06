@@ -7,6 +7,8 @@
  * which mode the customer chose.
  */
 
+import { formatDobText } from "@/lib/dob-parse";
+
 // --- Credit-commitments wizard ---
 export interface CreditType {
   key: string;
@@ -114,4 +116,8 @@ export function buildDependantsSummary(entries: DependantEntry[]): string {
   if (!entries.length) return "No dependants.";
   const parts = entries.map((e) => `${e.index}) ${e.detail.trim()}`);
   return `${entries.length} dependant${entries.length > 1 ? "s" : ""} — ${parts.join("; ")}.`;
+}
+
+export function buildDobAnswer(day: number, month: number, year: number): string {
+  return formatDobText({ day, month, year });
 }

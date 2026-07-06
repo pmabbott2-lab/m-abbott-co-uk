@@ -54,13 +54,18 @@ Required:
 | `OPENAI_API_KEY` | Voice interview AI, STT, TTS |
 | `APP_BASE_URL` | Your live site URL, e.g. `https://m-abbott.co.uk` |
 
-Optional (SMS booking texts):
+Optional (SMS booking texts + voice):
 
 | Variable | Purpose |
 |----------|---------|
 | `TWILIO_ACCOUNT_SID` | Twilio account |
 | `TWILIO_AUTH_TOKEN` | Twilio auth token |
-| `TWILIO_PHONE_NUMBER` | Outbound SMS number |
+| `TWILIO_MESSAGING_SERVICE_SID` | Outbound SMS via Messaging Service (sender: MortgageHub) |
+| `TWILIO_PHONE_NUMBER` | Mobile in Messaging Service pool / voice fallback |
+| `TWILIO_VOICE_PHONE_NUMBER` | Landline for CRM calls and inbound voicemail |
+| `TWILIO_API_KEY_SID` | API key for browser Voice SDK tokens |
+| `TWILIO_API_KEY_SECRET` | API key secret (shown once when created) |
+| `TWILIO_TWIML_APP_SID` | TwiML App for browser outbound calls |
 
 ---
 

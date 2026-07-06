@@ -1,3 +1,5 @@
+import { formatGBP, parseMoneyFromText } from "@/lib/structured-answers";
+
 export type Section = "personal" | "employment" | "outgoings" | "property";
 
 /**
@@ -39,8 +41,10 @@ export function firstNameFromFullName(fullName?: string | null): string {
  * cache hit that makes the first question play instantly.
  */
 export function firstGreeting(firstName: string | undefined, firstPrompt: string): string {
-  const hi = firstName ? `Hi ${firstName}, I'm Susan.` : "Hi, I'm Susan.";
-  return `${hi} I'll guide you through a quick chat to help with your mortgage. ${firstPrompt}`;
+  const intro = firstName
+    ? `Hi ${firstName}, I'm Susan, your virtual assistant.`
+    : "Hi, I'm Susan, your virtual assistant.";
+  return `${intro} I'm here to help get your mortgage advisor up to speed before you meet. ${firstPrompt}`;
 }
 
 export type AnswersMap = Record<string, string>;
@@ -71,7 +75,7 @@ export interface Question {
   /** What Susan says (and listens for) after "Other" is tapped. */
   otherPrompt?: string;
   /** Marks a question handled by a bespoke client-side wizard (e.g. credit commitments). */
-  wizard?: "credit" | "dependants";
+  wizard?: "credit" | "dependants" | "dob";
 }
 
 export interface SectionDef {
@@ -81,20 +85,44 @@ export interface SectionDef {
   questions: Question[];
 }
 
+function employmentStatusText(answers: AnswersMap): string {
+  return (answers["employment:employment_status"] ?? "").toLowerCase();
+}
+
 function isRetired(answers: AnswersMap): boolean {
-  const v = (
-    (answers["employment:employment_status"] ?? "") + " " +
-    (answers["employment:employer"] ?? "") + " " +
-    (answers["employment:job_title"] ?? "")
-  ).toLowerCase();
-  if (!v.trim()) return false;
-  return /\bretir/.test(v) || /\bpension/.test(v) || /no longer work/.test(v) || /not working/.test(v) || /stopped work/.test(v);
+  const status = employmentStatusText(answers);
+  if (/\bretired\b/.test(status)) return true;
+  if (!status.trim()) return false;
+  return /\bretir/.test(status) || /\bpensioner\b/.test(status) || /no longer work/.test(status) || /not working/.test(status) || /stopped work/.test(status);
 }
 
 function isNotRetired(answers: AnswersMap): boolean {
-  const v = (answers["employment:employment_status"] ?? "").toLowerCase();
-  if (!v.trim()) return true;
   return !isRetired(answers);
+}
+
+function isSelfEmployed(answers: AnswersMap): boolean {
+  return /\bself[-\s]?employ/.test(employmentStatusText(answers));
+}
+
+function isContractor(answers: AnswersMap): boolean {
+  return /\bcontractor\b/.test(employmentStatusText(answers));
+}
+
+function isEmployed(answers: AnswersMap): boolean {
+  const status = employmentStatusText(answers);
+  return /\bemployed\b/.test(status) && !isSelfEmployed(answers);
+}
+
+function needsEmployer(answers: AnswersMap): boolean {
+  return (isEmployed(answers) || isContractor(answers)) && !isRetired(answers);
+}
+
+function needsBusinessName(answers: AnswersMap): boolean {
+  return isSelfEmployed(answers) && !isRetired(answers);
+}
+
+function needsJobTitle(answers: AnswersMap): boolean {
+  return (isEmployed(answers) || isContractor(answers)) && !isRetired(answers);
 }
 
 function isRemortgage(answers: AnswersMap): boolean {
@@ -106,19 +134,43 @@ function isNotRemortgage(answers: AnswersMap): boolean {
   return !isRemortgage(answers);
 }
 
+function isMovingHome(answers: AnswersMap): boolean {
+  const v = (answers["property:mortgage_purpose"] ?? "").toLowerCase();
+  return /\bmoving\b/.test(v) || /\bnext home\b/.test(v);
+}
+
+function isMovingOrRemortgage(answers: AnswersMap): boolean {
+  return isRemortgage(answers) || isMovingHome(answers);
+}
+
+function isNotMovingOrRemortgage(answers: AnswersMap): boolean {
+  return !isMovingOrRemortgage(answers);
+}
+
+/** Prompt Susan should speak for a question, based on answers already captured. */
+export function resolveQuestionPrompt(q: Question, answers: AnswersMap): string {
+  switch (q.key) {
+    case "employer":
+      return "Who is your employer?";
+    case "business_name":
+      return "What's your business called?";
+    case "job_title":
+      return isContractor(answers)
+        ? "And what's your job title or contract role?"
+        : "And what's your job title?";
+    case "mortgage_term_remaining":
+      return "How many years are left on your current mortgage?";
+    default:
+      return q.prompt;
+  }
+}
+
 export const SECTIONS: SectionDef[] = [
   {
     id: "personal",
     title: "About you",
-    intro: "Let's start with a few details about you.",
+    intro: "Let's start with where you live.",
     questions: [
-      {
-        key: "date_of_birth",
-        label: "Date of birth",
-        prompt: "I hope the weather's treating you kindly today. To kick things off — what's your date of birth?",
-        expects: "A complete date of birth: day, month, and year.",
-        silenceMs: 1500,
-      },
       {
         key: "home_postcode",
         label: "Current postcode",
@@ -136,8 +188,12 @@ export const SECTIONS: SectionDef[] = [
       {
         key: "home_confirm",
         label: "Address confirmation",
-        prompt: "Let me check that address for you.",
+        prompt: "Let me check that address.",
         expects: "A simple yes or no confirming the address is correct.",
+        options: [
+          { value: "Yes", label: "Yes" },
+          { value: "No", label: "No" },
+        ],
         silenceMs: 1100,
       },
       {
@@ -146,6 +202,14 @@ export const SECTIONS: SectionDef[] = [
         prompt: "How long have you lived there?",
         expects: "Roughly how long they have lived at the address.",
         silenceMs: 1300,
+      },
+      {
+        key: "date_of_birth",
+        label: "Date of birth",
+        prompt: "What's your date of birth? Tap the day, month and year below — or say it aloud, for example 15 March 1980.",
+        expects: "A complete date of birth: day, month, and year.",
+        wizard: "dob",
+        silenceMs: 2000,
       },
       {
         key: "marital_status",
@@ -198,9 +262,17 @@ export const SECTIONS: SectionDef[] = [
       {
         key: "employer",
         label: "Employer",
-        prompt: "Who is your employer, {firstName}? If you're self-employed, just tell me your business name.",
-        expects: "The employer or business name.",
-        skipWhen: isRetired,
+        prompt: "Who is your employer?",
+        expects: "The employer name.",
+        skipWhen: (answers) => !needsEmployer(answers),
+        silenceMs: 1300,
+      },
+      {
+        key: "business_name",
+        label: "Business name",
+        prompt: "What's your business called?",
+        expects: "The business or trading name.",
+        skipWhen: (answers) => !needsBusinessName(answers),
         silenceMs: 1300,
       },
       {
@@ -208,7 +280,7 @@ export const SECTIONS: SectionDef[] = [
         label: "Job title",
         prompt: "And what's your job title?",
         expects: "The customer's job title or role.",
-        skipWhen: isRetired,
+        skipWhen: (answers) => !needsJobTitle(answers),
         silenceMs: 1300,
       },
       {
@@ -232,15 +304,8 @@ export const SECTIONS: SectionDef[] = [
   {
     id: "outgoings",
     title: "Outgoings & credit",
-    intro: "Let's cover your regular outgoings and any existing credit.",
+    intro: "Let's cover any existing credit commitments.",
     questions: [
-      {
-        key: "monthly_essentials",
-        label: "Monthly essentials",
-        prompt: "Roughly how much do you spend on essentials each month, {firstName} — things like bills, food and travel?",
-        expects: "Approximate total monthly essential spending in GBP.",
-        silenceMs: 1300,
-      },
       {
         key: "credit_commitments",
         label: "Credit commitments",
@@ -331,10 +396,19 @@ export const SECTIONS: SectionDef[] = [
         silenceMs: 1100,
       },
       {
+        key: "mortgage_term_remaining",
+        label: "Remaining mortgage term",
+        prompt: "How many years are left on your current mortgage?",
+        expects: "How many years remain on the current mortgage.",
+        skipWhen: isNotMovingOrRemortgage,
+        silenceMs: 1300,
+      },
+      {
         key: "mortgage_term",
         label: "Mortgage term",
         prompt: "Over how many years would you like the mortgage?",
         expects: "The mortgage term in years.",
+        skipWhen: isMovingOrRemortgage,
         silenceMs: 1300,
       },
     ],
@@ -418,4 +492,45 @@ export function prevStep(
 
 export function getQuestion(section: Section, index: number): Question | undefined {
   return findSection(section)?.questions[index];
+}
+
+/** Build the spoken line for a question (resume/back), matching server phrasing. */
+export function buildQuestionSayText(
+  section: Section,
+  index: number,
+  answers: AnswersMap,
+  firstName?: string,
+  opts?: { isFirstQuestion?: boolean },
+): string {
+  const sectionDef = findSection(section);
+  const question = getQuestion(section, index);
+  if (!sectionDef || !question) return "";
+
+  const personalise = (text: string) =>
+    firstName ? text.replace(/\{firstName\}/g, firstName) : text.replace(/,?\s*\{firstName\}/g, "");
+
+  if (opts?.isFirstQuestion && section === "personal" && index === 0) {
+    return personalise(firstGreeting(firstName, resolveQuestionPrompt(question, answers)));
+  }
+
+  if (question.key === "home_confirm") {
+    const addr = answers["personal:home_address"] ?? "";
+    const confirm = addr
+      ? `I have your address as ${addr}. Tap Yes to confirm, or No to try again.`
+      : "Your address — please say the full address, including the street, town and postcode.";
+    return personalise(confirm);
+  }
+
+  if (question.key === "equity_confirm") {
+    const price = parseMoneyFromText(answers["property:property_price"] ?? "");
+    const owed = parseMoneyFromText(answers["property:amount_owed"] ?? "");
+    if (price != null && owed != null) {
+      const equity = Math.max(0, price - owed);
+      return personalise(`That leaves about ${formatGBP(equity)} of equity in the property. Does that sound right? If not, just tell me the correct balance.`);
+    }
+    return personalise("Roughly how much equity do you think you have in the property?");
+  }
+
+  const intro = index === 0 ? `${sectionDef.intro} ` : "";
+  return personalise(intro + resolveQuestionPrompt(question, answers));
 }

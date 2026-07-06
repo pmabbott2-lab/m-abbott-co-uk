@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { PostCompletionBooking } from "@/components/PostCompletionBooking";
 import { ArrowLeft, Send } from "lucide-react";
 import { toast } from "sonner";
-import { totalQuestions, questionIndexGlobal, getQuestion, findSection, prevStep, type Section, type AnswersMap } from "@/lib/interview-script";
+import { totalQuestions, questionIndexGlobal, getQuestion, findSection, prevStep, buildQuestionSayText, type Section, type AnswersMap } from "@/lib/interview-script";
 
 export const Route = createFileRoute("/_authenticated/text/$sessionId")({
   component: TextInterviewPage,
@@ -29,14 +29,8 @@ interface StepResp {
   sayText?: string;
 }
 
-function buildPromptText(section: Section, index: number) {
-  const sectionDef = findSection(section);
-  const question = getQuestion(section, index);
-  if (!sectionDef || !question) return "";
-  if (section === "personal" && index === 0) {
-    return `Hi, I'm Susan. I'll guide you through a quick fact-find for your mortgage application. ${sectionDef.intro} ${question.prompt}`;
-  }
-  return `${sectionDef.intro} ${question.prompt}`;
+function buildPromptText(section: Section, index: number, answers: AnswersMap, firstName?: string) {
+  return buildQuestionSayText(section, index, answers, firstName, { isFirstQuestion: section === "personal" && index === 0 });
 }
 
 function TextInterviewPage() {

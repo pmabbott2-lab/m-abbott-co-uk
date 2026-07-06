@@ -339,6 +339,7 @@ export const generateLenderExample = createServerFn({ method: "POST" })
       null;
 
     const term =
+      parseYears(map.get("property:mortgage_term_remaining")) ??
       parseYears(map.get("property:mortgage_term")) ??
       parseYears(map.get("property:term_years")) ??
       parseYears(mortgageNeed) ??
@@ -766,6 +767,7 @@ export const getCustomerHub = createServerFn({ method: "POST" })
       email: string | null;
       phone: string | null;
       address?: string | null;
+      date_of_birth?: string | null;
     } | null = null;
     {
       const withAddress = await supabaseAdmin
@@ -783,6 +785,28 @@ export const getCustomerHub = createServerFn({ method: "POST" })
       } else {
         if (withAddress.error) throw new Error(withAddress.error.message);
         profile = withAddress.data;
+      }
+    }
+
+    let latestDob: string | null = null;
+    if (sessionIds.length > 0) {
+      const { data: dobAnswers } = await supabaseAdmin
+        .from("interview_answers")
+        .select("session_id, value")
+        .eq("field_key", "date_of_birth")
+        .in("session_id", sessionIds);
+      const dobBySession = new Map<string, string>();
+      for (const row of dobAnswers ?? []) {
+        if (row.session_id && row.value && !dobBySession.has(row.session_id)) {
+          dobBySession.set(row.session_id, row.value);
+        }
+      }
+      for (const s of active) {
+        const dob = dobBySession.get(s.id);
+        if (dob) {
+          latestDob = dob;
+          break;
+        }
       }
     }
 
@@ -808,14 +832,19 @@ export const getCustomerHub = createServerFn({ method: "POST" })
       }
     }
 
+    const customer = profile
+      ? { ...profile, date_of_birth: latestDob }
+      : {
+          id: data.customerId,
+          full_name: null,
+          email: null,
+          phone: null,
+          address: null,
+          date_of_birth: null,
+        };
+
     return {
-      customer: profile ?? {
-        id: data.customerId,
-        full_name: null,
-        email: null,
-        phone: null,
-        address: null,
-      },
+      customer,
       introducer,
       factFinds,
       cases,
@@ -952,6 +981,7 @@ export const getSession = createServerFn({ method: "POST" })
       email: string | null;
       phone: string | null;
       address?: string | null;
+      date_of_birth?: string | null;
     } | null = null;
     if (session?.customer_id) {
       const { data: profile, error: profileError } = await context.supabase
@@ -971,7 +1001,10 @@ export const getSession = createServerFn({ method: "POST" })
         customer = profile ?? null;
       }
     }
-    return { session, messages: messages ?? [], answers: answers ?? [], customer };
+    const answerMap = new Map((answers ?? []).map((a) => [`${a.section}:${a.field_key}`, a.value]));
+    const dobFromAnswers = answerMap.get("personal:date_of_birth") ?? null;
+    const customerWithDob = customer ? { ...customer, date_of_birth: dobFromAnswers } : customer;
+    return { session, messages: messages ?? [], answers: answers ?? [], customer: customerWithDob };
   });
 
 export const submitSession = createServerFn({ method: "POST" })
@@ -2207,9 +2240,14 @@ export type ContactHistoryEntry = {
     | "fact_find"
     | "journey_milestone"
     | "history_amend"
-    | "finance";
+    | "finance"
+    | "phone_call";
   body: string | null;
   occurredAt: string;
+  /** Phone call attachment — open for summary + transcript. */
+  callId?: string;
+  aiStatus?: string;
+  hasAttachment?: boolean;
   /** True when owner amended this contact-log row. */
   amended?: boolean;
   /** True when owner soft-deleted this contact-log row. */
@@ -2252,19 +2290,17 @@ function smsHistoryLabel(direction: string, body: string | null): string {
 // that session's appointments, call-backs, sent/received SMS and fact-find
 // milestones. Read-side merge of existing sources — no extra storage. Every
 // source is defensive: a missing table / empty result never breaks the list.
-export const listContactHistory = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<ContactHistoryEntry[]> => {
-    const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("advisor") && !roles.includes("admin")) throw new Error("Forbidden");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const { canAmendHistory } = await import("@/lib/admin-access");
-    const isOwner = canAmendHistory(await resolveAdminAccess(context.userId, email));
+export async function fetchContactHistoryEntries(
+  sessionId: string,
+  opts: { userId: string; email?: string },
+): Promise<ContactHistoryEntry[]> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { resolveAdminAccess } = await import("@/lib/admin.functions");
+  const { canAmendHistory } = await import("@/lib/admin-access");
+  const isOwner = canAmendHistory(await resolveAdminAccess(opts.userId, opts.email));
 
-    const entries: ContactHistoryEntry[] = [];
+  const entries: ContactHistoryEntry[] = [];
+  const data = { sessionId };
 
     // Fact-find milestones + the customer's phone (used to link SMS below).
     let customerPhone: string | null = null;
@@ -2445,8 +2481,51 @@ export const listContactHistory = createServerFn({ method: "POST" })
       }
     }
 
-    entries.sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
-    return entries;
+    {
+      const { data: calls, error } = await supabaseAdmin
+        .from("phone_calls")
+        .select("id, to_number, from_number, call_kind, status, started_at, duration_seconds, summary, ai_status")
+        .eq("session_id", data.sessionId);
+      if (error && !isMissingTableError(error)) throw new Error(error.message);
+      for (const c of calls ?? []) {
+        const dur =
+          c.duration_seconds != null && c.duration_seconds > 0
+            ? ` · ${Math.round(c.duration_seconds / 60)} min`
+            : "";
+        const ai =
+          c.ai_status === "complete"
+            ? " · summary ready"
+            : c.ai_status === "processing"
+              ? " · transcribing…"
+              : "";
+        const label =
+          c.call_kind === "inbound_voicemail"
+            ? `Voicemail from ${c.from_number ?? "customer"}`
+            : `Outbound call to ${c.to_number}`;
+        entries.push({
+          id: `call-${c.id}`,
+          type: "phone_call",
+          body: `${label}${dur}${ai}`,
+          occurredAt: c.started_at,
+          callId: c.id,
+          aiStatus: c.ai_status,
+          hasAttachment: true,
+        });
+      }
+    }
+
+  entries.sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+  return entries;
+}
+
+export const listContactHistory = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<ContactHistoryEntry[]> => {
+    const roles = await getRolesForUser(context.userId);
+    if (!roles.includes("advisor") && !roles.includes("admin")) throw new Error("Forbidden");
+    const email = (context.claims as { email?: string }).email;
+    return fetchContactHistoryEntries(data.sessionId, { userId: context.userId, email });
   });
 
 export const getCustomerJourney = createServerFn({ method: "POST" })

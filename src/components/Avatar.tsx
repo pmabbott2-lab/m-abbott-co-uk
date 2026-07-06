@@ -448,10 +448,10 @@ export function useAudioPlayback(getAuthToken?: () => Promise<string | null>) {
     try { sourceRef.current?.stop(); } catch {}
     sourceRef.current = null;
     if (progressRafRef.current) cancelAnimationFrame(progressRafRef.current);
+    progressRafRef.current = null;
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     // Inert when the flag is off (getRealtimeAvatarSink() returns null).
     if (REALTIME_AVATAR_ENABLED) getRealtimeAvatarSink()?.clear();
-    setProgress(1);
     setPlaying(false);
   };
 

@@ -19,7 +19,7 @@ export const sendLoginSmsCode = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     if (!isTwilioConfigured()) {
       throw new Error(
-        "SMS sign-in is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in .env.",
+        "SMS sign-in is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_MESSAGING_SERVICE_SID in .env.",
       );
     }
 

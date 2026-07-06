@@ -49,6 +49,9 @@ import {
   CALLBACK_WINDOW_RANGES,
 } from "@/components/PostCompletionBooking";
 import { CustomerHubBookingDialog } from "@/components/CustomerHubBookingDialog";
+import { CrmContactCard } from "@/components/CrmContactCard";
+import { PhoneCallDetailDialog } from "@/components/PhoneCallDetailDialog";
+import { listSessionVoicemails } from "@/lib/telephony.functions";
 
 export const Route = createFileRoute("/_authenticated/sessions/$sessionId")({
   component: SessionDetail,
@@ -216,7 +219,7 @@ function SessionDetail() {
 
           {isAdvisor && isCase && (
             <TabsContent value="crm" className="space-y-6 mt-4">
-              <ContactCard customer={customer} />
+              <CrmContactCard sessionId={sessionId} customer={customer} clickToCall />
               {customerId && (
                 <Link to="/customers/$customerId" params={{ customerId }}>
                   <Button variant="outline" size="sm">Open customer record</Button>
@@ -524,6 +527,7 @@ const HISTORY_LABELS: Record<string, string> = {
   finance: "Finance",
   appointment: "Appointment",
   callback: "Call-back",
+  phone_call: "Phone call",
   sms: "SMS",
   fact_find: "Fact-find",
   journey_milestone: "Journey",
@@ -635,13 +639,19 @@ function AppointmentCallbackCard({
 }) {
   const qc = useQueryClient();
   const getFn = useServerFn(getSessionBooking);
+  const voicemailsFn = useServerFn(listSessionVoicemails);
   const attemptFn = useServerFn(logCallbackAttempt);
   const resolveFn = useServerFn(resolveCallback);
   const openedFn = useServerFn(markContactOpened);
+  const [voicemailCallId, setVoicemailCallId] = useState<string | null>(null);
 
   const bookingQ = useQuery({
     queryKey: ["session-booking", sessionId],
     queryFn: () => getFn({ data: { sessionId } }),
+  });
+  const voicemailsQ = useQuery({
+    queryKey: ["session-voicemails", sessionId],
+    queryFn: () => voicemailsFn({ data: { sessionId } }),
   });
 
   const appointment = bookingQ.data?.appointment ?? null;
@@ -657,6 +667,7 @@ function AppointmentCallbackCard({
 
   const invalidateAfterAction = () => {
     qc.invalidateQueries({ queryKey: ["session-booking", sessionId] });
+    qc.invalidateQueries({ queryKey: ["session-voicemails", sessionId] });
     qc.invalidateQueries({ queryKey: ["contact-history", sessionId] });
     qc.invalidateQueries({ queryKey: ["contact-tracking", sessionId] });
     qc.invalidateQueries({ queryKey: ["advisor-contacts"] });
@@ -685,6 +696,7 @@ function AppointmentCallbackCard({
 
   const callbackResolved = callback?.status === "closed";
   const actionPending = logAttempt.isPending || spokeTo.isPending;
+  const voicemails = voicemailsQ.data ?? [];
 
   return (
     <div className="rounded-2xl border bg-card p-5 space-y-4">
@@ -692,6 +704,39 @@ function AppointmentCallbackCard({
         <CalendarCheck className="w-4 h-4 text-muted-foreground" />
         Appointment &amp; call-back
       </h3>
+
+      {voicemails.length > 0 && (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
+          <div className="flex items-center gap-2 text-xs font-medium text-primary">
+            <PhoneCall className="w-3 h-3" /> Voicemail — call back requested
+          </div>
+          {voicemails.map((vm) => (
+            <div key={vm.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <div>
+                <div className="font-medium">{vm.fromNumber}</div>
+                <div className="text-xs text-muted-foreground">{formatLondon(vm.startedAt)}</div>
+                {vm.summary && (
+                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{vm.summary}</p>
+                )}
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setVoicemailCallId(vm.id)}
+                disabled={vm.aiStatus === "processing" || vm.aiStatus === "pending"}
+              >
+                {vm.aiStatus === "complete" ? "View summary" : vm.aiStatus === "processing" ? "Transcribing…" : "View"}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <PhoneCallDetailDialog
+        callId={voicemailCallId}
+        open={Boolean(voicemailCallId)}
+        onOpenChange={(open) => !open && setVoicemailCallId(null)}
+      />
 
       <div className="rounded-lg border bg-background p-4 space-y-3">
         {bookingQ.isLoading ? (
@@ -904,6 +949,7 @@ function ContactHistoryCard({ sessionId, isOwner }: { sessionId: string; isOwner
   const amendFn = useServerFn(amendContactHistoryEntry);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
+  const [historyCallId, setHistoryCallId] = useState<string | null>(null);
 
   const historyQ = useQuery({
     queryKey: ["contact-history", sessionId],
@@ -972,11 +1018,24 @@ function ContactHistoryCard({ sessionId, isOwner }: { sessionId: string; isOwner
                   </div>
                 </div>
               ) : (
-                e.body && (
-                  <div className={e.deleted ? "text-destructive line-through" : e.amended ? "text-destructive" : ""}>
-                    {e.body}
-                  </div>
-                )
+                <>
+                  {e.body && (
+                    <div className={e.deleted ? "text-destructive line-through" : e.amended ? "text-destructive" : ""}>
+                      {e.body}
+                    </div>
+                  )}
+                  {e.callId && e.hasAttachment && !e.deleted && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="link"
+                      className="h-auto p-0 mt-1"
+                      onClick={() => setHistoryCallId(e.callId!)}
+                    >
+                      View call summary
+                    </Button>
+                  )}
+                </>
               )}
               {isOwner && e.amendable && !e.deleted && editingId !== e.id && (
                 <div className="flex gap-2 mt-1">
@@ -1007,6 +1066,11 @@ function ContactHistoryCard({ sessionId, isOwner }: { sessionId: string; isOwner
           </div>
         ))}
       </div>
+      <PhoneCallDetailDialog
+        callId={historyCallId}
+        open={Boolean(historyCallId)}
+        onOpenChange={(open) => !open && setHistoryCallId(null)}
+      />
     </div>
   );
 }
@@ -1363,45 +1427,6 @@ function CustomerFinanceCard({
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-function ContactCard({
-  customer,
-}: {
-  customer: {
-    full_name: string | null;
-    email: string | null;
-    phone: string | null;
-    address?: string | null;
-  } | null;
-}) {
-  const items: Array<{ label: string; value: string }> = [];
-  if (customer?.full_name) items.push({ label: "Name", value: customer.full_name });
-  if (customer?.email) items.push({ label: "Email", value: customer.email });
-  if (customer?.phone) items.push({ label: "Mobile", value: customer.phone });
-  if (customer?.address) items.push({ label: "Address", value: customer.address });
-  if (items.length === 0) {
-    return (
-      <div className="rounded-2xl border bg-card p-5">
-        <h3 className="font-semibold mb-1">Contact details</h3>
-        <p className="text-sm text-muted-foreground">No contact details on file for this customer yet.</p>
-      </div>
-    );
-  }
-  return (
-    <div className="rounded-2xl border bg-card p-5">
-      <h3 className="font-semibold mb-1">Contact details</h3>
-      <p className="text-xs text-muted-foreground mb-4">From the account used for this fact-find.</p>
-      <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {items.map((it) => (
-          <div key={it.label}>
-            <dt className="text-xs text-muted-foreground">{it.label}</dt>
-            <dd className="text-sm font-medium break-words">{it.value}</dd>
-          </div>
-        ))}
-      </dl>
     </div>
   );
 }

@@ -155,6 +155,9 @@ export function extractStructuredFields(fieldKey: string, value: string): Json {
     case "employer": {
       return text ? { employer: text } : {};
     }
+    case "business_name": {
+      return text ? { employer: text, business_name: text } : {};
+    }
     case "job_title": {
       return text ? { job_title: text } : {};
     }
@@ -242,7 +245,8 @@ export function extractStructuredFields(fieldKey: string, value: string): Json {
     }
     case "equity_confirm":
       return {};
-    case "mortgage_term": {
+    case "mortgage_term":
+    case "mortgage_term_remaining": {
       const t = parseYears(text) ?? (text.match(/\b(\d{1,2})\b/) ? parseInt(text.match(/\b(\d{1,2})\b/)![1], 10) : null);
       return t ? { mortgage_term_years: t } : {};
     }

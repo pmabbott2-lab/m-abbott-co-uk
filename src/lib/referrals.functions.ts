@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
-import { isTwilioConfigured, sendSms, getAppBaseUrl } from "@/lib/sms.server";
+import { isTwilioConfigured, sendSms, getAppBaseUrl, getSmsSenderLabel } from "@/lib/sms.server";
 import { rafShareMessage } from "@/lib/referral";
 
 // ============================================================================
@@ -365,7 +365,7 @@ export const textReferralLink = createServerFn({ method: "POST" })
     try {
       await supabaseAdmin.from("sms_messages").insert({
         direction: "outbound",
-        from_number: process.env.TWILIO_PHONE_NUMBER!,
+        from_number: getSmsSenderLabel(),
         to_number: link.referrer_phone,
         body,
         twilio_sid: sid,
@@ -413,7 +413,7 @@ export const textRafInviteToFriend = createServerFn({ method: "POST" })
     try {
       await supabaseAdmin.from("sms_messages").insert({
         direction: "outbound",
-        from_number: process.env.TWILIO_PHONE_NUMBER!,
+        from_number: getSmsSenderLabel(),
         to_number: data.friendPhone,
         body,
         twilio_sid: sid,

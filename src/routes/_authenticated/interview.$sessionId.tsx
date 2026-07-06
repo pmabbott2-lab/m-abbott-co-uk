@@ -9,6 +9,7 @@ import { useAudioPlayback } from "@/components/Avatar";
 import { RealtimeAvatar } from "@/components/RealtimeAvatar";
 import { REALTIME_AVATAR_ENABLED, whenRealtimeAvatarReady } from "@/lib/realtime-avatar-bridge";
 import { PostCompletionBooking } from "@/components/PostCompletionBooking";
+import { DobPicker } from "@/components/DobPicker";
 import {
   getSpeechRecognitionCtor,
   isBrowserSttSupported,
@@ -20,13 +21,14 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Pause, Play, ArrowLeft, Undo2, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
-import { totalQuestions, questionIndexGlobal, getQuestion, findSection, prevStep, SECTIONS, ACKNOWLEDGEMENTS, ackClip, firstGreeting, firstNameFromFullName, type Section, type AnswersMap } from "@/lib/interview-script";
+import { totalQuestions, questionIndexGlobal, getQuestion, findSection, prevStep, SECTIONS, ACKNOWLEDGEMENTS, ackClip, firstGreeting, firstNameFromFullName, buildQuestionSayText, type Section, type AnswersMap } from "@/lib/interview-script";
 import {
   CREDIT_TYPES,
   parseCount,
   buildCreditSummary,
   ordinal,
   buildDependantsSummary,
+  buildDobAnswer,
   type CreditFlow,
   type DependantFlow,
 } from "@/lib/interview-wizards";
@@ -47,7 +49,8 @@ interface StepResp {
   ack?: string;
   sayText?: string;
   closing?: string;
-  wizard?: "credit" | "dependants";
+  wizard?: "credit" | "dependants" | "dob";
+  followupCount?: number;
 }
 
 // Hard cap on the spoken closing line so a stalled avatar/TTS never blocks the
@@ -79,16 +82,8 @@ function revealByProgress(text: string, p: number): string {
   return text.slice(0, nextSpace === -1 ? text.length : nextSpace);
 }
 
-function buildPromptText(section: Section, index: number, firstName?: string) {
-  const sectionDef = findSection(section);
-  const question = getQuestion(section, index);
-  if (!sectionDef || !question) return "";
-  const personalise = (text: string) =>
-    firstName ? text.replace(/\{firstName\}/g, firstName) : text.replace(/,?\s*\{firstName\}/g, "");
-  if (section === "personal" && index === 0) {
-    return personalise(firstGreeting(firstName, question.prompt));
-  }
-  return personalise(`${sectionDef.intro} ${question.prompt}`);
+function buildPromptText(section: Section, index: number, firstName: string | undefined, answers: AnswersMap) {
+  return buildQuestionSayText(section, index, answers, firstName);
 }
 
 function asSusan(text: string) {
@@ -134,6 +129,7 @@ function InterviewPage() {
   const [credit, setCredit] = useState<CreditFlow | null>(null);
   // Dependants wizard state (count, then per-child name & age).
   const [dependants, setDependants] = useState<DependantFlow | null>(null);
+  const [dobSpeechMode, setDobSpeechMode] = useState(false);
 
   const mediaRef = useRef<MediaRecorder | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
@@ -158,6 +154,26 @@ function InterviewPage() {
   const pausedRef = useRef(false);
   const doneRef = useRef(false);
   const currentRef = useRef<StepResp | null>(null);
+  /** Bumped on pause/back to cancel in-flight step/speech handlers. */
+  const flowGenRef = useRef(0);
+
+  const bumpFlow = () => {
+    flowGenRef.current += 1;
+    return flowGenRef.current;
+  };
+
+  const resetInterviewInput = () => {
+    listenArmedRef.current = false;
+    pendingTranscriptRef.current = null;
+    setOptionsActive(false);
+    setCreditState(null);
+    setDependantsState(null);
+    setDobSpeechMode(false);
+    setListening(false);
+    setTranscribing(false);
+    setThinking(false);
+    silentRetryRef.current = 0;
+  };
 
   pausedRef.current = paused;
   doneRef.current = done;
@@ -231,6 +247,7 @@ function InterviewPage() {
 
   const getStepOptions = (step: StepResp | null) => {
     if (!step || step.done || !step.section || step.questionIndex == null) return null;
+    if (step.fieldKey === "home_confirm" && (step.followupCount ?? 0) > 0) return null;
     const q = getQuestion(step.section, step.questionIndex);
     if (!q?.options?.length) return null;
     return {
@@ -254,7 +271,7 @@ function InterviewPage() {
   // (tap options and the credit wizard wait for a tap instead).
   const armListenEarly = (step: StepResp | null) => {
     if (pausedRef.current || doneRef.current) return;
-    if (step?.wizard === "credit" || step?.wizard === "dependants" || getStepOptions(step)) return;
+    if (step?.wizard === "credit" || step?.wizard === "dependants" || (step?.wizard === "dob" && !dobSpeechMode) || getStepOptions(step)) return;
     startListeningOnce();
   };
 
@@ -266,6 +283,8 @@ function InterviewPage() {
       startCreditSelect();
     } else if (step?.wizard === "dependants") {
       startDependants();
+    } else if (step?.wizard === "dob" && !dobSpeechMode) {
+      startDob();
     } else if (getStepOptions(step)) {
       setOptionsActive(true);
       setStatus("Tap the option that best fits");
@@ -424,6 +443,32 @@ function InterviewPage() {
     void callStep(summary);
   };
 
+  // ---- Date of birth wizard ----
+  const startDob = () => {
+    setOptionsActive(false);
+    setDobSpeechMode(false);
+    pendingTranscriptRef.current = null;
+    setStatus("Tap your date of birth below");
+  };
+
+  const confirmDob = (day: number, month: number, year: number) => {
+    setDobSpeechMode(false);
+    void callStep(buildDobAnswer(day, month, year));
+  };
+
+  const dobSayInstead = async () => {
+    setDobSpeechMode(true);
+    setStatus("Susan is speaking…");
+    listenArmedRef.current = false;
+    const prompt = "No problem — just say your date of birth, including the day, month and year.";
+    try {
+      await play(prompt, { onNearEnd: () => startListeningOnce(), leadMs: 1000 });
+    } catch {
+      /* ignore playback failure — still listen */
+    }
+    startListeningOnce();
+  };
+
   // ---- Dependants wizard ----
   const setDependantsState = (next: DependantFlow | null) => {
     dependantsRef.current = next;
@@ -481,6 +526,7 @@ function InterviewPage() {
 
   // Route a finished transcript either to the credit wizard or the normal step.
   const deliverTranscript = (text: string) => {
+    if (pausedRef.current || doneRef.current) return;
     const handler = pendingTranscriptRef.current;
     if (handler) {
       pendingTranscriptRef.current = null;
@@ -491,6 +537,7 @@ function InterviewPage() {
   };
 
   const callStep = async (transcript: string) => {
+    const gen = flowGenRef.current;
     silentRetryRef.current = 0;
     setThinking(true);
     setStatus(transcript ? "Preparing the next question…" : "Preparing…");
@@ -505,6 +552,7 @@ function InterviewPage() {
       });
       if (!res.ok) throw new Error(await res.text());
       const data = normaliseStep((await res.json()) as StepResp);
+      if (gen !== flowGenRef.current) return;
       if (data.done) {
         setOptionsActive(false);
         const closing = (data.closing ?? "").trim();
@@ -536,8 +584,9 @@ function InterviewPage() {
       setCurrent(data);
       setLastHeard("");
       setOptionsActive(false);
+      setDobSpeechMode(false);
       const opts = getStepOptions(data);
-      if (data.sayText) {
+        if (data.sayText) {
         setStatus("Susan is speaking…");
         if (!pausedRef.current && !doneRef.current) {
           // Kick off generating the question audio now so it's ready by the time
@@ -550,6 +599,7 @@ function InterviewPage() {
         if (data.ack && !pausedRef.current && !doneRef.current) {
           await play(data.ack, { noReveal: true }).catch(() => {});
         }
+        if (gen !== flowGenRef.current) return;
         const spoke = await play(data.sayText, { onNearEnd: () => armListenEarly(data), leadMs: 1000 })
           .then(() => true)
           .catch((e) => {
@@ -558,15 +608,20 @@ function InterviewPage() {
             if (!opts) toast.message("Having trouble with voice playback — please answer when you're ready");
             return true;
           });
-        if (spoke && !pausedRef.current && !doneRef.current) {
+        if (spoke && !pausedRef.current && !doneRef.current && gen === flowGenRef.current) {
           if (data.wizard === "credit") {
             startCreditSelect();
           } else if (data.wizard === "dependants") {
             startDependants();
+          } else if (data.wizard === "dob") {
+            startDob();
           } else if (opts) {
-            // Wait for a tap rather than listening on the microphone.
             setOptionsActive(true);
-            setStatus("Tap the option that best fits");
+            setStatus(
+              data.fieldKey === "home_confirm"
+                ? "Tap Yes to confirm, or No to try again"
+                : "Tap the option that best fits",
+            );
           } else {
             startListeningOnce();
           }
@@ -583,6 +638,7 @@ function InterviewPage() {
   };
 
   const submitRecording = async (blob: Blob, mimeType: string) => {
+    if (pausedRef.current || doneRef.current) return;
     if (blob.size < 512) {
       handleNoSpeech();
       return;
@@ -651,7 +707,7 @@ function InterviewPage() {
       let silenceTimer: ReturnType<typeof setTimeout> | null = null;
       const fieldKey = currentRef.current?.fieldKey;
       // Dates need a touch more cushion (people pause between day/month/year).
-      const silenceMs = fieldKey === "date_of_birth" ? 1500 : 1200;
+      const silenceMs = fieldKey === "date_of_birth" ? 2000 : 1200;
 
       const clearSilence = () => {
         if (silenceTimer) window.clearTimeout(silenceTimer);
@@ -865,17 +921,14 @@ function InterviewPage() {
   };
 
   const handlePause = () => {
+    bumpFlow();
     pausedRef.current = true;
     setPaused(true);
     stopPlayback();
     stopRecognition();
     if (mediaRef.current?.state === "recording") mediaRef.current.stop();
     cleanupAudio();
-    setListening(false);
-    // Reset any in-progress wizard so resume restarts it cleanly.
-    pendingTranscriptRef.current = null;
-    setCreditState(null);
-    setDependantsState(null);
+    resetInterviewInput();
     setStatus("Paused");
   };
 
@@ -924,6 +977,7 @@ function InterviewPage() {
   };
 
   const playLocal = (sayText: string, section: Section, index: number) => {
+    const gen = flowGenRef.current;
     const secDef = findSection(section);
     const q = getQuestion(section, index);
     const localStep = {
@@ -936,6 +990,7 @@ function InterviewPage() {
       fieldLabel: q?.label,
       prompt: q?.prompt,
       sayText,
+      wizard: q?.wizard,
     };
     currentRef.current = localStep;
     setCurrent(localStep);
@@ -943,15 +998,25 @@ function InterviewPage() {
     listenArmedRef.current = false;
     play(sayText, { onNearEnd: () => armListenEarly(localStep), leadMs: 1000 })
       .then(() => {
+        if (gen !== flowGenRef.current || pausedRef.current || doneRef.current) return;
         beginInputForStep(localStep);
       })
       .catch((e) => {
+        if (gen !== flowGenRef.current) return;
         console.error("TTS play failed", e);
         setStatus("Listening… speak your answer");
         toast.message("Having trouble with voice playback — please answer when you're ready");
         beginInputForStep(localStep);
       });
   };
+
+  const answersMap: AnswersMap = (() => {
+    const m: AnswersMap = {};
+    (sessionQ.data?.answers ?? []).forEach((a: { section: string; field_key: string; value: string | null }) => {
+      m[`${a.section}:${a.field_key}`] = a.value ?? "";
+    });
+    return m;
+  })();
 
   const handleStart = async () => {
     if (bootedRef.current || !sessionQ.data) return;
@@ -994,20 +1059,12 @@ function InterviewPage() {
       playLocal(asSusan(lastAvatar!.text), savedSection, savedIndex);
     } else if (messages.length > 0) {
       // Resume after an answer — re-ask the saved question locally, no server advance
-      playLocal(buildPromptText(savedSection, savedIndex, profileFirstName), savedSection, savedIndex);
+      playLocal(buildPromptText(savedSection, savedIndex, profileFirstName, answersMap), savedSection, savedIndex);
     } else {
       // Fresh session — let the server seed the first question
       callStep("");
     }
   };
-
-  const answersMap: AnswersMap = (() => {
-    const m: AnswersMap = {};
-    (sessionQ.data?.answers ?? []).forEach((a: { section: string; field_key: string; value: string | null }) => {
-      m[`${a.section}:${a.field_key}`] = a.value ?? "";
-    });
-    return m;
-  })();
 
   const handleBack = async () => {
     if (!current?.section || current.questionIndex == null) return;
@@ -1016,20 +1073,26 @@ function InterviewPage() {
       toast.info("You're at the first question");
       return;
     }
+    const gen = bumpFlow();
     stopPlayback();
     if (mediaRef.current?.state === "recording") {
       try { mediaRef.current.stop(); } catch {}
     }
     cleanupAudio(false);
-    setListening(false);
-    setThinking(false);
+    resetInterviewInput();
     try {
       await setPositionFn({ data: { sessionId, section: prev.section, index: prev.index } });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't go back");
       return;
     }
-    playLocal(buildPromptText(prev.section, prev.index, profileFirstName), prev.section, prev.index);
+    if (gen !== flowGenRef.current) return;
+    const { data: refreshedSession } = await sessionQ.refetch();
+    const refreshed: AnswersMap = {};
+    (refreshedSession?.answers ?? []).forEach((a: { section: string; field_key: string; value: string | null }) => {
+      refreshed[`${a.section}:${a.field_key}`] = a.value ?? "";
+    });
+    playLocal(buildPromptText(prev.section, prev.index, profileFirstName, refreshed), prev.section, prev.index);
   };
 
 
@@ -1074,6 +1137,7 @@ function InterviewPage() {
   const showCreditSelect = credit?.phase === "select" && wizardReady;
   const showCreditCount = credit?.phase === "count" && wizardReady && !listening;
   const showDependantsCount = dependants?.phase === "count" && wizardReady && !listening;
+  const showDobPicker = current?.wizard === "dob" && !dobSpeechMode && wizardReady && !listening;
 
   return (
     <AppShell
@@ -1092,7 +1156,7 @@ function InterviewPage() {
           >
             <MessageSquare className="w-4 h-4 mr-2" /> Switch to typing
           </Button>
-          <Button variant="outline" size="sm" className="shrink-0" onClick={() => navigate({ to: "/home" })}>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={() => { handlePause(); navigate({ to: "/home" }); }}>
             <ArrowLeft className="w-4 h-4 mr-2" /> Back
           </Button>
         </div>
@@ -1253,6 +1317,9 @@ function InterviewPage() {
                     5+
                   </Button>
                 </div>
+              )}
+              {showDobPicker && (
+                <DobPicker onConfirm={confirmDob} onSayInstead={() => void dobSayInstead()} />
               )}
               <p className="text-sm text-muted-foreground">
                 {transcribing

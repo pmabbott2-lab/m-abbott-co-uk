@@ -5,6 +5,7 @@ import {
   bookingConfirmationMessage,
   callbackConfirmationMessage,
   getAppBaseUrl,
+  getSmsSenderLabel,
   isTwilioConfigured,
   normaliseUkPhone,
   sendSms,
@@ -339,7 +340,7 @@ async function sendBookingConfirmations(opts: {
       const { sid } = await sendSms({ to: opts.customerPhone, body: message });
       await logSms({
         direction: "outbound",
-        from: process.env.TWILIO_PHONE_NUMBER!,
+        from: getSmsSenderLabel(),
         to: opts.customerPhone,
         body: message,
         twilioSid: sid,
@@ -1048,7 +1049,7 @@ async function createCallbackRequest(
       const { sid } = await sendSms({ to: data.customerPhone, body: message });
       await logSms({
         direction: "outbound",
-        from: process.env.TWILIO_PHONE_NUMBER!,
+        from: getSmsSenderLabel(),
         to: data.customerPhone,
         body: message,
         twilioSid: sid,
@@ -1131,6 +1132,13 @@ export type AdvisorContact = {
   status: string | null;
   createdAt: string;
   opened: boolean;
+  /** True when this row came from an inbound office-line voicemail. */
+  isVoicemail?: boolean;
+  /** No advisor assigned yet — owner/supervisor/admin only. */
+  unallocated?: boolean;
+  phoneCallId?: string | null;
+  summary?: string | null;
+  aiStatus?: string | null;
 };
 
 function isMissingContactTable(error: { code?: string; message?: string } | null): boolean {
@@ -1187,15 +1195,20 @@ async function appendContactLog(
 export const listAdvisorContacts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<AdvisorContact[]> => {
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const adminAccess = await resolveAdminAccess(context.userId, email);
+    const isStaffAdmin = adminAccess.isOwner || adminAccess.isSupervisor || adminAccess.isAdmin;
+
     const { data: roles } = await context.supabase
       .from("user_roles")
       .select("role")
       .eq("user_id", context.userId);
-    if (!(roles ?? []).some((r) => r.role === "advisor")) throw new Error("Forbidden");
+    const isAdvisor = (roles ?? []).some((r) => r.role === "advisor");
+    if (!isAdvisor && !isStaffAdmin) throw new Error("Forbidden");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    // Which appointments/callbacks has this advisor already opened?
     const opened = new Set<string>();
     {
       const { data, error } = await supabaseAdmin
@@ -1206,14 +1219,28 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
       for (const v of data ?? []) opened.add(`${v.contact_type}:${v.contact_id}`);
     }
 
+    const allocatedSessionIds = new Set<string>();
+    if (isAdvisor && !isStaffAdmin) {
+      const { data: allocs } = await supabaseAdmin
+        .from("session_advisors")
+        .select("session_id")
+        .eq("advisor_id", context.userId);
+      for (const a of allocs ?? []) {
+        if (a.session_id) allocatedSessionIds.add(a.session_id);
+      }
+    }
+
     const contacts: AdvisorContact[] = [];
 
     {
-      const { data: appts, error } = await supabaseAdmin
+      let apptQuery = supabaseAdmin
         .from("appointments")
-        .select("id, customer_name, customer_phone, customer_email, session_id, starts_at, status, created_at")
-        .eq("advisor_id", context.userId)
+        .select("id, customer_name, customer_phone, customer_email, session_id, starts_at, status, created_at, advisor_id")
         .order("starts_at", { ascending: true });
+      if (!isStaffAdmin) {
+        apptQuery = apptQuery.eq("advisor_id", context.userId);
+      }
+      const { data: appts, error } = await apptQuery;
       if (error && !isMissingContactTable(error)) throw new Error(error.message);
       for (const a of appts ?? []) {
         contacts.push({
@@ -1232,36 +1259,196 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
       }
     }
 
+    const phoneCallMeta = new Map<string, { summary: string | null; aiStatus: string }>();
     {
-      const { data: callbacks, error } = await supabaseAdmin
+      let cbQuery = supabaseAdmin
         .from("callback_requests")
-        .select("id, customer_name, customer_phone, customer_email, session_id, preferred_window, status, created_at")
-        .eq("advisor_id", context.userId)
+        .select(
+          "id, customer_name, customer_phone, customer_email, session_id, preferred_window, status, created_at, advisor_id, notes, phone_call_id",
+        )
+        .neq("status", "closed")
         .order("created_at", { ascending: false });
+      const { data: callbacks, error } = await cbQuery;
       if (error && !isMissingContactTable(error)) throw new Error(error.message);
+
+      const callIds = (callbacks ?? [])
+        .map((c) => (c as { phone_call_id?: string | null }).phone_call_id)
+        .filter(Boolean) as string[];
+      if (callIds.length > 0) {
+        const { data: calls } = await supabaseAdmin
+          .from("phone_calls")
+          .select("id, summary, ai_status")
+          .in("id", callIds);
+        for (const call of calls ?? []) {
+          phoneCallMeta.set(call.id, { summary: call.summary, aiStatus: call.ai_status });
+        }
+      }
+
       for (const c of callbacks ?? []) {
+        const row = c as {
+          id: string;
+          customer_name: string;
+          customer_phone: string;
+          customer_email: string | null;
+          session_id: string | null;
+          preferred_window: string;
+          status: string;
+          created_at: string;
+          advisor_id: string | null;
+          notes: string | null;
+          phone_call_id?: string | null;
+        };
+
+        const isVoicemail = (row.notes ?? "").toLowerCase().includes("voicemail");
+        const unallocated = row.advisor_id == null && row.session_id == null;
+
+        if (!isStaffAdmin) {
+          const mine =
+            row.advisor_id === context.userId ||
+            (row.session_id != null && allocatedSessionIds.has(row.session_id));
+          if (!mine) continue;
+          if (unallocated && row.session_id == null) continue;
+        }
+
+        const phoneCallId = row.phone_call_id ?? null;
+        const meta = phoneCallId ? phoneCallMeta.get(phoneCallId) : undefined;
+
         contacts.push({
           kind: "callback",
-          id: c.id,
-          customerName: c.customer_name,
-          customerPhone: c.customer_phone,
-          customerEmail: c.customer_email ?? null,
-          sessionId: c.session_id ?? null,
+          id: row.id,
+          customerName: row.customer_name,
+          customerPhone: row.customer_phone,
+          customerEmail: row.customer_email,
+          sessionId: row.session_id,
           startsAt: null,
-          window: c.preferred_window,
-          status: c.status,
-          createdAt: c.created_at,
-          opened: opened.has(`callback:${c.id}`),
+          window: row.preferred_window,
+          status: row.status,
+          createdAt: row.created_at,
+          opened: opened.has(`callback:${row.id}`),
+          isVoicemail,
+          unallocated: unallocated && isStaffAdmin,
+          phoneCallId,
+          summary: meta?.summary ?? null,
+          aiStatus: meta?.aiStatus ?? null,
         });
       }
     }
 
-    // Unopened first, then newest first.
     contacts.sort((a, b) => {
+      if (a.unallocated !== b.unallocated) return a.unallocated ? -1 : 1;
       if (a.opened !== b.opened) return a.opened ? 1 : -1;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
     return contacts;
+  });
+
+/** Owner / supervisor / admin: list advisors for assigning unallocated voicemails. */
+export const listAssigneeAdvisors = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const adminAccess = await resolveAdminAccess(context.userId, email);
+    if (!adminAccess.isOwner && !adminAccess.isSupervisor && !adminAccess.isAdmin) {
+      throw new Error("Forbidden");
+    }
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: roleRows } = await supabaseAdmin.from("user_roles").select("user_id").eq("role", "advisor");
+    const advisorIds = Array.from(new Set((roleRows ?? []).map((r) => r.user_id)));
+    if (advisorIds.length === 0) return [] as Array<{ id: string; full_name: string | null; email: string | null }>;
+
+    const { data: profiles } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", advisorIds)
+      .order("full_name", { ascending: true });
+
+    return profiles ?? [];
+  });
+
+/** Assign an unallocated voicemail call-back to an advisor (and link to a case when the number matches). */
+export const assignUnallocatedVoicemail = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ callbackId: z.string().uuid(), advisorId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const adminAccess = await resolveAdminAccess(context.userId, email);
+    if (!adminAccess.isOwner && !adminAccess.isSupervisor && !adminAccess.isAdmin) {
+      throw new Error("Forbidden");
+    }
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { findSessionForCallerPhone } = await import("@/lib/phone-lookup.server");
+
+    const { data: cb, error: cbErr } = await supabaseAdmin
+      .from("callback_requests")
+      .select("id, customer_phone, customer_name, session_id, advisor_id, phone_call_id, notes")
+      .eq("id", data.callbackId)
+      .maybeSingle();
+    if (cbErr) throw new Error(cbErr.message);
+    if (!cb) throw new Error("Call-back not found");
+    if (cb.advisor_id) throw new Error("This call-back is already assigned to an advisor.");
+    if (cb.session_id) throw new Error("This call-back is already linked to a case.");
+
+    const { data: advisor } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name")
+      .eq("id", data.advisorId)
+      .maybeSingle();
+    if (!advisor) throw new Error("Advisor not found");
+
+    const match = await findSessionForCallerPhone(cb.customer_phone);
+
+    const callbackPatch: Record<string, unknown> = {
+      advisor_id: data.advisorId,
+      notes: `${(cb.notes ?? "Inbound voicemail").replace(/\. Assign.*$/, "")} · Assigned to ${advisor.full_name ?? "advisor"} by admin.`,
+    };
+    if (match) {
+      callbackPatch.session_id = match.sessionId;
+      callbackPatch.customer_id = match.customerId;
+      const { data: prof } = await supabaseAdmin
+        .from("profiles")
+        .select("full_name")
+        .eq("id", match.customerId)
+        .maybeSingle();
+      if (prof?.full_name) callbackPatch.customer_name = prof.full_name;
+    }
+
+    const { error: updateErr } = await supabaseAdmin
+      .from("callback_requests")
+      .update(callbackPatch)
+      .eq("id", data.callbackId);
+    if (updateErr) throw new Error(updateErr.message);
+
+    if (cb.phone_call_id) {
+      const callPatch: Record<string, unknown> = { advisor_id: data.advisorId };
+      if (match) {
+        callPatch.session_id = match.sessionId;
+        callPatch.customer_id = match.customerId;
+      }
+      await supabaseAdmin.from("phone_calls").update(callPatch).eq("id", cb.phone_call_id);
+    }
+
+    if (match) {
+      try {
+        await supabaseAdmin.from("session_advisors").upsert(
+          { session_id: match.sessionId, advisor_id: data.advisorId, assigned_by: context.userId },
+          { onConflict: "session_id,advisor_id" },
+        );
+      } catch (e) {
+        console.error("assign voicemail session_advisors failed", e);
+      }
+    }
+
+    return {
+      ok: true,
+      sessionId: match?.sessionId ?? null,
+      advisorName: advisor.full_name,
+    };
   });
 
 export const markContactOpened = createServerFn({ method: "POST" })
@@ -1276,7 +1463,14 @@ export const markContactOpened = createServerFn({ method: "POST" })
       .from("user_roles")
       .select("role")
       .eq("user_id", context.userId);
-    if (!(roles ?? []).some((r) => r.role === "advisor")) throw new Error("Forbidden");
+    if (!(roles ?? []).some((r) => r.role === "advisor")) {
+      const email = (context.claims as { email?: string }).email;
+      const { resolveAdminAccess } = await import("@/lib/admin.functions");
+      const adminAccess = await resolveAdminAccess(context.userId, email);
+      if (!adminAccess.isOwner && !adminAccess.isSupervisor && !adminAccess.isAdmin) {
+        throw new Error("Forbidden");
+      }
+    }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin
@@ -1377,7 +1571,7 @@ export const sendLeadBookingSms = createServerFn({ method: "POST" })
     const { sid } = await sendSms({ to: lead.customer_phone, body });
     await logSms({
       direction: "outbound",
-      from: process.env.TWILIO_PHONE_NUMBER!,
+      from: getSmsSenderLabel(),
       to: lead.customer_phone,
       body,
       twilioSid: sid,
@@ -1528,7 +1722,7 @@ export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
       const { sid } = await sendSms({ to: phone, body });
       await logSms({
         direction: "outbound",
-        from: process.env.TWILIO_PHONE_NUMBER!,
+        from: getSmsSenderLabel(),
         to: phone,
         body,
         twilioSid: sid,
@@ -1654,7 +1848,7 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
       const { sid } = await sendSms({ to: phone, body });
       await logSms({
         direction: "outbound",
-        from: process.env.TWILIO_PHONE_NUMBER!,
+        from: getSmsSenderLabel(),
         to: phone,
         body,
         twilioSid: sid,

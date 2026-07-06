@@ -20,6 +20,8 @@ import {
 import type { AdvisorCustomerRow } from "@/lib/sessions.functions";
 import { listAdvisorContacts, markContactOpened, getSessionBooking } from "@/lib/booking.functions";
 import type { AdvisorContact } from "@/lib/booking.functions";
+import { AssignVoicemailAdvisor } from "@/components/AssignVoicemailAdvisor";
+import { PhoneCallDetailDialog } from "@/components/PhoneCallDetailDialog";
 import { checkIsIntroducer } from "@/lib/introducer.functions";
 import { claimReferral, createReferralLink, textReferralLink, textRafInviteToFriend, getPublicShareBaseUrl, listReferralLinks, listAllReferrals, updateReferralBonusStatus, searchCustomers, listMyReferralActivity, ensureMyReferralLink } from "@/lib/referrals.functions";
 import { getRafCode, clearRafCookie, rafLinkForCode, rafShareMessage } from "@/lib/referral";
@@ -2846,6 +2848,7 @@ function ContactsCard() {
   const qc = useQueryClient();
   const contactsFn = useServerFn(listAdvisorContacts);
   const openFn = useServerFn(markContactOpened);
+  const [voicemailCallId, setVoicemailCallId] = useState<string | null>(null);
 
   const contactsQ = useQuery({ queryKey: ["advisor-contacts"], queryFn: () => contactsFn() });
   const contacts = (contactsQ.data ?? []) as AdvisorContact[];
@@ -2857,10 +2860,11 @@ function ContactsCard() {
   });
 
   const unopenedCount = contacts.filter((c) => !c.opened).length;
+  const unallocatedCount = contacts.filter((c) => c.unallocated).length;
 
   return (
     <div className="mt-2">
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
           <Inbox className="w-4 h-4" />
           Appointments &amp; call-backs
@@ -2870,11 +2874,17 @@ function ContactsCard() {
             {unopenedCount} new
           </span>
         )}
+        {unallocatedCount > 0 && (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 font-medium">
+            {unallocatedCount} unallocated
+          </span>
+        )}
       </div>
       <div className="rounded-2xl border bg-card divide-y overflow-hidden">
         <div className="p-4 text-xs text-muted-foreground">
-          Your booked appointments and customer call-back requests. New items you haven&apos;t opened
-          are highlighted — opening one marks it as seen.
+          Booked appointments, call-back requests, and office-line voicemails. Voicemails are linked
+          to the allocated advisor when we recognise the caller; unknown numbers appear as unallocated
+          for owner and admin supervisors.
         </div>
         {contactsQ.isLoading && <div className="p-4 text-sm text-muted-foreground">Loading contacts…</div>}
         {!contactsQ.isLoading && contacts.length === 0 && (
@@ -2892,11 +2902,21 @@ function ContactsCard() {
                 {c.kind === "appointment" ? <CalendarCheck className="w-4 h-4" /> : <PhoneCall className="w-4 h-4" />}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="font-medium truncate flex items-center gap-2">
+                <div className="font-medium truncate flex items-center gap-2 flex-wrap">
                   {c.customerName}
                   {!c.opened && (
                     <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground">
                       New
+                    </span>
+                  )}
+                  {c.isVoicemail && (
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">
+                      Voicemail
+                    </span>
+                  )}
+                  {c.unallocated && (
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                      Unallocated
                     </span>
                   )}
                 </div>
@@ -2905,11 +2925,40 @@ function ContactsCard() {
                     ? c.startsAt
                       ? `Appointment · ${format(new Date(c.startsAt), "EEE d MMM, HH:mm")}`
                       : "Appointment"
-                    : `Call back · ${CALLBACK_WINDOW_LABELS[c.window ?? ""] ?? c.window}`}
+                    : c.isVoicemail
+                      ? "Voicemail · call back requested"
+                      : `Call back · ${CALLBACK_WINDOW_LABELS[c.window ?? ""] ?? c.window}`}
                   {c.customerPhone ? ` · ${c.customerPhone}` : ""}
                 </div>
+                {c.summary && (
+                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{c.summary}</p>
+                )}
               </div>
-              {c.sessionId && <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
+              <div className="flex flex-col gap-1 shrink-0 items-end">
+                {c.unallocated && (
+                  <AssignVoicemailAdvisor
+                    callbackId={c.id}
+                    onAssigned={() => qc.invalidateQueries({ queryKey: ["advisor-contacts"] })}
+                  />
+                )}
+                {c.phoneCallId && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      markSeen();
+                      setVoicemailCallId(c.phoneCallId!);
+                    }}
+                    disabled={c.aiStatus === "processing" || c.aiStatus === "pending"}
+                  >
+                    {c.aiStatus === "complete" ? "View summary" : c.aiStatus === "processing" ? "Transcribing…" : "View"}
+                  </Button>
+                )}
+                {c.sessionId && <ChevronRight className="w-4 h-4 text-muted-foreground self-end" />}
+              </div>
             </div>
           );
           return c.sessionId ? (
@@ -2934,6 +2983,11 @@ function ContactsCard() {
           );
         })}
       </div>
+      <PhoneCallDetailDialog
+        callId={voicemailCallId}
+        open={Boolean(voicemailCallId)}
+        onOpenChange={(open) => !open && setVoicemailCallId(null)}
+      />
     </div>
   );
 }

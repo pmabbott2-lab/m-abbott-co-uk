@@ -2,7 +2,7 @@
 // OpenAI tidies the notes, but this deterministic fact gate decides whether
 // the interview is allowed to move on.
 
-import { hasCompleteDob, hasPartialDob, stripCapturedMarkers } from "@/lib/dob-parse";
+import { hasCompleteDob, hasPartialDob, stripCapturedMarkers, parseDob, formatDobText } from "@/lib/dob-parse";
 
 export interface EvaluateInput {
   fieldKey: string;
@@ -395,7 +395,7 @@ function missingFactsFor(input: EvaluateInput, text: string, latest = "", target
         : [{
             id: "dob",
             followup: () =>
-              "Sorry, could you tell me your date of birth again — including the year?",
+              "Could you say the day, month and year — for example, 15 March 1980? Or tap your date below.",
           }];
     case "home_postcode":
       return hasPostcode(text) || targetDeclined
@@ -437,8 +437,9 @@ function missingFactsFor(input: EvaluateInput, text: string, latest = "", target
       return missing;
     }
     case "employer":
+    case "business_name":
     case "job_title":
-      // Asked as two separate single-shot questions — accept the answer and move on.
+      // Asked as separate single-shot questions — accept the answer and move on.
       return [];
     case "income":
       return hasMoneyLike(text) || (target === "income" && hasMoneyLike(latest)) || targetDeclined
@@ -449,9 +450,8 @@ function missingFactsFor(input: EvaluateInput, text: string, latest = "", target
         ? []
         : [{ id: "pension_income", followup: () => "Roughly what's your total annual pension income, in pounds?" }];
     case "monthly_essentials":
-      return hasMoneyLike(text) || (target === "essentials" && hasMoneyLike(latest)) || targetDeclined
-        ? []
-        : [{ id: "essentials", followup: () => "A rough monthly figure is fine — about how much, in pounds?" }];
+      // Retired — no longer asked in the scripted flow.
+      return [];
     case "ongoing_loans":
     case "ongoing_credit":
       // Accept 'none' or any detail in one go to avoid repetitive probing.
@@ -480,9 +480,10 @@ function missingFactsFor(input: EvaluateInput, text: string, latest = "", target
       // Single-shot — a yes/no or a corrected balance is enough.
       return [];
     case "mortgage_term":
+    case "mortgage_term_remaining":
       return hasMortgageTerm(text) || hasAnyNumber(text) || (target === "term" && hasAnyNumber(latest)) || targetDeclined
         ? []
-        : [{ id: "term", followup: () => "Over how many years, roughly?" }];
+        : [{ id: "term", followup: () => "Roughly how many years?" }];
     case "property_type":
       return [];
     default:
@@ -528,6 +529,10 @@ export async function evaluateAnswer(input: EvaluateInput): Promise<EvaluateResu
   const cleanedValue = withCapturedFactMarker(combinedText, input, hardMissing);
 
   if (hardMissing.length === 0) {
+    if (input.fieldKey === "date_of_birth") {
+      const parsed = parseDob(combinedText);
+      return { complete: true, cleanedValue: parsed ? formatDobText(parsed) : cleanedValue };
+    }
     return { complete: true, cleanedValue };
   }
   return {

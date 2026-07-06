@@ -26,12 +26,39 @@ function normaliseTwoDigitYear(year: number): number {
   return candidate > currentYear ? candidate - 100 : candidate;
 }
 
-function isValidDob(day: number, month: number, year: number): boolean {
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+export function formatDobText(dob: { day: number; month: number; year: number }): string {
+  return `${dob.day} ${MONTH_NAMES[dob.month - 1]} ${dob.year}`;
+}
+
+/** UK-readable DOB for CRM and profile display (e.g. 15 March 1980). */
+export function formatDobDisplay(text: string | null | undefined): string {
+  if (!text?.trim()) return "";
+  const parsed = parseDob(text);
+  if (parsed) return formatDobText(parsed);
+  return text.trim();
+}
+
+export const DOB_MONTHS = MONTH_NAMES.map((label, index) => ({ value: index + 1, label }));
+
+export function dobYearOptions(maxYear = new Date().getFullYear(), span = 100): number[] {
+  return Array.from({ length: span + 1 }, (_, i) => maxYear - i);
+}
+
+export function isValidDobParts(day: number, month: number, year: number): boolean {
   const currentYear = new Date().getUTCFullYear();
   if (!Number.isInteger(day) || !Number.isInteger(month) || !Number.isInteger(year)) return false;
   if (year < 1900 || year > currentYear || month < 1 || month > 12 || day < 1 || day > 31) return false;
   const parsed = new Date(Date.UTC(year, month - 1, day));
   return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+}
+
+function isValidDob(day: number, month: number, year: number): boolean {
+  return isValidDobParts(day, month, year);
 }
 
 function parseDayWords(phrase: string): number | null {
@@ -194,6 +221,22 @@ export function parseDob(text: string): { day: number; month: number; year: numb
       const res = order === "dmy" ? resolve(m[1], m[2], m[3]) : resolve(m[2], m[1], m[3]);
       if (res) return res;
     }
+  }
+
+  // Split across pauses: "15 march" then "1980" in the same utterance.
+  const splitDmy = normalised.match(
+    new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${monthNames})\\b[\\s\\S]{0,48}\\b(${yearPattern})\\b`, "i"),
+  );
+  if (splitDmy) {
+    const res = resolve(splitDmy[1], splitDmy[2], splitDmy[3]);
+    if (res) return res;
+  }
+  const splitMdy = normalised.match(
+    new RegExp(`\\b(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b[\\s\\S]{0,48}\\b(${yearPattern})\\b`, "i"),
+  );
+  if (splitMdy) {
+    const res = resolve(splitMdy[2], splitMdy[1], splitMdy[3]);
+    if (res) return res;
   }
 
   return null;

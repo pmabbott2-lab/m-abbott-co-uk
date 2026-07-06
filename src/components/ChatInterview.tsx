@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getSession, submitSession } from "@/lib/sessions.functions";
 import { AppShell } from "@/components/AppShell";
 import { PostCompletionBooking } from "@/components/PostCompletionBooking";
+import { DobPicker } from "@/components/DobPicker";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ArrowLeft, Mic, Send } from "lucide-react";
@@ -26,6 +27,7 @@ import {
   buildCreditSummary,
   ordinal,
   buildDependantsSummary,
+  buildDobAnswer,
   type CreditFlow,
   type DependantFlow,
 } from "@/lib/interview-wizards";
@@ -41,7 +43,8 @@ interface StepResp {
   prompt?: string;
   ack?: string;
   sayText?: string;
-  wizard?: "credit" | "dependants";
+  wizard?: "credit" | "dependants" | "dob";
+  followupCount?: number;
 }
 
 interface ChatMsg {
@@ -55,6 +58,7 @@ const nextId = () => `m-${Date.now()}-${bubbleSeq++}`;
 
 function getStepOptions(step: StepResp | null) {
   if (!step || step.done || !step.section || step.questionIndex == null) return null;
+  if (step.fieldKey === "home_confirm" && (step.followupCount ?? 0) > 0) return null;
   const q = getQuestion(step.section, step.questionIndex);
   if (!q?.options?.length) return null;
   return {
@@ -71,14 +75,15 @@ const PLACEHOLDER_EXAMPLES: Record<string, string> = {
   home_house: "e.g. 42, or Rose Cottage",
   home_duration: "e.g. 3 years",
   employer: "e.g. Acme Ltd",
+  business_name: "e.g. Smith Consulting",
   job_title: "e.g. Software engineer",
   income: "e.g. £45,000 a year",
   retirement_income: "e.g. £20,000 a year",
-  monthly_essentials: "e.g. £1,200 a month",
   property_price: "e.g. £300,000",
   deposit: "e.g. £30,000",
   amount_owed: "e.g. £150,000",
   mortgage_term: "e.g. 25 years",
+  mortgage_term_remaining: "e.g. 18 years left",
 };
 
 function placeholderForStep(step: StepResp | null): string {
@@ -125,6 +130,7 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
   const [optionsActive, setOptionsActive] = useState(false);
   const [credit, setCredit] = useState<CreditFlow | null>(null);
   const [dependants, setDependants] = useState<DependantFlow | null>(null);
+  const [dobTypingMode, setDobTypingMode] = useState(false);
   const [textPlaceholder, setTextPlaceholder] = useState("Type your answer…");
   // When set, the next typed message is delivered here (wizard sub-answers,
   // "Other" free-text) instead of being POSTed as a normal step answer.
@@ -189,6 +195,7 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
           return;
         }
         setCurrent(data);
+        setDobTypingMode(false);
         appendAssistant([data.ack, data.sayText].filter(Boolean).join(" "));
         beginInputForStep(data);
       } catch (e) {
@@ -214,6 +221,8 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
       startCreditSelect();
     } else if (step.wizard === "dependants") {
       startDependants();
+    } else if (step.wizard === "dob" && !dobTypingMode) {
+      startDob();
     } else if (getStepOptions(step)) {
       setOptionsActive(true);
     } else {
@@ -237,6 +246,25 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
     setOptionsActive(false);
     appendAssistant(otherPrompt);
     setTextHandler((text) => submitAnswer(text), "Type your answer…");
+  };
+
+  // ---- Date of birth wizard ----
+  const startDob = () => {
+    setOptionsActive(false);
+    setDobTypingMode(false);
+    setTextHandler(null);
+  };
+
+  const confirmDob = (day: number, month: number, year: number) => {
+    setDobTypingMode(false);
+    submitAnswer(buildDobAnswer(day, month, year));
+  };
+
+  const dobTypeInstead = () => {
+    setDobTypingMode(true);
+    setTextPlaceholder("e.g. 15 March 1980");
+    appendAssistant("No problem — type your date of birth below, including the day, month and year.");
+    requestAnimationFrame(() => inputRef.current?.focus());
   };
 
   // ---- Credit-commitments wizard ----
@@ -483,10 +511,12 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
   const showCreditSelect = credit?.phase === "select" && !done && !thinking;
   const showCreditCount = credit?.phase === "count" && !done && !thinking;
   const showDependantsCount = dependants?.phase === "count" && !done && !thinking;
+  const showDobPicker = current?.wizard === "dob" && !dobTypingMode && !done && !thinking;
   const showTextInput =
     !done &&
     Boolean(current) &&
-    (textHandlerActive || (!credit && !dependants && !optionsActive && !stepOpts));
+    (textHandlerActive ||
+      (!credit && !dependants && !optionsActive && !stepOpts && !(current?.wizard === "dob" && !dobTypingMode)));
 
   return (
     <AppShell
@@ -570,6 +600,16 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
                     {stepOpts.otherLabel}
                   </Button>
                 )}
+              </div>
+            )}
+
+            {showDobPicker && (
+              <div className="pt-1">
+                <DobPicker
+                  onConfirm={confirmDob}
+                  onSayInstead={dobTypeInstead}
+                  sayInsteadLabel="Type it instead"
+                />
               </div>
             )}
 

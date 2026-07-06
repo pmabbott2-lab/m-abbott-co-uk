@@ -2,8 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { chatCompletion } from "@/lib/ai-gateway.server";
 import { extractStructuredFields, parseMoneyFromText, computeLoanAmount, formatGBP } from "@/lib/structured-answers";
 import { resolveAddress, isLikelyPostcode } from "@/lib/address-lookup.server";
-import { ageFromText } from "@/lib/dob-parse";
-import { getQuestion, nextStep, findSection, SECTIONS, ACKNOWLEDGEMENTS, ackClip, firstGreeting, firstNameFromFullName, type Section, type AnswersMap } from "@/lib/interview-script";
+import { ageFromText, parseDob, formatDobText } from "@/lib/dob-parse";
+import { getQuestion, nextStep, findSection, SECTIONS, ACKNOWLEDGEMENTS, ackClip, firstGreeting, firstNameFromFullName, resolveQuestionPrompt, type Section, type AnswersMap } from "@/lib/interview-script";
 import { smalltalkEnabled, isAsideMoment, generateAside } from "@/lib/interview-smalltalk.server";
 import { createClient } from "@supabase/supabase-js";
 import { sendInterviewCompleteSms } from "@/lib/sms.server";
@@ -166,7 +166,13 @@ export const Route = createFileRoute("/api/interview-step")({
               section,
               field_key: currentQ.key,
               field_label: currentQ.label,
-              value: cleanedValue,
+              value:
+                currentQ.key === "date_of_birth" && cleanedValue
+                  ? (() => {
+                      const parsed = parseDob(cleanedValue);
+                      return parsed ? formatDobText(parsed) : cleanedValue;
+                    })()
+                  : cleanedValue,
               structured_value: extractStructuredFields(currentQ.key, cleanedValue ?? ""),
               updated_at: new Date().toISOString(),
             },
@@ -240,7 +246,7 @@ export const Route = createFileRoute("/api/interview-step")({
             const alreadyRetried = (session.followup_count ?? 0) >= 1;
             if (!affirmative && negativeOnly && !alreadyRetried) {
               stayOnSameQuestion = true;
-              followupPrompt = "No problem — please say your full address, including the street, town and postcode.";
+              followupPrompt = "Your address — please say the full address, including the street, town and postcode.";
               nextFollowupCount = (session.followup_count ?? 0) + 1;
             } else if (!affirmative) {
               await saveAddress(rawValue, { address: rawValue });
@@ -405,8 +411,8 @@ export const Route = createFileRoute("/api/interview-step")({
         if (nextQ.key === "home_confirm") {
           const addr = answersMap["personal:home_address"] ?? "";
           confirmPrompt = addr
-            ? `I've got your address as ${addr}. If that's right, just say yes — otherwise, tell me the correct address.`
-            : "Could you tell me your full address, including the street, town and postcode?";
+            ? `I have your address as ${addr}. Tap Yes to confirm, or No to try again.`
+            : "Your address — please say the full address, including the street, town and postcode.";
         }
 
         // Remortgage: confirm the equity (value − balance owed) instead of a deposit.
@@ -432,16 +438,11 @@ export const Route = createFileRoute("/api/interview-step")({
           if (loan != null) borrowNote = `So you're looking to borrow about ${formatGBP(loan)}. `;
         }
 
-        // When small talk is on, the rigid scripted DOB opener becomes dynamic:
-        // drop the fixed weather line so asides drive the warmth instead.
-        const firstPrompt =
-          isFirst && smalltalk
-            ? nextQ.prompt.replace("I hope the weather's treating you kindly today. ", "")
-            : nextQ.prompt;
+        const firstPrompt = resolveQuestionPrompt(nextQ, answersMap);
         const scriptedSay =
           followupPrompt ||
           confirmPrompt ||
-          (isFirst ? firstGreeting(firstName, firstPrompt) : intro + borrowNote + nextQ.prompt);
+          (isFirst ? firstGreeting(firstName, firstPrompt) : intro + borrowNote + resolveQuestionPrompt(nextQ, answersMap));
         const sayText = personalise(aside ? `${aside} ${scriptedSay}` : scriptedSay);
         // The ack is only spoken when advancing to a new question, not on follow-ups.
         const ack = stayOnSameQuestion ? "" : ackText;
@@ -474,9 +475,11 @@ export const Route = createFileRoute("/api/interview-step")({
           questionsInSection: sec.questions.length,
           fieldKey: nextQ.key,
           fieldLabel: nextQ.label,
-          prompt: personalise(nextQ.prompt),
+          prompt: personalise(resolveQuestionPrompt(nextQ, answersMap)),
           ack,
           sayText,
+          followupCount: stayOnSameQuestion ? nextFollowupCount : 0,
+          wizard: nextQ.wizard,
         });
       },
     },

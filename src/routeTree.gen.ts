@@ -33,6 +33,11 @@ import { Route as AuthenticatedSessionsSessionIdRouteImport } from './routes/_au
 import { Route as AuthenticatedInterviewSessionIdRouteImport } from './routes/_authenticated/interview.$sessionId'
 import { Route as AuthenticatedCustomersCustomerIdRouteImport } from './routes/_authenticated/customers.$customerId'
 import { Route as AuthenticatedChatSessionIdRouteImport } from './routes/_authenticated/chat.$sessionId'
+import { Route as ApiTwilioVoiceVoicemailDoneRouteImport } from './routes/api/twilio/voice/voicemail-done'
+import { Route as ApiTwilioVoiceStatusRouteImport } from './routes/api/twilio/voice/status'
+import { Route as ApiTwilioVoiceRecordingRouteImport } from './routes/api/twilio/voice/recording'
+import { Route as ApiTwilioVoiceInboundRouteImport } from './routes/api/twilio/voice/inbound'
+import { Route as ApiTwilioVoiceClientOutboundRouteImport } from './routes/api/twilio/voice/client-outbound'
 
 const RegisterRoute = RegisterRouteImport.update({
   id: '/register',
@@ -159,6 +164,33 @@ const AuthenticatedChatSessionIdRoute =
     path: '/chat/$sessionId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const ApiTwilioVoiceVoicemailDoneRoute =
+  ApiTwilioVoiceVoicemailDoneRouteImport.update({
+    id: '/api/twilio/voice/voicemail-done',
+    path: '/api/twilio/voice/voicemail-done',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiTwilioVoiceStatusRoute = ApiTwilioVoiceStatusRouteImport.update({
+  id: '/api/twilio/voice/status',
+  path: '/api/twilio/voice/status',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTwilioVoiceRecordingRoute = ApiTwilioVoiceRecordingRouteImport.update({
+  id: '/api/twilio/voice/recording',
+  path: '/api/twilio/voice/recording',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTwilioVoiceInboundRoute = ApiTwilioVoiceInboundRouteImport.update({
+  id: '/api/twilio/voice/inbound',
+  path: '/api/twilio/voice/inbound',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTwilioVoiceClientOutboundRoute =
+  ApiTwilioVoiceClientOutboundRouteImport.update({
+    id: '/api/twilio/voice/client-outbound',
+    path: '/api/twilio/voice/client-outbound',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -184,6 +216,11 @@ export interface FileRoutesByFullPath {
   '/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
+  '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
+  '/api/twilio/voice/inbound': typeof ApiTwilioVoiceInboundRoute
+  '/api/twilio/voice/recording': typeof ApiTwilioVoiceRecordingRoute
+  '/api/twilio/voice/status': typeof ApiTwilioVoiceStatusRoute
+  '/api/twilio/voice/voicemail-done': typeof ApiTwilioVoiceVoicemailDoneRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -209,6 +246,11 @@ export interface FileRoutesByTo {
   '/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
+  '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
+  '/api/twilio/voice/inbound': typeof ApiTwilioVoiceInboundRoute
+  '/api/twilio/voice/recording': typeof ApiTwilioVoiceRecordingRoute
+  '/api/twilio/voice/status': typeof ApiTwilioVoiceStatusRoute
+  '/api/twilio/voice/voicemail-done': typeof ApiTwilioVoiceVoicemailDoneRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -236,6 +278,11 @@ export interface FileRoutesById {
   '/_authenticated/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
+  '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
+  '/api/twilio/voice/inbound': typeof ApiTwilioVoiceInboundRoute
+  '/api/twilio/voice/recording': typeof ApiTwilioVoiceRecordingRoute
+  '/api/twilio/voice/status': typeof ApiTwilioVoiceStatusRoute
+  '/api/twilio/voice/voicemail-done': typeof ApiTwilioVoiceVoicemailDoneRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -263,6 +310,11 @@ export interface FileRouteTypes {
     | '/text/$sessionId'
     | '/api/auth/request-password-reset'
     | '/api/sms/inbound'
+    | '/api/twilio/voice/client-outbound'
+    | '/api/twilio/voice/inbound'
+    | '/api/twilio/voice/recording'
+    | '/api/twilio/voice/status'
+    | '/api/twilio/voice/voicemail-done'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -288,6 +340,11 @@ export interface FileRouteTypes {
     | '/text/$sessionId'
     | '/api/auth/request-password-reset'
     | '/api/sms/inbound'
+    | '/api/twilio/voice/client-outbound'
+    | '/api/twilio/voice/inbound'
+    | '/api/twilio/voice/recording'
+    | '/api/twilio/voice/status'
+    | '/api/twilio/voice/voicemail-done'
   id:
     | '__root__'
     | '/'
@@ -314,6 +371,11 @@ export interface FileRouteTypes {
     | '/_authenticated/text/$sessionId'
     | '/api/auth/request-password-reset'
     | '/api/sms/inbound'
+    | '/api/twilio/voice/client-outbound'
+    | '/api/twilio/voice/inbound'
+    | '/api/twilio/voice/recording'
+    | '/api/twilio/voice/status'
+    | '/api/twilio/voice/voicemail-done'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -330,6 +392,11 @@ export interface RootRouteChildren {
   RafCodeRoute: typeof RafCodeRoute
   ApiAuthRequestPasswordResetRoute: typeof ApiAuthRequestPasswordResetRoute
   ApiSmsInboundRoute: typeof ApiSmsInboundRoute
+  ApiTwilioVoiceClientOutboundRoute: typeof ApiTwilioVoiceClientOutboundRoute
+  ApiTwilioVoiceInboundRoute: typeof ApiTwilioVoiceInboundRoute
+  ApiTwilioVoiceRecordingRoute: typeof ApiTwilioVoiceRecordingRoute
+  ApiTwilioVoiceStatusRoute: typeof ApiTwilioVoiceStatusRoute
+  ApiTwilioVoiceVoicemailDoneRoute: typeof ApiTwilioVoiceVoicemailDoneRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -502,6 +569,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChatSessionIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/twilio/voice/voicemail-done': {
+      id: '/api/twilio/voice/voicemail-done'
+      path: '/api/twilio/voice/voicemail-done'
+      fullPath: '/api/twilio/voice/voicemail-done'
+      preLoaderRoute: typeof ApiTwilioVoiceVoicemailDoneRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/twilio/voice/status': {
+      id: '/api/twilio/voice/status'
+      path: '/api/twilio/voice/status'
+      fullPath: '/api/twilio/voice/status'
+      preLoaderRoute: typeof ApiTwilioVoiceStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/twilio/voice/recording': {
+      id: '/api/twilio/voice/recording'
+      path: '/api/twilio/voice/recording'
+      fullPath: '/api/twilio/voice/recording'
+      preLoaderRoute: typeof ApiTwilioVoiceRecordingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/twilio/voice/inbound': {
+      id: '/api/twilio/voice/inbound'
+      path: '/api/twilio/voice/inbound'
+      fullPath: '/api/twilio/voice/inbound'
+      preLoaderRoute: typeof ApiTwilioVoiceInboundRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/twilio/voice/client-outbound': {
+      id: '/api/twilio/voice/client-outbound'
+      path: '/api/twilio/voice/client-outbound'
+      fullPath: '/api/twilio/voice/client-outbound'
+      preLoaderRoute: typeof ApiTwilioVoiceClientOutboundRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -558,6 +660,11 @@ const rootRouteChildren: RootRouteChildren = {
   RafCodeRoute: RafCodeRoute,
   ApiAuthRequestPasswordResetRoute: ApiAuthRequestPasswordResetRoute,
   ApiSmsInboundRoute: ApiSmsInboundRoute,
+  ApiTwilioVoiceClientOutboundRoute: ApiTwilioVoiceClientOutboundRoute,
+  ApiTwilioVoiceInboundRoute: ApiTwilioVoiceInboundRoute,
+  ApiTwilioVoiceRecordingRoute: ApiTwilioVoiceRecordingRoute,
+  ApiTwilioVoiceStatusRoute: ApiTwilioVoiceStatusRoute,
+  ApiTwilioVoiceVoicemailDoneRoute: ApiTwilioVoiceVoicemailDoneRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

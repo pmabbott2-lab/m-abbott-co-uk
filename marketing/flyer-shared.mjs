@@ -182,6 +182,38 @@ export const FLYER_CSS = String.raw`
   }
   .contact b { color: #fff; font-weight: 700; }
   .roles { font-size: 8.5px; color: rgba(255,255,255,0.55); margin-top: 6px; line-height: 1.45; }
+  .coming-hero {
+    padding: 10mm 12mm 4mm; text-align: center;
+  }
+  .coming-hero h1 { font-size: 28px; color: var(--navy); font-weight: 800; line-height: 1.1; }
+  .coming-hero h1 .hl { color: var(--accent-deep); }
+  .coming-hero p { margin-top: 8px; font-size: 11px; color: var(--muted); line-height: 1.5; max-width: 150mm; margin-left: auto; margin-right: auto; }
+  .soon-badge {
+    display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--navy-deep);
+    background: linear-gradient(145deg, var(--accent), var(--accent-deep));
+    padding: 5px 14px; border-radius: 999px; margin-bottom: 10px;
+  }
+  .roadmap { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; padding: 0 12mm; }
+  .roadmap-item {
+    background: #fff; border: 1px dashed var(--accent); border-radius: 14px;
+    padding: 10px 11px; position: relative;
+  }
+  .roadmap-item .tag {
+    position: absolute; top: 8px; right: 8px;
+    font-size: 7px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--accent-deep); background: var(--accent-soft);
+    padding: 2px 7px; border-radius: 999px;
+  }
+  .roadmap-item .ico {
+    width: 30px; height: 30px; border-radius: 9px;
+    background: var(--navy); color: #fff;
+    display: flex; align-items: center; justify-content: center; margin-bottom: 7px;
+  }
+  .roadmap-item .ico svg { width: 16px; height: 16px; }
+  .roadmap-item h3 { font-size: 11.5px; color: var(--navy); font-weight: 800; padding-right: 42px; }
+  .roadmap-item p { font-size: 9px; line-height: 1.45; color: var(--muted); margin-top: 3px; }
+  .roadmap-wide { grid-column: 1 / -1; }
 `;
 
 export const ICONS = {
@@ -200,6 +232,19 @@ export const ICONS = {
   star: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
   clipboard: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>`,
   bell: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>`,
+  pound: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12"/><path d="M6 8h12"/><path d="M11 3v18"/><path d="M9 13h4a3 3 0 0 0 0-6H9"/></svg>`,
+  mail: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>`,
+  eye: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`,
+  upload: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`,
+  idcard: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><circle cx="8" cy="12" r="2"/><path d="M14 10h4"/><path d="M14 14h4"/></svg>`,
+  headset: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5a9 9 0 0 1 18 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/></svg>`,
+  card: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>`,
+};
+
+export const CONTACT = {
+  web: "m-abbott.co.uk",
+  email: "hello@m-abbott.co.uk",
+  phone: "01234 567 890",
 };
 
 export function flyerShell(title, body) {
@@ -231,9 +276,9 @@ export function footer({ ctaHtml, ctaBtn, note }) {
       <div class="cta-btn">${ctaBtn}</div>
     </div>
     <div class="contact">
-      <span><b>Web:</b> www.mortgagehub.example</span>
-      <span><b>Email:</b> hello@mortgagehub.example</span>
-      <span><b>Phone:</b> 01234 567 890</span>
+      <span><b>Web:</b> ${CONTACT.web}</span>
+      <span><b>Email:</b> ${CONTACT.email}</span>
+      <span><b>Phone:</b> ${CONTACT.phone}</span>
     </div>
     ${note ? `<div class="roles">${note}</div>` : ""}
   </div>`;
@@ -242,17 +287,17 @@ export function footer({ ctaHtml, ctaBtn, note }) {
 export function customerWays() {
   const { mic, chat, calendar } = ICONS;
   return `<div class="ways">
-    <div class="way"><div class="ico">${mic}</div><h3>Spoken interview</h3><p>Susan, our avatar-led voice assistant, speaks each question and listens to replies.</p></div>
-    <div class="way"><div class="ico">${chat}</div><h3>Text &amp; chat</h3><p>Same guided questions in a quiet typed chat — no microphone, pick up any time.</p></div>
-    <div class="way"><div class="ico">${calendar}</div><h3>Book a call</h3><p>Short on time? Pick a slot with a mortgage advisor — booking confirmed by text.</p></div>
+    <div class="way"><div class="ico">${mic}</div><h3>Spoken fact-find</h3><p>Susan, our avatar-led voice assistant, guides customers question by question.</p></div>
+    <div class="way"><div class="ico">${chat}</div><h3>Type fact-find</h3><p>Same guided journey in a quiet typed chat — pause and resume any time.</p></div>
+    <div class="way"><div class="ico">${calendar}</div><h3>Book or confirm</h3><p>Pick an advisor slot — then complete the fact-find, or confirm attendance only.</p></div>
   </div>`;
 }
 
 export function customerSteps() {
   return `<div class="steps">
-    <div class="step"><div class="num">1</div><h4>Guided interview</h4><p>Sign in and answer simple questions — spoken or typed, at their pace.</p></div>
-    <div class="step"><div class="num">2</div><h4>Fact-find summary</h4><p>An AI summary is generated and the customer is texted a link when they finish.</p></div>
-    <div class="step"><div class="num">3</div><h4>Meet the advisor</h4><p>They book a time. You arrive already up to speed on their situation.</p></div>
+    <div class="step"><div class="num">1</div><h4>Sign in &amp; choose</h4><p>Spoken interview, typed chat, or book an appointment straight away.</p></div>
+    <div class="step"><div class="num">2</div><h4>Confirm by text &amp; email</h4><p>Booking confirmations arrive by SMS and email with clear next steps.</p></div>
+    <div class="step"><div class="num">3</div><h4>Meet prepared</h4><p>Advisor receives an AI summary — the first meeting starts with context.</p></div>
   </div>`;
 }
 
@@ -267,5 +312,14 @@ export function benefit(icon, title, text, navy = false) {
   return `<div class="benefit">
     <div class="ico${navy ? " navy" : ""}">${icon}</div>
     <div><h4>${title}</h4><p>${text}</p></div>
+  </div>`;
+}
+
+export function roadmapItem(icon, title, text, wide = false) {
+  return `<div class="roadmap-item${wide ? " roadmap-wide" : ""}">
+    <span class="tag">Coming soon</span>
+    <div class="ico">${icon}</div>
+    <h3>${title}</h3>
+    <p>${text}</p>
   </div>`;
 }
