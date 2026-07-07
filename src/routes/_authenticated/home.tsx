@@ -21,6 +21,7 @@ import type { AdvisorCustomerRow } from "@/lib/sessions.functions";
 import { listAdvisorContacts, markContactOpened, getSessionBooking } from "@/lib/booking.functions";
 import type { AdvisorContact } from "@/lib/booking.functions";
 import { AssignVoicemailAdvisor } from "@/components/AssignVoicemailAdvisor";
+import { MarkContactedButton } from "@/components/MarkContactedButton";
 import { PhoneCallDetailDialog } from "@/components/PhoneCallDetailDialog";
 import { checkIsIntroducer } from "@/lib/introducer.functions";
 import { claimReferral, createReferralLink, textReferralLink, textRafInviteToFriend, getPublicShareBaseUrl, listReferralLinks, listAllReferrals, updateReferralBonusStatus, searchCustomers, listMyReferralActivity, ensureMyReferralLink } from "@/lib/referrals.functions";
@@ -2892,10 +2893,21 @@ function ContactsCard() {
         )}
         {contacts.map((c) => {
           const markSeen = () => {
-            if (!c.opened) open.mutate({ contactType: c.kind, contactId: c.id });
+            if (!c.opened && c.kind !== "phone_call") {
+              open.mutate({ contactType: c.kind === "appointment" ? "appointment" : "callback", contactId: c.id });
+            }
+            if (!c.opened && c.kind === "phone_call") {
+              open.mutate({ contactType: "phone_call", contactId: c.id });
+            }
           };
+          const archiveType =
+            c.kind === "phone_call" ? "phone_call" : c.kind === "appointment" ? "appointment" : "callback";
           const body = (
-            <div className={`flex items-center gap-3 p-4 transition ${c.opened ? "" : "bg-primary/5"}`}>
+            <div
+              className={`flex items-center gap-3 p-4 transition ${
+                c.contacted ? "opacity-60 bg-muted/30" : c.opened ? "" : "bg-primary/5"
+              }`}
+            >
               <span
                 className={`inline-flex w-9 h-9 items-center justify-center rounded-full shrink-0 ${c.kind === "appointment" ? "bg-accent/30" : "bg-primary/10 text-primary"}`}
               >
@@ -2914,6 +2926,16 @@ function ContactsCard() {
                       Voicemail
                     </span>
                   )}
+                  {c.kind === "phone_call" && !c.isVoicemail && (
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+                      Outbound
+                    </span>
+                  )}
+                  {c.contacted && (
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+                      Contacted
+                    </span>
+                  )}
                   {c.unallocated && (
                     <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
                       Unallocated
@@ -2925,9 +2947,13 @@ function ContactsCard() {
                     ? c.startsAt
                       ? `Appointment · ${format(new Date(c.startsAt), "EEE d MMM, HH:mm")}`
                       : "Appointment"
-                    : c.isVoicemail
-                      ? "Voicemail · call back requested"
-                      : `Call back · ${CALLBACK_WINDOW_LABELS[c.window ?? ""] ?? c.window}`}
+                    : c.kind === "phone_call"
+                      ? c.isVoicemail
+                        ? "Voicemail · call back requested"
+                        : `Outbound call · ${format(new Date(c.createdAt), "EEE d MMM, HH:mm")}`
+                      : c.isVoicemail
+                        ? "Voicemail · call back requested"
+                        : `Call back · ${CALLBACK_WINDOW_LABELS[c.window ?? ""] ?? c.window}`}
                   {c.customerPhone ? ` · ${c.customerPhone}` : ""}
                 </div>
                 {c.summary && (
@@ -2935,10 +2961,19 @@ function ContactsCard() {
                 )}
               </div>
               <div className="flex flex-col gap-1 shrink-0 items-end">
-                {c.unallocated && (
+                {c.unallocated && c.kind === "callback" && (
                   <AssignVoicemailAdvisor
                     callbackId={c.id}
                     onAssigned={() => qc.invalidateQueries({ queryKey: ["advisor-contacts"] })}
+                  />
+                )}
+                {(c.kind === "callback" || c.kind === "phone_call" || c.kind === "appointment") && (
+                  <MarkContactedButton
+                    contactType={archiveType}
+                    contactId={c.kind === "phone_call" ? c.id : c.id}
+                    sessionId={c.sessionId}
+                    contacted={c.contacted}
+                    onDone={() => qc.invalidateQueries({ queryKey: ["advisor-contacts"] })}
                   />
                 )}
                 {c.phoneCallId && (

@@ -4,8 +4,11 @@ set -euo pipefail
 
 PLIST="$HOME/Library/LaunchAgents/com.mabbott.mortgage-hub.plist"
 BIN="$HOME/bin"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-chmod +x "$BIN/mortgage-hub-stable.sh" "$BIN/mortgage-hub-watch.sh"
+mkdir -p "$BIN"
+install -m 755 "$SCRIPT_DIR/mortgage-hub-stable.sh" "$BIN/mortgage-hub-stable.sh"
+install -m 755 "$SCRIPT_DIR/mortgage-hub-watch.sh" "$BIN/mortgage-hub-watch.sh"
 
 cat >"$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

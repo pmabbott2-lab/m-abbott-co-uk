@@ -24,6 +24,7 @@
     "configure:twilio-voice": "node scripts/configure-twilio-voice.mjs",
     "fix:env-url": "node scripts/fix-env-app-base-url.mjs",
     "backfill:voicemails": "node scripts/backfill-twilio-voicemails.mjs",
+    "backfill:call-transcripts": "node scripts/backfill-call-transcripts.mjs",
     "build:marketing": "node marketing/build-all.mjs"
   },
   "dependencies": {

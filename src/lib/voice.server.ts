@@ -42,7 +42,7 @@ export function clientDialCustomerTwiml(opts: {
   const customer = escapeXml(normaliseUkPhone(opts.customerPhone));
   const callerId = escapeXml(opts.callerId);
   const recordCb = escapeXml(`${opts.recordCallback}?callId=${encodeURIComponent(opts.callId)}`);
-  const statusCb = escapeXml(opts.statusCallback);
+  const statusCb = escapeXml(`${opts.statusCallback}?callId=${encodeURIComponent(opts.callId)}`);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>

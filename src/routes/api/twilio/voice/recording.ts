@@ -1,9 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
   handleInboundVoicemailWebhook,
-  processVoicemailRecording,
   upsertInboundVoicemail,
 } from "@/lib/inbound-voicemail.server";
+import {
+  findPhoneCallId,
+  processPhoneCallRecording,
+  syncRecordingFromTwilioCall,
+} from "@/lib/phone-call-recording.server";
 
 export const Route = createFileRoute("/api/twilio/voice/recording")({
   server: {
@@ -22,51 +26,50 @@ export const Route = createFileRoute("/api/twilio/voice/recording")({
           return new Response("ok");
         }
 
-        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        let callId = await findPhoneCallId({
+          callId: callIdFromQuery,
+          callSid,
+          recordingSid,
+        });
 
-        let row: { id: string } | null = null;
-        if (callIdFromQuery) {
-          const byId = await supabaseAdmin
-            .from("phone_calls")
-            .select("id")
-            .eq("id", callIdFromQuery)
-            .maybeSingle();
-          row = byId.data;
-        }
-        if (!row && callSid) {
-          const byCall = await supabaseAdmin
-            .from("phone_calls")
-            .select("id")
-            .eq("twilio_call_sid", callSid)
-            .maybeSingle();
-          row = byCall.data;
+        // Outbound browser call — recording callback may arrive before CallSid is attached.
+        if (!callId && callSid && from.startsWith("client:")) {
+          const synced = await syncRecordingFromTwilioCall(callSid, callIdFromQuery).catch((e) => {
+            console.error("[recording] outbound sync failed", e);
+            return false;
+          });
+          if (synced) return new Response("ok");
         }
 
         // Inbound voicemail: recording callback often arrives before voicemail-done.
-        if (!row && callSid && from) {
+        if (!callId && callSid && from && !from.startsWith("client:")) {
           const upserted = await upsertInboundVoicemail({
             callSid,
             from,
             recordingUrl,
             recordingSid,
           });
-          if (upserted.callId) row = { id: upserted.callId };
+          callId = upserted.callId;
         }
 
-        if (!row) {
-          if (callSid && from) {
+        if (!callId) {
+          if (callSid && from && !from.startsWith("client:")) {
             await handleInboundVoicemailWebhook({
               callSid,
               from,
               recordingUrl,
               recordingSid,
             });
+          } else {
+            console.warn(
+              `[recording] no phone_calls row (callSid=${callSid}, callId=${callIdFromQuery ?? ""}, from=${from})`,
+            );
           }
           return new Response("ok");
         }
 
         try {
-          await processVoicemailRecording(row.id, recordingUrl, recordingSid || undefined);
+          await processPhoneCallRecording(callId, recordingUrl, recordingSid || undefined);
         } catch (e) {
           console.error("[recording] AI processing failed", e);
         }

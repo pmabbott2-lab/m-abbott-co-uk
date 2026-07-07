@@ -848,7 +848,7 @@ export const getSessionBooking = createServerFn({ method: "GET" })
         .limit(1)
         .maybeSingle();
       if (error && !isMissingContactTable(error)) throw new Error(error.message);
-      if (cb) {
+      if (cb && cb.status === "new") {
         callback = {
           id: cb.id,
           preferredWindow: cb.preferred_window,
@@ -1121,7 +1121,7 @@ export const requestCallbackAuth = createServerFn({ method: "POST" })
 // whether THIS advisor has opened it yet (so new/unopened contacts highlight).
 // Degrades gracefully if the callback/views tables aren't present yet.
 export type AdvisorContact = {
-  kind: "appointment" | "callback";
+  kind: "appointment" | "callback" | "phone_call";
   id: string;
   customerName: string;
   customerPhone: string;
@@ -1139,6 +1139,33 @@ export type AdvisorContact = {
   phoneCallId?: string | null;
   summary?: string | null;
   aiStatus?: string | null;
+  /** Marked contacted — shown greyed until archive window expires. */
+  contacted?: boolean;
+  contactedAt?: string | null;
+};
+
+/** Items stay visible (greyed) for 24h after Contacted, then drop from Contacts/CRM. */
+export const CONTACT_ARCHIVE_MS = 24 * 60 * 60 * 1000;
+
+export function contactArchiveVisible(contactedAt: string | null | undefined): boolean {
+  if (!contactedAt) return true;
+  return Date.now() - new Date(contactedAt).getTime() < CONTACT_ARCHIVE_MS;
+}
+
+export function isContactArchived(contactedAt: string | null | undefined): boolean {
+  return Boolean(contactedAt) && contactArchiveVisible(contactedAt);
+}
+
+export type SessionCrmContactItem = {
+  contactType: "callback" | "phone_call";
+  id: string;
+  phoneCallId?: string | null;
+  title: string;
+  subtitle: string;
+  summary?: string | null;
+  aiStatus?: string | null;
+  contacted: boolean;
+  contactedAt?: string | null;
 };
 
 function isMissingContactTable(error: { code?: string; message?: string } | null): boolean {
@@ -1210,13 +1237,18 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const opened = new Set<string>();
+    const contactedAtByKey = new Map<string, string>();
     {
       const { data, error } = await supabaseAdmin
         .from("advisor_contact_views")
-        .select("contact_type, contact_id")
+        .select("contact_type, contact_id, contacted_at")
         .eq("advisor_id", context.userId);
       if (error && !isMissingContactTable(error)) throw new Error(error.message);
-      for (const v of data ?? []) opened.add(`${v.contact_type}:${v.contact_id}`);
+      for (const v of data ?? []) {
+        const row = v as { contact_type: string; contact_id: string; contacted_at?: string | null };
+        opened.add(`${row.contact_type}:${row.contact_id}`);
+        if (row.contacted_at) contactedAtByKey.set(`${row.contact_type}:${row.contact_id}`, row.contacted_at);
+      }
     }
 
     const allocatedSessionIds = new Set<string>();
@@ -1266,7 +1298,7 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
         .select(
           "id, customer_name, customer_phone, customer_email, session_id, preferred_window, status, created_at, advisor_id, notes, phone_call_id",
         )
-        .neq("status", "closed")
+        .in("status", ["new", "contacted"])
         .order("created_at", { ascending: false });
       const { data: callbacks, error } = await cbQuery;
       if (error && !isMissingContactTable(error)) throw new Error(error.message);
@@ -1312,6 +1344,8 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
 
         const phoneCallId = row.phone_call_id ?? null;
         const meta = phoneCallId ? phoneCallMeta.get(phoneCallId) : undefined;
+        const contactedAt = contactedAtByKey.get(`callback:${row.id}`) ?? null;
+        if (contactedAt && !contactArchiveVisible(contactedAt)) continue;
 
         contacts.push({
           kind: "callback",
@@ -1330,11 +1364,80 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
           phoneCallId,
           summary: meta?.summary ?? null,
           aiStatus: meta?.aiStatus ?? null,
+          contacted: isContactArchived(contactedAt),
+          contactedAt,
+        });
+      }
+    }
+
+    const callbackPhoneCallIds = new Set(
+      contacts.map((c) => c.phoneCallId).filter(Boolean) as string[],
+    );
+
+    {
+      let callQuery = supabaseAdmin
+        .from("phone_calls")
+        .select(
+          "id, session_id, call_kind, direction, from_number, to_number, started_at, summary, ai_status, status",
+        )
+        .not("session_id", "is", null)
+        .in("call_kind", ["outbound", "inbound_voicemail"])
+        .order("started_at", { ascending: false })
+        .limit(40);
+      const { data: phoneCalls, error } = await callQuery;
+      if (error && !isMissingContactTable(error)) throw new Error(error.message);
+
+      for (const call of phoneCalls ?? []) {
+        if (call.call_kind === "inbound_voicemail" && callbackPhoneCallIds.has(call.id)) continue;
+
+        const sessionId = call.session_id as string;
+        if (!isStaffAdmin && !allocatedSessionIds.has(sessionId)) continue;
+
+        const contactedAt = contactedAtByKey.get(`phone_call:${call.id}`) ?? null;
+        if (contactedAt && !contactArchiveVisible(contactedAt)) continue;
+
+        const isVoicemail = call.call_kind === "inbound_voicemail";
+        const phone = isVoicemail ? call.from_number : call.to_number;
+        let customerName = "Customer";
+        const { data: session } = await supabaseAdmin
+          .from("interview_sessions")
+          .select("customer_id, case_ref")
+          .eq("id", sessionId)
+          .maybeSingle();
+        if (session?.customer_id) {
+          const { data: prof } = await supabaseAdmin
+            .from("profiles")
+            .select("full_name")
+            .eq("id", session.customer_id)
+            .maybeSingle();
+          customerName = prof?.full_name?.trim() || customerName;
+        }
+
+        contacts.push({
+          kind: "phone_call",
+          id: call.id,
+          customerName,
+          customerPhone: phone ?? "Unknown",
+          customerEmail: null,
+          sessionId,
+          startsAt: null,
+          window: null,
+          status: call.status,
+          createdAt: call.started_at,
+          opened: opened.has(`phone_call:${call.id}`),
+          isVoicemail,
+          unallocated: false,
+          phoneCallId: call.id,
+          summary: call.summary,
+          aiStatus: call.ai_status,
+          contacted: isContactArchived(contactedAt),
+          contactedAt,
         });
       }
     }
 
     contacts.sort((a, b) => {
+      if (a.contacted !== b.contacted) return a.contacted ? 1 : -1;
       if (a.unallocated !== b.unallocated) return a.unallocated ? -1 : 1;
       if (a.opened !== b.opened) return a.opened ? 1 : -1;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
@@ -1342,7 +1445,200 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
     return contacts;
   });
 
-/** Owner / supervisor / admin: list advisors for assigning unallocated voicemails. */
+export const listSessionCrmContacts = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<SessionCrmContactItem[]> => {
+    const { data: roles } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
+    if (!isStaff) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const contactedAtByKey = new Map<string, string>();
+    {
+      const { data: views, error } = await supabaseAdmin
+        .from("advisor_contact_views")
+        .select("contact_type, contact_id, contacted_at")
+        .eq("advisor_id", context.userId);
+      if (error && !isMissingContactTable(error)) throw new Error(error.message);
+      for (const v of views ?? []) {
+        const row = v as { contact_type: string; contact_id: string; contacted_at?: string | null };
+        if (row.contacted_at) contactedAtByKey.set(`${row.contact_type}:${row.contact_id}`, row.contacted_at);
+      }
+    }
+
+    const items: SessionCrmContactItem[] = [];
+
+    const { data: callbacks, error: cbErr } = await supabaseAdmin
+      .from("callback_requests")
+      .select("id, preferred_window, status, created_at, notes, phone_call_id")
+      .eq("session_id", data.sessionId)
+      .in("status", ["new", "contacted"])
+      .order("created_at", { ascending: false });
+    if (cbErr && !isMissingContactTable(cbErr)) throw new Error(cbErr.message);
+
+    const linkedCallIds = new Set<string>();
+    for (const cb of callbacks ?? []) {
+      const isVoicemail = (cb.notes ?? "").toLowerCase().includes("voicemail");
+      const contactedAt = contactedAtByKey.get(`callback:${cb.id}`) ?? null;
+      if (contactedAt && !contactArchiveVisible(contactedAt)) continue;
+      if (cb.phone_call_id) linkedCallIds.add(cb.phone_call_id);
+      items.push({
+        contactType: "callback",
+        id: cb.id,
+        phoneCallId: cb.phone_call_id,
+        title: isVoicemail ? "Inbound voicemail" : "Call-back request",
+        subtitle: isVoicemail
+          ? "Office line — call back requested"
+          : `Preferred ${cb.preferred_window?.replace("-", "–") ?? "window"}`,
+        contacted: isContactArchived(contactedAt),
+        contactedAt,
+      });
+    }
+
+    const { data: calls, error: callErr } = await supabaseAdmin
+      .from("phone_calls")
+      .select("id, call_kind, from_number, to_number, started_at, summary, ai_status")
+      .eq("session_id", data.sessionId)
+      .in("call_kind", ["outbound", "inbound_voicemail"])
+      .order("started_at", { ascending: false })
+      .limit(20);
+    if (callErr && !isMissingContactTable(callErr)) throw new Error(callErr.message);
+
+    for (const call of calls ?? []) {
+      if (call.call_kind === "inbound_voicemail" && linkedCallIds.has(call.id)) continue;
+      const contactedAt = contactedAtByKey.get(`phone_call:${call.id}`) ?? null;
+      if (contactedAt && !contactArchiveVisible(contactedAt)) continue;
+      const isVoicemail = call.call_kind === "inbound_voicemail";
+      items.push({
+        contactType: "phone_call",
+        id: call.id,
+        phoneCallId: call.id,
+        title: isVoicemail ? "Inbound voicemail" : "Outbound call",
+        subtitle: isVoicemail
+          ? `From ${call.from_number ?? "unknown"} · ${new Date(call.started_at).toLocaleString("en-GB")}`
+          : `To ${call.to_number ?? "unknown"} · ${new Date(call.started_at).toLocaleString("en-GB")}`,
+        summary: call.summary,
+        aiStatus: call.ai_status,
+        contacted: isContactArchived(contactedAt),
+        contactedAt,
+      });
+    }
+
+    items.sort((a, b) => {
+      if (a.contacted !== b.contacted) return a.contacted ? 1 : -1;
+      return 0;
+    });
+    return items;
+  });
+
+/** Mark a contact item as handled — logs History, greys out for 24h, then drops from Contacts/CRM. */
+export const markAdvisorContactHandled = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        contactType: z.enum(["appointment", "callback", "phone_call"]),
+        contactId: z.string().uuid(),
+        sessionId: z.string().uuid().optional(),
+        note: z.string().max(200).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: roles } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
+    if (!isStaff) {
+      const email = (context.claims as { email?: string }).email;
+      const { resolveAdminAccess } = await import("@/lib/admin.functions");
+      const adminAccess = await resolveAdminAccess(context.userId, email);
+      if (!adminAccess.isOwner && !adminAccess.isSupervisor && !adminAccess.isAdmin) {
+        throw new Error("Forbidden");
+      }
+    }
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const now = new Date().toISOString();
+
+    const viewRow: Record<string, unknown> = {
+      advisor_id: context.userId,
+      contact_type: data.contactType,
+      contact_id: data.contactId,
+      opened_at: now,
+      contacted_at: now,
+    };
+
+    const { error: viewErr } = await supabaseAdmin
+      .from("advisor_contact_views")
+      .upsert(viewRow, { onConflict: "advisor_id,contact_type,contact_id" });
+    if (viewErr && !isMissingContactTable(viewErr)) throw new Error(viewErr.message);
+
+    let sessionId = data.sessionId ?? null;
+    let historyNote = data.note?.trim() || null;
+
+    if (data.contactType === "callback") {
+      await supabaseAdmin.from("callback_requests").update({ status: "contacted" }).eq("id", data.contactId);
+      if (!sessionId) {
+        const { data: cb } = await supabaseAdmin
+          .from("callback_requests")
+          .select("session_id, notes, phone_call_id")
+          .eq("id", data.contactId)
+          .maybeSingle();
+        sessionId = cb?.session_id ?? null;
+        if (!historyNote) {
+          const vm = (cb?.notes ?? "").toLowerCase().includes("voicemail");
+          historyNote = vm ? "Inbound voicemail — marked as contacted" : "Call-back — marked as contacted";
+        }
+        if (cb?.phone_call_id) {
+          await supabaseAdmin.from("advisor_contact_views").upsert(
+            {
+              advisor_id: context.userId,
+              contact_type: "phone_call",
+              contact_id: cb.phone_call_id,
+              opened_at: now,
+              contacted_at: now,
+            },
+            { onConflict: "advisor_id,contact_type,contact_id" },
+          );
+        }
+      }
+    }
+
+    if (data.contactType === "phone_call") {
+      if (!sessionId) {
+        const { data: call } = await supabaseAdmin
+          .from("phone_calls")
+          .select("session_id, call_kind")
+          .eq("id", data.contactId)
+          .maybeSingle();
+        sessionId = call?.session_id ?? null;
+        if (!historyNote) {
+          historyNote =
+            call?.call_kind === "inbound_voicemail"
+              ? "Inbound voicemail — marked as contacted"
+              : "Outbound call — marked as contacted";
+        }
+      }
+    }
+
+    if (data.contactType === "appointment" && !historyNote) {
+      historyNote = "Appointment — marked as contacted";
+    }
+
+    if (sessionId) {
+      await appendContactLog(sessionId, context.userId, "contact", historyNote ?? "Marked as contacted");
+      await clearSessionAttention(sessionId, context.userId, "contact_handled");
+    }
+
+    return { ok: true, contactedAt: now };
+  });
+
 export const listAssigneeAdvisors = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -1455,7 +1751,7 @@ export const markContactOpened = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z
-      .object({ contactType: z.enum(["appointment", "callback"]), contactId: z.string().uuid() })
+      .object({ contactType: z.enum(["appointment", "callback", "phone_call"]), contactId: z.string().uuid() })
       .parse(d),
   )
   .handler(async ({ data, context }) => {

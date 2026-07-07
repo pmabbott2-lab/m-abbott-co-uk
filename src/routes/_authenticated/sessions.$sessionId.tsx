@@ -33,10 +33,10 @@ import { mergeKeyFacts, formatGBP as fmtGBP } from "@/lib/structured-answers";
 import {
   getSessionBooking,
   logCallbackAttempt,
-  resolveCallback,
-  markContactOpened,
+  listSessionCrmContacts,
   getAppointmentForSession,
 } from "@/lib/booking.functions";
+import { MarkContactedButton } from "@/components/MarkContactedButton";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,8 +50,10 @@ import {
 } from "@/components/PostCompletionBooking";
 import { CustomerHubBookingDialog } from "@/components/CustomerHubBookingDialog";
 import { CrmContactCard } from "@/components/CrmContactCard";
+import { ReportExportBox } from "@/components/ReportExportBox";
+import { ReportTableScroll } from "@/components/ReportTableScroll";
+import { contactHistoryToSheet } from "@/lib/report-mappers";
 import { PhoneCallDetailDialog } from "@/components/PhoneCallDetailDialog";
-import { listSessionVoicemails } from "@/lib/telephony.functions";
 
 export const Route = createFileRoute("/_authenticated/sessions/$sessionId")({
   component: SessionDetail,
@@ -243,7 +245,7 @@ function SessionDetail() {
           {isAdvisor && isCase && (
             <TabsContent value="notes" className="space-y-6 mt-4">
               <AdvisorNoteInput sessionId={sessionId} />
-              <ContactHistoryCard sessionId={sessionId} isOwner={isOwner} />
+              <ContactHistoryCard sessionId={sessionId} caseRef={caseRef} isOwner={isOwner} />
             </TabsContent>
           )}
 
@@ -416,7 +418,7 @@ function CustomerNextStepsCard({
   const [editing, setEditing] = useState(false);
   const appointment = booking?.appointment ?? null;
   const callback = booking?.callback ?? null;
-  const callbackOpen = callback && callback.status !== "closed";
+  const callbackOpen = callback && callback.status === "new";
 
   if (editing) {
     return (
@@ -639,35 +641,26 @@ function AppointmentCallbackCard({
 }) {
   const qc = useQueryClient();
   const getFn = useServerFn(getSessionBooking);
-  const voicemailsFn = useServerFn(listSessionVoicemails);
+  const crmContactsFn = useServerFn(listSessionCrmContacts);
   const attemptFn = useServerFn(logCallbackAttempt);
-  const resolveFn = useServerFn(resolveCallback);
-  const openedFn = useServerFn(markContactOpened);
-  const [voicemailCallId, setVoicemailCallId] = useState<string | null>(null);
+  const [detailCallId, setDetailCallId] = useState<string | null>(null);
 
   const bookingQ = useQuery({
     queryKey: ["session-booking", sessionId],
     queryFn: () => getFn({ data: { sessionId } }),
   });
-  const voicemailsQ = useQuery({
-    queryKey: ["session-voicemails", sessionId],
-    queryFn: () => voicemailsFn({ data: { sessionId } }),
+  const crmContactsQ = useQuery({
+    queryKey: ["session-crm-contacts", sessionId],
+    queryFn: () => crmContactsFn({ data: { sessionId } }),
   });
 
   const appointment = bookingQ.data?.appointment ?? null;
-  const callback = bookingQ.data?.callback ?? null;
-
-  // Mark the call-back as opened (clears the Contacts-tab "new" highlight).
-  useEffect(() => {
-    if (!callback) return;
-    openedFn({ data: { contactType: "callback", contactId: callback.id } })
-      .then(() => qc.invalidateQueries({ queryKey: ["advisor-contacts"] }))
-      .catch(() => {});
-  }, [callback, openedFn, qc]);
+  const crmItems = crmContactsQ.data ?? [];
+  const openCallback = crmItems.find((i) => i.contactType === "callback" && !i.contacted);
 
   const invalidateAfterAction = () => {
     qc.invalidateQueries({ queryKey: ["session-booking", sessionId] });
-    qc.invalidateQueries({ queryKey: ["session-voicemails", sessionId] });
+    qc.invalidateQueries({ queryKey: ["session-crm-contacts", sessionId] });
     qc.invalidateQueries({ queryKey: ["contact-history", sessionId] });
     qc.invalidateQueries({ queryKey: ["contact-tracking", sessionId] });
     qc.invalidateQueries({ queryKey: ["advisor-contacts"] });
@@ -685,57 +678,76 @@ function AppointmentCallbackCard({
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not log attempt"),
   });
 
-  const spokeTo = useMutation({
-    mutationFn: () => resolveFn({ data: { callbackId: callback!.id, sessionId } }),
-    onSuccess: () => {
-      toast.success("Call-back resolved");
-      invalidateAfterAction();
-    },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not update"),
-  });
-
-  const callbackResolved = callback?.status === "closed";
-  const actionPending = logAttempt.isPending || spokeTo.isPending;
-  const voicemails = voicemailsQ.data ?? [];
-
   return (
     <div className="rounded-2xl border bg-card p-5 space-y-4">
       <h3 className="font-semibold flex items-center gap-2">
         <CalendarCheck className="w-4 h-4 text-muted-foreground" />
-        Appointment &amp; call-back
+        Appointment &amp; contacts
       </h3>
+      <p className="text-xs text-muted-foreground">
+        Inbound voicemails, outbound calls, and call-backs. Press Contacted when handled — the item
+        greys out, drops from Contacts after 24 hours, and stays in History.
+      </p>
 
-      {voicemails.length > 0 && (
-        <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
-          <div className="flex items-center gap-2 text-xs font-medium text-primary">
-            <PhoneCall className="w-3 h-3" /> Voicemail — call back requested
-          </div>
-          {voicemails.map((vm) => (
-            <div key={vm.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-              <div>
-                <div className="font-medium">{vm.fromNumber}</div>
-                <div className="text-xs text-muted-foreground">{formatLondon(vm.startedAt)}</div>
-                {vm.summary && (
-                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{vm.summary}</p>
+      {crmItems.length > 0 && (
+        <div className="rounded-lg border bg-background divide-y">
+          {crmItems.map((item) => (
+            <div
+              key={`${item.contactType}-${item.id}`}
+              className={`flex flex-wrap items-center justify-between gap-3 p-4 text-sm ${
+                item.contacted ? "opacity-60 bg-muted/30" : ""
+              }`}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="font-medium flex items-center gap-2 flex-wrap">
+                  {item.title}
+                  {item.contacted && (
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+                      Contacted
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5">{item.subtitle}</div>
+                {item.summary && (
+                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{item.summary}</p>
                 )}
               </div>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setVoicemailCallId(vm.id)}
-                disabled={vm.aiStatus === "processing" || vm.aiStatus === "pending"}
-              >
-                {vm.aiStatus === "complete" ? "View summary" : vm.aiStatus === "processing" ? "Transcribing…" : "View"}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {item.phoneCallId && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setDetailCallId(item.phoneCallId!)}
+                    disabled={item.aiStatus === "processing" || item.aiStatus === "pending"}
+                  >
+                    {item.aiStatus === "complete"
+                      ? "View summary"
+                      : item.aiStatus === "processing"
+                        ? "Transcribing…"
+                        : "View"}
+                  </Button>
+                )}
+                <MarkContactedButton
+                  contactType={item.contactType}
+                  contactId={item.id}
+                  sessionId={sessionId}
+                  contacted={item.contacted}
+                  onDone={invalidateAfterAction}
+                />
+              </div>
             </div>
           ))}
         </div>
       )}
 
+      {crmContactsQ.isSuccess && crmItems.length === 0 && (
+        <p className="text-xs text-muted-foreground">No open voicemails, calls, or call-backs for this case.</p>
+      )}
+
       <PhoneCallDetailDialog
-        callId={voicemailCallId}
-        open={Boolean(voicemailCallId)}
-        onOpenChange={(open) => !open && setVoicemailCallId(null)}
+        callId={detailCallId}
+        open={Boolean(detailCallId)}
+        onOpenChange={(open) => !open && setDetailCallId(null)}
       />
 
       <div className="rounded-lg border bg-background p-4 space-y-3">
@@ -783,40 +795,12 @@ function AppointmentCallbackCard({
         )}
       </div>
 
-      {callback ? (
-        <div className={`rounded-lg border bg-background p-4 space-y-3 ${callbackResolved ? "opacity-60" : ""}`}>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <PhoneCall className="w-3 h-3" /> Call-back requested
-          </div>
-          <dl className="grid sm:grid-cols-3 gap-3 text-sm">
-            <div>
-              <dt className="text-xs text-muted-foreground">Preferred window</dt>
-              <dd className="font-medium">{CALLBACK_WINDOW_LABELS[callback.preferredWindow] ?? callback.preferredWindow}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Requested</dt>
-              <dd className="font-medium">{formatLondon(callback.createdAt)}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Status</dt>
-              <dd className="font-medium">{CALLBACK_STATUS_LABELS[callback.status] ?? callback.status}</dd>
-            </div>
-          </dl>
-          {callbackResolved ? (
-            <p className="text-xs text-muted-foreground">Resolved — logged in History below.</p>
-          ) : (
-            <div className="flex gap-2 flex-wrap">
-              <Button size="sm" variant="outline" disabled={actionPending} onClick={() => logAttempt.mutate()}>
-                {logAttempt.isPending ? "Logging…" : "Log attempt"}
-              </Button>
-              <Button size="sm" disabled={actionPending} onClick={() => spokeTo.mutate()}>
-                {spokeTo.isPending ? "Saving…" : "Spoke to customer"}
-              </Button>
-            </div>
-          )}
+      {openCallback && (
+        <div className="flex gap-2 flex-wrap">
+          <Button size="sm" variant="outline" disabled={logAttempt.isPending} onClick={() => logAttempt.mutate()}>
+            {logAttempt.isPending ? "Logging…" : "Log call attempt (no answer)"}
+          </Button>
         </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">No call-back requested.</p>
       )}
 
       {customer?.phone && (
@@ -943,7 +927,15 @@ function ContactTrackingCard({ sessionId }: { sessionId: string }) {
 // Advisor-only: chronological history (contact events, notes, next-contact
 // changes, appointments and call-backs) — all timestamped.
 // Owner can amend/delete contact-log rows only.
-function ContactHistoryCard({ sessionId, isOwner }: { sessionId: string; isOwner: boolean }) {
+function ContactHistoryCard({
+  sessionId,
+  caseRef,
+  isOwner,
+}: {
+  sessionId: string;
+  caseRef: string | null;
+  isOwner: boolean;
+}) {
   const qc = useQueryClient();
   const historyFn = useServerFn(listContactHistory);
   const amendFn = useServerFn(amendContactHistoryEntry);
@@ -956,6 +948,8 @@ function ContactHistoryCard({ sessionId, isOwner }: { sessionId: string; isOwner
     queryFn: () => historyFn({ data: { sessionId } }),
   });
   const entries = historyQ.data ?? [];
+  const exportSheet = contactHistoryToSheet(entries, HISTORY_LABELS);
+  const exportFilename = `contact-history-${caseRef ?? sessionId.slice(0, 8)}`;
 
   const amend = useMutation({
     mutationFn: (vars: { entryId: string; body?: string; delete?: boolean }) =>
@@ -969,108 +963,122 @@ function ContactHistoryCard({ sessionId, isOwner }: { sessionId: string; isOwner
   });
 
   return (
-    <div className="rounded-2xl border bg-card p-5 space-y-3">
-      <h3 className="font-semibold flex items-center gap-2">
-        <History className="w-4 h-4 text-muted-foreground" />
-        History
-      </h3>
-      <p className="text-xs text-muted-foreground">
-        Full audit (newest first) — fact-find milestones, texts sent/received, appointments,
-        call-backs, advisor notes, contact events and next-contact changes. All times Europe/London.
-        {isOwner && " As owner you can amend or delete contact-log entries."}
-      </p>
-      {historyQ.isLoading && <p className="text-sm text-muted-foreground">Loading history…</p>}
-      {!historyQ.isLoading && entries.length === 0 && (
-        <p className="text-sm text-muted-foreground">No history yet.</p>
-      )}
-      <div className="space-y-2">
-        {entries.map((e) => (
-          <div
-            key={e.id}
-            className={`flex items-start gap-3 text-sm border-l-2 pl-3 py-1 ${
-              e.deleted || e.amended ? "border-destructive/60" : "border-muted"
-            }`}
-          >
-            <span
-              className={`text-xs px-2 py-0.5 rounded-full shrink-0 mt-0.5 ${
-                e.deleted || e.amended ? "bg-destructive/15 text-destructive" : "bg-muted"
-              }`}
-            >
-              {HISTORY_LABELS[e.type] ?? e.type}
-              {e.deleted ? " · deleted" : e.amended ? " · amended" : ""}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="text-xs text-muted-foreground">{format(new Date(e.occurredAt), "PPp")}</div>
-              {editingId === e.id ? (
-                <div className="mt-1 space-y-2">
-                  <Input value={editBody} onChange={(ev) => setEditBody(ev.target.value)} />
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      disabled={amend.isPending}
-                      onClick={() => amend.mutate({ entryId: e.id, body: editBody })}
-                    >
-                      Save
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
-                      Cancel
-                    </Button>
+    <div className="flex flex-col gap-4">
+      <div className="rounded-2xl border bg-card p-5 space-y-3">
+        <h3 className="font-semibold flex items-center gap-2">
+          <History className="w-4 h-4 text-muted-foreground" />
+          History
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          Full audit (newest first) — fact-find milestones, texts sent/received, appointments,
+          call-backs, advisor notes, contact events and next-contact changes. All times Europe/London.
+          {isOwner && " As owner you can amend or delete contact-log entries."}
+        </p>
+        {historyQ.isLoading && <p className="text-sm text-muted-foreground">Loading history…</p>}
+        {!historyQ.isLoading && entries.length === 0 && (
+          <p className="text-sm text-muted-foreground">No history yet.</p>
+        )}
+        {entries.length > 0 && (
+          <ReportTableScroll visibleRows={15} className="border-0">
+            <div className="space-y-2 p-3">
+              {entries.map((e) => (
+                <div
+                  key={e.id}
+                  className={`flex items-start gap-3 text-sm border-l-2 pl-3 py-1 ${
+                    e.deleted || e.amended ? "border-destructive/60" : "border-muted"
+                  }`}
+                >
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full shrink-0 mt-0.5 ${
+                      e.deleted || e.amended ? "bg-destructive/15 text-destructive" : "bg-muted"
+                    }`}
+                  >
+                    {HISTORY_LABELS[e.type] ?? e.type}
+                    {e.deleted ? " · deleted" : e.amended ? " · amended" : ""}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs text-muted-foreground">{format(new Date(e.occurredAt), "PPp")}</div>
+                    {editingId === e.id ? (
+                      <div className="mt-1 space-y-2">
+                        <Input value={editBody} onChange={(ev) => setEditBody(ev.target.value)} />
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            disabled={amend.isPending}
+                            onClick={() => amend.mutate({ entryId: e.id, body: editBody })}
+                          >
+                            Save
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {e.body && (
+                          <div className={e.deleted ? "text-destructive line-through" : e.amended ? "text-destructive" : ""}>
+                            {e.body}
+                          </div>
+                        )}
+                        {e.callId && e.hasAttachment && !e.deleted && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="link"
+                            className="h-auto p-0 mt-1"
+                            onClick={() => setHistoryCallId(e.callId!)}
+                          >
+                            View call summary
+                          </Button>
+                        )}
+                      </>
+                    )}
+                    {isOwner && e.amendable && !e.deleted && editingId !== e.id && (
+                      <div className="flex gap-2 mt-1">
+                        <button
+                          type="button"
+                          className="text-xs text-muted-foreground hover:underline"
+                          onClick={() => {
+                            setEditingId(e.id);
+                            setEditBody(e.body ?? "");
+                          }}
+                        >
+                          Amend
+                        </button>
+                        <button
+                          type="button"
+                          className="text-xs text-destructive hover:underline"
+                          onClick={() => {
+                            if (confirm("Soft-delete this history entry? (Owner only — leaves an audit trail.)")) {
+                              amend.mutate({ entryId: e.id, delete: true });
+                            }
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
-              ) : (
-                <>
-                  {e.body && (
-                    <div className={e.deleted ? "text-destructive line-through" : e.amended ? "text-destructive" : ""}>
-                      {e.body}
-                    </div>
-                  )}
-                  {e.callId && e.hasAttachment && !e.deleted && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="link"
-                      className="h-auto p-0 mt-1"
-                      onClick={() => setHistoryCallId(e.callId!)}
-                    >
-                      View call summary
-                    </Button>
-                  )}
-                </>
-              )}
-              {isOwner && e.amendable && !e.deleted && editingId !== e.id && (
-                <div className="flex gap-2 mt-1">
-                  <button
-                    type="button"
-                    className="text-xs text-muted-foreground hover:underline"
-                    onClick={() => {
-                      setEditingId(e.id);
-                      setEditBody(e.body ?? "");
-                    }}
-                  >
-                    Amend
-                  </button>
-                  <button
-                    type="button"
-                    className="text-xs text-destructive hover:underline"
-                    onClick={() => {
-                      if (confirm("Soft-delete this history entry? (Owner only — leaves an audit trail.)")) {
-                        amend.mutate({ entryId: e.id, delete: true });
-                      }
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              )}
+              ))}
             </div>
-          </div>
-        ))}
+          </ReportTableScroll>
+        )}
+        <PhoneCallDetailDialog
+          callId={historyCallId}
+          open={Boolean(historyCallId)}
+          onOpenChange={(open) => !open && setHistoryCallId(null)}
+        />
       </div>
-      <PhoneCallDetailDialog
-        callId={historyCallId}
-        open={Boolean(historyCallId)}
-        onOpenChange={(open) => !open && setHistoryCallId(null)}
-      />
+      <div className="self-start pt-1">
+        <ReportExportBox
+          filename={exportFilename}
+          label="History"
+          sheets={[exportSheet]}
+          pdfTitle={`Contact history${caseRef ? ` — ${caseRef}` : ""}`}
+        />
+      </div>
     </div>
   );
 }

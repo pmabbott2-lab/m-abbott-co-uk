@@ -4,19 +4,28 @@ import { chatCompletion } from "@/lib/ai-gateway.server";
 import { getTwilioConfig } from "@/lib/sms.server";
 import { transcribeAudio } from "@/lib/openai.server";
 
-export async function downloadTwilioRecording(recordingUrl: string): Promise<Blob> {
+export async function downloadTwilioRecording(recordingUrl: string, recordingSid?: string): Promise<Blob> {
   const { accountSid, authToken } = getTwilioConfig();
   const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
-  const url = recordingUrl.endsWith(".mp3") ? recordingUrl : `${recordingUrl}.mp3`;
-  const res = await fetch(url, { headers: { Authorization: `Basic ${auth}` } });
-  if (!res.ok) {
-    throw new Error(`Failed to download recording (${res.status})`);
+  const candidates = [
+    recordingUrl.endsWith(".mp3") ? recordingUrl : `${recordingUrl}.mp3`,
+    recordingSid
+      ? `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Recordings/${recordingSid}.mp3`
+      : null,
+    recordingSid
+      ? `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Recordings/${recordingSid}.mp3?RequestedChannels=dual`
+      : null,
+  ].filter(Boolean) as string[];
+
+  for (const url of candidates) {
+    const res = await fetch(url, { headers: { Authorization: `Basic ${auth}` } });
+    if (res.ok) return res.blob();
   }
-  return res.blob();
+  throw new Error(`Failed to download recording (${candidates.length} URLs tried)`);
 }
 
-export async function transcribeCallRecording(recordingUrl: string): Promise<string> {
-  const blob = await downloadTwilioRecording(recordingUrl);
+export async function transcribeCallRecording(recordingUrl: string, recordingSid?: string): Promise<string> {
+  const blob = await downloadTwilioRecording(recordingUrl, recordingSid);
   const file = new File([blob], "call-recording.mp3", { type: "audio/mpeg" });
   return transcribeAudio(file);
 }
@@ -44,7 +53,7 @@ export async function processCallRecording(opts: {
   recordingUrl: string;
   recordingSid?: string;
 }): Promise<{ transcript: string; summary: string }> {
-  const transcript = await transcribeCallRecording(opts.recordingUrl);
+  const transcript = await transcribeCallRecording(opts.recordingUrl, opts.recordingSid);
   const summary = await summarizeCallTranscript(transcript);
   return { transcript, summary };
 }

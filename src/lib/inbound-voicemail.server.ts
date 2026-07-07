@@ -1,7 +1,7 @@
 // Server-only: persist inbound voicemails, match callers to cases, run AI transcript.
 
-import { processCallRecording } from "@/lib/call-ai.server";
 import { findSessionForCallerPhone } from "@/lib/phone-lookup.server";
+import { processPhoneCallRecording } from "@/lib/phone-call-recording.server";
 import { getVoiceConfig } from "@/lib/voice.server";
 import { normaliseUkPhone } from "@/lib/sms.server";
 
@@ -262,32 +262,7 @@ export async function upsertInboundVoicemail(opts: {
 }
 
 export async function processVoicemailRecording(callId: string, recordingUrl: string, recordingSid?: string) {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  await supabaseAdmin
-    .from("phone_calls")
-    .update({ ai_status: "processing", recording_url: recordingUrl, twilio_recording_sid: recordingSid ?? null })
-    .eq("id", callId);
-
-  try {
-    const { transcript, summary } = await processCallRecording({ recordingUrl, recordingSid });
-    await supabaseAdmin
-      .from("phone_calls")
-      .update({
-        transcript,
-        summary,
-        ai_status: "complete",
-        status: "completed",
-        ended_at: new Date().toISOString(),
-      })
-      .eq("id", callId);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Processing failed";
-    await supabaseAdmin
-      .from("phone_calls")
-      .update({ ai_status: "failed", error_message: msg })
-      .eq("id", callId);
-    throw e;
-  }
+  await processPhoneCallRecording(callId, recordingUrl, recordingSid);
 }
 
 export async function handleInboundVoicemailWebhook(opts: {

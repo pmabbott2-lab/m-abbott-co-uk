@@ -5,6 +5,7 @@ import {
   PAYOUT_STATUS_LABELS,
   type CommissionPayoutRow,
 } from "@/lib/finance.functions";
+import type { ContactHistoryEntry } from "@/lib/sessions.functions";
 import type { ExportSheet, OwnerCustomerExportRow } from "@/lib/report-export.types";
 import { penceToGbp } from "@/lib/report-export.types";
 
@@ -116,6 +117,40 @@ export function rateHistoryToSheet(
       FEE_TYPE_LABELS[h.fee_type as keyof typeof FEE_TYPE_LABELS] ?? h.fee_type,
       h.pct_from != null ? String(h.pct_from) : "new",
       String(h.pct_to),
+    ]),
+  };
+}
+
+const CONTACT_HISTORY_TYPE_LABELS: Record<string, string> = {
+  contact: "Contacted",
+  note: "Note added",
+  next_contact_set: "Next contact updated",
+  history_amend: "History amended",
+  finance: "Finance",
+  appointment: "Appointment",
+  callback: "Call-back",
+  phone_call: "Phone call",
+  sms: "SMS",
+  fact_find: "Fact-find",
+  journey_milestone: "Journey",
+};
+
+export function contactHistoryToSheet(
+  entries: ContactHistoryEntry[],
+  typeLabels: Record<string, string> = CONTACT_HISTORY_TYPE_LABELS,
+): ExportSheet {
+  return {
+    name: "History",
+    headers: ["When", "Type", "Entry"],
+    rows: entries.map((e) => [
+      format(new Date(e.occurredAt), "yyyy-MM-dd HH:mm"),
+      typeLabels[e.type] ?? e.type,
+      [
+        e.body ?? "",
+        e.deleted ? "(deleted)" : e.amended ? "(amended)" : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
     ]),
   };
 }

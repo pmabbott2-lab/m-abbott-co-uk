@@ -183,6 +183,10 @@ export function useTwilioSoftphone(opts?: { onCallComplete?: () => void }) {
             CallId: opts.callId,
           },
         });
+        const sid = call.parameters?.CallSid;
+        if (sid) {
+          attachFn({ data: { callId: opts.callId, twilioCallSid: sid } }).catch(() => {});
+        }
         wireCall(call, opts.callId);
       } catch (e: unknown) {
         setDisplayState("failed");
