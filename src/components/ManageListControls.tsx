@@ -45,10 +45,20 @@ export function ManageListControls({
   );
 }
 
-/** Scrollable list body showing at most `visibleCount` rows (default 5). */
-export function ManageListScroll({ children }: { children: React.ReactNode }) {
+/** Scrollable list body showing at most ~5 rows by default. */
+export function ManageListScroll({
+  children,
+  visibleRows = 5,
+}: {
+  children: React.ReactNode;
+  visibleRows?: number;
+}) {
+  const maxHeight = 44 + visibleRows * 44;
   return (
-    <div className="max-h-[320px] overflow-y-auto divide-y [-webkit-overflow-scrolling:touch]">
+    <div
+      className="overflow-y-auto divide-y [-webkit-overflow-scrolling:touch]"
+      style={{ maxHeight }}
+    >
       {children}
     </div>
   );

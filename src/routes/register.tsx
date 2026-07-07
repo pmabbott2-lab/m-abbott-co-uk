@@ -12,7 +12,7 @@ import { ShieldCheck, Link2 } from "lucide-react";
 import avatarImg from "@/assets/susan.png";
 
 type ResolvedInvite = {
-  role: "advisor" | "introducer";
+  role: "advisor" | "introducer" | "admin";
   email: string | null;
   companyName: string | null;
   companyCode: string | null;
@@ -35,6 +35,7 @@ export const Route = createFileRoute("/register")({
 const ROLE_LABEL: Record<ResolvedInvite["role"], string> = {
   advisor: "Advisor",
   introducer: "Introducer",
+  admin: "Admin",
 };
 
 function RegisterPage() {
@@ -163,7 +164,9 @@ function RegisterPage() {
                   ? invite.createCompany
                     ? "Create your account below. We'll set you up with your own introducer company and referral links."
                     : `Create your account below. You'll be linked to ${invite.companyName ? `“${invite.companyName}”` : `company ${invite.companyCode}`}.`
-                  : "Create your account below to start working with customer fact-finds."}
+                  : invite.role === "admin"
+                    ? "Create your account below. The owner will assign your supervisor or general admin access after you register."
+                    : "Create your account below to start working with customer fact-finds."}
               </p>
             </>
           ) : (

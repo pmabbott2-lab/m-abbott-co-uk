@@ -8,6 +8,8 @@ import {
   type PermissionKey,
   DEFAULT_GENERAL_PERMISSIONS,
   PERMISSION_KEYS,
+  canEditAdminPermissions,
+  canGrantAdminLevel,
   emptyPermissions,
   fullPermissions,
 } from "@/lib/admin-access";
@@ -249,8 +251,24 @@ export const listAdmins = createServerFn({ method: "GET" })
 
     const levelOrder: Record<AdminLevel, number> = { owner: 0, supervisor: 1, general: 2 };
 
+    const { data: adminInvites } = await supabaseAdmin
+      .from("staff_invitations")
+      .select("used_by")
+      .eq("role", "admin")
+      .not("used_by", "is", null);
+    const invitedAdminIds = new Set(
+      (adminInvites ?? []).map((i) => i.used_by as string).filter(Boolean),
+    );
+
     return {
       admins: (profiles ?? [])
+        .filter((p) => {
+          if (isOwnerEmail(p.email)) return true;
+          const level = resolveListedAdminLevel(p.id, p.email, levelByUser, profilesMissing);
+          if (level === "owner") return true;
+          const granted = levelByUser.has(p.id);
+          return invitedAdminIds.has(p.id) || granted;
+        })
         .map((p) => {
           const level = resolveListedAdminLevel(p.id, p.email, levelByUser, profilesMissing);
           const defaults = { ...DEFAULT_GENERAL_PERMISSIONS };
@@ -300,7 +318,7 @@ export const setAdminLevel = createServerFn({ method: "POST" })
     }
 
     if (data.level === "supervisor") {
-      if (!access.isOwner) throw new Error("Only the owner can grant Admin Supervisor.");
+      if (!canGrantAdminLevel(access, "supervisor")) throw new Error("Only the owner can grant Admin Supervisor.");
       await supabaseAdmin
         .from("user_roles")
         .upsert({ user_id: data.userId, role: "admin" }, { onConflict: "user_id,role" });
@@ -323,7 +341,7 @@ export const setAdminLevel = createServerFn({ method: "POST" })
     }
 
     if (data.level === "general") {
-      if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+      if (!canGrantAdminLevel(access, "general")) throw new Error("Forbidden");
       await supabaseAdmin
         .from("user_roles")
         .upsert({ user_id: data.userId, role: "admin" }, { onConflict: "user_id,role" });
@@ -380,7 +398,7 @@ export const setAdminPermissions = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const email = (context.claims as { email?: string }).email;
     const access = await requireAdminAccess(context.userId, email);
-    if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+    if (!canEditAdminPermissions(access)) throw new Error("Forbidden");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: profile } = await supabaseAdmin
@@ -410,10 +428,18 @@ export const listUsersForAdminGrant = createServerFn({ method: "GET" })
     if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: invites } = await supabaseAdmin
+      .from("staff_invitations")
+      .select("used_by")
+      .eq("role", "admin")
+      .not("used_by", "is", null);
+    const ids = [...new Set((invites ?? []).map((i) => i.used_by as string).filter(Boolean))];
+    if (ids.length === 0) return [];
+
     const { data: profiles } = await supabaseAdmin
       .from("profiles")
       .select("id, full_name, email")
-      .order("full_name", { ascending: true })
-      .limit(200);
+      .in("id", ids)
+      .order("full_name", { ascending: true });
     return profiles ?? [];
   });

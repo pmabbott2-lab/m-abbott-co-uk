@@ -40,10 +40,10 @@ export function MarkContactedButton({
 
   if (contacted) {
     return (
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-        <Check className="w-3.5 h-3.5" />
+      <Button type="button" size={size} variant="outline" disabled className="opacity-60">
+        <Check className="w-3.5 h-3.5 mr-1" />
         Contacted
-      </span>
+      </Button>
     );
   }
 

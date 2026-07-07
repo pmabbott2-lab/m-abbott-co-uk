@@ -14,12 +14,14 @@ export const PERMISSION_KEYS = [
   "customers",
   "advisors",
   "introducers",
+  "introducer_amend",
   "allocations",
   "raf",
   "invites",
   "appointments",
   "journey",
   "users_roles",
+  "admin_access",
   "finance_customer",
   "finance_advisor_pct",
   "finance_introducer_pct",
@@ -32,12 +34,14 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   customers: "Customers",
   advisors: "Advisors",
   introducers: "Introducers",
+  introducer_amend: "Introducer amend (customer)",
   allocations: "Fact-find allocations",
   raf: "RAF / referrals",
   invites: "Staff invite links",
   appointments: "Appointments & call-backs",
   journey: "Journey milestones",
   users_roles: "Users & roles (view)",
+  admin_access: "Admin permissions matrix",
   finance_customer: "Finance — customer fees",
   finance_advisor_pct: "Finance — advisor commission %",
   finance_introducer_pct: "Finance — introducer commission %",
@@ -49,12 +53,14 @@ export const DEFAULT_GENERAL_PERMISSIONS: Record<PermissionKey, PermissionAccess
   customers: "amend",
   advisors: "none",
   introducers: "none",
+  introducer_amend: "none",
   allocations: "view",
   raf: "none",
   invites: "none",
   appointments: "amend",
   journey: "amend",
   users_roles: "view",
+  admin_access: "none",
   finance_customer: "none",
   finance_advisor_pct: "none",
   finance_introducer_pct: "none",
@@ -126,6 +132,36 @@ export function canAmendCommissionPayouts(access: AdminAccess | null | undefined
 /** Owner-only history amend. */
 export function canAmendHistory(access: AdminAccess | null | undefined): boolean {
   return Boolean(access?.isOwner);
+}
+
+/** Amend customer introducer code — owner, supervisor, or general with introducer_amend. */
+export function canAmendIntroducer(access: AdminAccess | null | undefined): boolean {
+  if (!access?.isAdmin) return false;
+  if (access.isOwner || access.isSupervisor) return true;
+  return canAmend(access, "introducer_amend");
+}
+
+/** Backdate introducer commission after amendment — owner only. */
+export function canRefreshIntroducerCommission(access: AdminAccess | null | undefined): boolean {
+  return Boolean(access?.isOwner);
+}
+
+/** Edit general-admin permission matrix — owner or general admin with admin_access amend. */
+export function canEditAdminPermissions(access: AdminAccess | null | undefined): boolean {
+  if (!access?.isAdmin) return false;
+  if (access.isOwner) return true;
+  if (access.isSupervisor) return false;
+  return canAmend(access, "admin_access");
+}
+
+/** Grant supervisor / general admin levels — owner for supervisor; owner + supervisor for general. */
+export function canGrantAdminLevel(
+  access: AdminAccess | null | undefined,
+  level: "supervisor" | "general",
+): boolean {
+  if (!access?.isAdmin) return false;
+  if (level === "supervisor") return Boolean(access.isOwner);
+  return Boolean(access.isOwner || access.isSupervisor);
 }
 
 /** Any admin (with journey amend) or advisor can confirm; only admin can reverse. */

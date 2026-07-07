@@ -211,11 +211,12 @@ export const submitSessionFees = createServerFn({ method: "POST" })
       .select("customer_id")
       .eq("id", data.sessionId)
       .maybeSingle();
-    const { resolveIntroducerIdForCustomer } = await import("@/lib/introducer-attribution");
+    const { resolveIntroducerIdForCustomerAtDate } = await import("@/lib/introducer-attribution");
     const resolvedIntroducerId = feeSession?.customer_id
-      ? await resolveIntroducerIdForCustomer(
+      ? await resolveIntroducerIdForCustomerAtDate(
           supabaseAdmin,
           feeSession.customer_id,
+          new Date(now),
           data.sessionId,
         )
       : null;
@@ -382,6 +383,111 @@ export const amendPostedFee = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export type EnrichedLedgerRow = {
+  id: string;
+  created_at: string;
+  kind: string;
+  fee_type?: string | null;
+  amount_pence: number;
+  note?: string | null;
+  beneficiary_role?: string | null;
+  commission_pct?: number | null;
+  is_reversal?: boolean | null;
+  session_id?: string | null;
+  customerName?: string | null;
+  caseRef?: string | null;
+  receiverName?: string | null;
+  receiverRef?: string | null;
+};
+
+async function enrichFinanceLedgerRows(
+  supabaseAdmin: Awaited<
+    ReturnType<typeof import("@/integrations/supabase/client.server")>
+  >["supabaseAdmin"],
+  rows: Array<Record<string, unknown>>,
+): Promise<EnrichedLedgerRow[]> {
+  const sessionIds = new Set<string>();
+  const userIds = new Set<string>();
+  for (const r of rows) {
+    if (r.session_id) sessionIds.add(r.session_id as string);
+    if (r.beneficiary_user_id) userIds.add(r.beneficiary_user_id as string);
+  }
+
+  const sessionMap = new Map<string, { caseRef: string | null; customerId: string | null }>();
+  if (sessionIds.size > 0) {
+    const { data: sessions } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("id, case_ref, customer_id")
+      .in("id", [...sessionIds]);
+    for (const s of sessions ?? []) {
+      sessionMap.set(s.id, { caseRef: s.case_ref ?? null, customerId: s.customer_id ?? null });
+    }
+  }
+
+  const customerIds = new Set(
+    [...sessionMap.values()].map((v) => v.customerId).filter(Boolean) as string[],
+  );
+  const customerNameMap = new Map<string, string>();
+  if (customerIds.size > 0) {
+    const { data: profiles } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", [...customerIds]);
+    for (const p of profiles ?? []) {
+      customerNameMap.set(p.id, p.full_name || p.email || "Customer");
+    }
+  }
+
+  const profileMap = new Map<string, string>();
+  const advisorCodeMap = new Map<string, string>();
+  const introCodeMap = new Map<string, string>();
+  if (userIds.size > 0) {
+    const { data: profiles } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", [...userIds]);
+    for (const p of profiles ?? []) profileMap.set(p.id, p.full_name || p.email || "Unknown");
+    const { data: adv } = await supabaseAdmin
+      .from("advisor_profiles")
+      .select("user_id, code")
+      .in("user_id", [...userIds]);
+    for (const a of adv ?? []) advisorCodeMap.set(a.user_id, a.code);
+    const { data: intros } = await supabaseAdmin
+      .from("introducers")
+      .select("user_id, company_code")
+      .in("user_id", [...userIds]);
+    for (const i of intros ?? []) introCodeMap.set(i.user_id, (i as { company_code?: string }).company_code ?? "");
+  }
+
+  return rows.map((r) => {
+    const sessionId = r.session_id as string | null;
+    const sess = sessionId ? sessionMap.get(sessionId) : undefined;
+    const customerName = sess?.customerId ? customerNameMap.get(sess.customerId) ?? null : null;
+    const beneficiaryId = r.beneficiary_user_id as string | null;
+    const role = r.beneficiary_role as string | null;
+    let receiverRef: string | null = null;
+    if (beneficiaryId && role === "advisor") receiverRef = advisorCodeMap.get(beneficiaryId) ?? null;
+    if (beneficiaryId && role === "introducer") receiverRef = introCodeMap.get(beneficiaryId) ?? null;
+
+    return {
+      id: r.id as string,
+      created_at: r.created_at as string,
+      kind: r.kind as string,
+      fee_type: r.fee_type as string | null,
+      amount_pence: r.amount_pence as number,
+      note: r.note as string | null,
+      beneficiary_role: role,
+      commission_pct: r.commission_pct as number | null,
+      is_reversal: r.is_reversal as boolean | null,
+      session_id: sessionId,
+      customerName,
+      caseRef: sess?.caseRef ?? null,
+      receiverName: beneficiaryId ? profileMap.get(beneficiaryId) ?? null : null,
+      receiverRef,
+    };
+  });
+}
+
 export const listFinanceLedger = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -399,7 +505,8 @@ export const listFinanceLedger = createServerFn({ method: "GET" })
       if (isMissingTable(error)) return { rows: [], migrationRequired: true };
       throw new Error(error.message);
     }
-    return { rows: rows ?? [], migrationRequired: false };
+    const enriched = await enrichFinanceLedgerRows(supabaseAdmin, rows ?? []);
+    return { rows: enriched, migrationRequired: false };
   });
 
 export const listCommissionStaff = createServerFn({ method: "GET" })
@@ -466,22 +573,38 @@ export const listCommissionStaff = createServerFn({ method: "GET" })
 export const listCommissionRateHistory = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ userId: z.string().uuid(), role: z.enum(["advisor", "introducer"]) }).parse(d),
+    z
+      .object({
+        userId: z.string().uuid().optional(),
+        role: z.enum(["advisor", "introducer"]).optional(),
+        from: z.string().optional(),
+        to: z.string().optional(),
+        feeType: z.enum(FEE_TYPES).optional(),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
-    const key = data.role === "advisor" ? "finance_advisor_pct" : "finance_introducer_pct";
-    if (!canView(access, key)) throw new Error("Forbidden");
+    if (!data.userId) {
+      if (!canViewFinanceReport(access)) throw new Error("Forbidden");
+    } else {
+      const key = data.role === "introducer" ? "finance_introducer_pct" : "finance_advisor_pct";
+      if (!canView(access, key)) throw new Error("Forbidden");
+    }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: rows, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from("commission_rate_history")
-      .select("fee_type, pct_from, pct_to, created_at, changed_by")
-      .eq("user_id", data.userId)
-      .eq("role", data.role)
+      .select("fee_type, pct_from, pct_to, created_at, changed_by, user_id, role")
       .order("created_at", { ascending: false })
-      .limit(50);
+      .limit(100);
+    if (data.userId) query = query.eq("user_id", data.userId);
+    if (data.role) query = query.eq("role", data.role);
+    if (data.feeType) query = query.eq("fee_type", data.feeType);
+    if (data.from) query = query.gte("created_at", data.from);
+    if (data.to) query = query.lte("created_at", data.to);
+    const { data: rows, error } = await query;
     if (error && !isMissingTable(error)) throw new Error(error.message);
     return rows ?? [];
   });
@@ -608,6 +731,21 @@ export const setCommissionRate = createServerFn({ method: "POST" })
         fee_type: feeType,
         pct_from: from,
         pct_to: to,
+        changed_by: context.userId,
+      });
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", data.userId)
+        .maybeSingle();
+      const who = profile?.full_name || profile?.email || data.userId;
+      await supabaseAdmin.from("finance_audit_log").insert({
+        audit_type: "commission_rate",
+        subject_user_id: data.userId,
+        role: data.role,
+        fee_type: feeType,
+        summary: `${data.role} ${who}: ${FEE_TYPE_LABELS[feeType]} ${from != null ? `${from}% → ` : ""}${to}%`,
+        detail: { pct_from: from, pct_to: to },
         changed_by: context.userId,
       });
     }
@@ -955,4 +1093,92 @@ export const updateCommissionPayoutStatus = createServerFn({ method: "POST" })
     }
 
     return { ok: true };
+  });
+
+export type FinanceAuditRow = {
+  id: string;
+  audit_type: string;
+  summary: string;
+  role: string | null;
+  fee_type: string | null;
+  created_at: string;
+};
+
+export const listFinanceAuditLog = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const access = await resolveAdminAccess(context.userId, email);
+    if (!canViewFinanceReport(access)) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
+      .from("finance_audit_log")
+      .select("id, audit_type, summary, role, fee_type, created_at")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error && !isMissingTable(error)) throw new Error(error.message);
+    return (data ?? []) as FinanceAuditRow[];
+  });
+
+export type CommissionArrangementRow = {
+  userId: string;
+  name: string;
+  role: "advisor" | "introducer";
+  referenceCode: string | null;
+  pctFee: number;
+  pctMortgageFee: number;
+  pctInsuranceFee: number;
+  pctOtherFee: number;
+};
+
+export const listCurrentCommissionArrangements = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ role: z.enum(["all", "advisor", "introducer"]).optional() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const access = await resolveAdminAccess(context.userId, email);
+    if (!canViewFinanceReport(access)) throw new Error("Forbidden");
+
+    const roleFilter = data.role ?? "all";
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: rates, error } = await supabaseAdmin.from("commission_rates").select("*");
+    if (error && !isMissingTable(error)) throw new Error(error.message);
+
+    const rows: CommissionArrangementRow[] = [];
+    const userIds = [...new Set((rates ?? []).map((r) => r.user_id as string))];
+    const { data: profiles } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", userIds.length ? userIds : ["00000000-0000-0000-0000-000000000000"]);
+    const nameMap = new Map((profiles ?? []).map((p) => [p.id, p.full_name || p.email || "Unknown"]));
+
+    const advisorCodes = new Map<string, string>();
+    const introCodes = new Map<string, string>();
+    const { data: adv } = await supabaseAdmin.from("advisor_profiles").select("user_id, code");
+    for (const a of adv ?? []) advisorCodes.set(a.user_id, a.code);
+    const { data: intros } = await supabaseAdmin.from("introducers").select("user_id, company_code");
+    for (const i of intros ?? []) introCodes.set(i.user_id, (i as { company_code?: string }).company_code ?? "");
+
+    for (const r of rates ?? []) {
+      const role = r.role as "advisor" | "introducer";
+      if (roleFilter !== "all" && role !== roleFilter) continue;
+      const legacy = Number(r.percentage ?? 0);
+      rows.push({
+        userId: r.user_id as string,
+        name: nameMap.get(r.user_id as string) ?? "Unknown",
+        role,
+        referenceCode:
+          role === "advisor"
+            ? advisorCodes.get(r.user_id as string) ?? null
+            : introCodes.get(r.user_id as string) || null,
+        pctFee: Number(r.pct_fee ?? legacy),
+        pctMortgageFee: Number(r.pct_mortgage_fee ?? legacy),
+        pctInsuranceFee: Number(r.pct_insurance_fee ?? legacy),
+        pctOtherFee: Number(r.pct_other_fee ?? legacy),
+      });
+    }
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
   });

@@ -1142,6 +1142,9 @@ export type AdvisorContact = {
   /** Marked contacted — shown greyed until archive window expires. */
   contacted?: boolean;
   contactedAt?: string | null;
+  customerId?: string | null;
+  introducerCode?: string | null;
+  introducerCompany?: string | null;
 };
 
 /** Items stay visible (greyed) for 24h after Contacted, then drop from Contacts/CRM. */
@@ -1275,6 +1278,19 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
       const { data: appts, error } = await apptQuery;
       if (error && !isMissingContactTable(error)) throw new Error(error.message);
       for (const a of appts ?? []) {
+        const contactedAt = contactedAtByKey.get(`appointment:${a.id}`) ?? null;
+        if (contactedAt && !contactArchiveVisible(contactedAt)) continue;
+
+        let customerId: string | null = null;
+        if (a.session_id) {
+          const { data: sess } = await supabaseAdmin
+            .from("interview_sessions")
+            .select("customer_id")
+            .eq("id", a.session_id)
+            .maybeSingle();
+          customerId = sess?.customer_id ?? null;
+        }
+
         contacts.push({
           kind: "appointment",
           id: a.id,
@@ -1282,11 +1298,14 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
           customerPhone: a.customer_phone,
           customerEmail: a.customer_email ?? null,
           sessionId: a.session_id ?? null,
+          customerId,
           startsAt: a.starts_at,
           window: null,
           status: a.status,
           createdAt: a.created_at,
           opened: opened.has(`appointment:${a.id}`),
+          contacted: isContactArchived(contactedAt),
+          contactedAt,
         });
       }
     }
@@ -1347,6 +1366,16 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
         const contactedAt = contactedAtByKey.get(`callback:${row.id}`) ?? null;
         if (contactedAt && !contactArchiveVisible(contactedAt)) continue;
 
+        let customerId: string | null = null;
+        if (row.session_id) {
+          const { data: sess } = await supabaseAdmin
+            .from("interview_sessions")
+            .select("customer_id")
+            .eq("id", row.session_id)
+            .maybeSingle();
+          customerId = sess?.customer_id ?? null;
+        }
+
         contacts.push({
           kind: "callback",
           id: row.id,
@@ -1354,6 +1383,7 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
           customerPhone: row.customer_phone,
           customerEmail: row.customer_email,
           sessionId: row.session_id,
+          customerId,
           startsAt: null,
           window: row.preferred_window,
           status: row.status,
@@ -1420,6 +1450,7 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
           customerPhone: phone ?? "Unknown",
           customerEmail: null,
           sessionId,
+          customerId: session?.customer_id ?? null,
           startsAt: null,
           window: null,
           status: call.status,
@@ -1433,6 +1464,39 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
           contacted: isContactArchived(contactedAt),
           contactedAt,
         });
+      }
+    }
+
+    const customerIds = [...new Set(contacts.map((c) => c.customerId).filter(Boolean))] as string[];
+    if (customerIds.length > 0) {
+      const { data: links } = await supabaseAdmin
+        .from("customer_introducer_links")
+        .select("customer_id, introducer_id")
+        .in("customer_id", customerIds);
+      const introIds = [...new Set((links ?? []).map((l) => l.introducer_id))];
+      const introMap = new Map<string, { code: string | null; name: string | null }>();
+      if (introIds.length > 0) {
+        const { data: intros } = await supabaseAdmin
+          .from("introducers")
+          .select("id, company_code, company_name")
+          .in("id", introIds);
+        for (const i of intros ?? []) {
+          introMap.set(i.id, {
+            code: (i as { company_code?: string | null }).company_code ?? null,
+            name: (i as { company_name?: string | null }).company_name ?? null,
+          });
+        }
+      }
+      const linkByCustomer = new Map(
+        (links ?? []).map((l) => [l.customer_id, l.introducer_id as string]),
+      );
+      for (const c of contacts) {
+        if (!c.customerId) continue;
+        const introId = linkByCustomer.get(c.customerId);
+        if (!introId) continue;
+        const meta = introMap.get(introId);
+        c.introducerCode = meta?.code ?? null;
+        c.introducerCompany = meta?.name ?? null;
       }
     }
 

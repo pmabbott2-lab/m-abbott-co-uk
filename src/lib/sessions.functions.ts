@@ -3038,7 +3038,7 @@ export const createStaffInvite = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) =>
     z
       .object({
-        role: z.enum(["advisor", "introducer"]),
+        role: z.enum(["advisor", "introducer", "admin"]),
         email: z.string().email().optional().or(z.literal("")),
         // Introducer-only: create a new company vs join an existing one.
         companyMode: z.enum(["new", "join"]).optional(),
@@ -3121,7 +3121,7 @@ export const revokeStaffInvite = createServerFn({ method: "POST" })
   });
 
 type ResolvedInvite = {
-  role: "advisor" | "introducer";
+  role: "advisor" | "introducer" | "admin";
   email: string | null;
   companyName: string | null;
   companyCode: string | null;
@@ -3150,7 +3150,12 @@ async function resolveInviteByToken(token: string): Promise<{
   if (invite.expires_at && new Date(invite.expires_at).getTime() < Date.now()) {
     throw new Error("This invite link has expired. Ask an admin for a new one.");
   }
-  const role = invite.role === "introducer" ? "introducer" : "advisor";
+  const role =
+    invite.role === "introducer"
+      ? "introducer"
+      : invite.role === "admin"
+        ? "admin"
+        : "advisor";
   return {
     id: invite.id,
     resolved: {
@@ -3387,6 +3392,20 @@ export const markStaffInviteUsed = createServerFn({ method: "POST" })
         if (error) throw new Error(error.message);
         await ensureAdvisorCode(data.userId);
         await setAdvisorDeletedAt(data.userId, null);
+      } else if (resolved.role === "admin") {
+        const { error } = await supabaseAdmin
+          .from("user_roles")
+          .upsert({ user_id: data.userId, role: "admin" }, { onConflict: "user_id,role" });
+        if (error) throw new Error(error.message);
+        const { error: profileErr } = await supabaseAdmin.from("admin_profiles").upsert(
+          {
+            user_id: data.userId,
+            level: "general",
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id" },
+        );
+        if (profileErr && !isMissingTableError(profileErr)) throw new Error(profileErr.message);
       } else {
         await grantIntroducerRole(
           data.userId,

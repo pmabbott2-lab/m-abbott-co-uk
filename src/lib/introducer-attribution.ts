@@ -32,6 +32,37 @@ export async function ensureCustomerIntroducerLink(
   }
 }
 
+/** Resolve introducer active for a customer at a given point in time. */
+export async function resolveIntroducerIdForCustomerAtDate(
+  supabaseAdmin: SupabaseAdmin,
+  customerId: string,
+  asOf: Date,
+  sessionId?: string | null,
+): Promise<string | null> {
+  const { data: history } = await supabaseAdmin
+    .from("introducer_amendment_history")
+    .select("new_introducer_id, effective_from")
+    .eq("customer_id", customerId)
+    .lte("effective_from", asOf.toISOString())
+    .order("effective_from", { ascending: false })
+    .limit(1);
+  if (history?.[0]?.new_introducer_id) return history[0].new_introducer_id as string;
+
+  const { data: link } = await supabaseAdmin
+    .from("customer_introducer_links")
+    .select("introducer_id, effective_from")
+    .eq("customer_id", customerId)
+    .maybeSingle();
+  if (link?.introducer_id) {
+    const eff = (link as { effective_from?: string }).effective_from;
+    if (!eff || new Date(eff).getTime() <= asOf.getTime()) {
+      return link.introducer_id as string;
+    }
+  }
+
+  return findIntroducerIdForCustomer(supabaseAdmin, customerId, sessionId);
+}
+
 /** Resolve introducer for a customer (and optional session), back-filling customer link when found. */
 export async function resolveIntroducerIdForCustomer(
   supabaseAdmin: SupabaseAdmin,

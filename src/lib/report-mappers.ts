@@ -20,18 +20,36 @@ type LedgerRow = {
   beneficiary_role?: string | null;
   commission_pct?: number | null;
   is_reversal?: boolean | null;
+  customerName?: string | null;
+  caseRef?: string | null;
+  receiverName?: string | null;
+  receiverRef?: string | null;
 };
 
 export function ledgerRowsToSheet(rows: LedgerRow[]): ExportSheet {
   return {
     name: "Finance ledger",
-    headers: ["When", "Kind", "Fee type", "Amount (£)", "Beneficiary", "Commission %", "Note"],
+    headers: [
+      "When",
+      "Kind",
+      "Customer",
+      "Case ref",
+      "Fee type",
+      "Amount (£)",
+      "Receiver",
+      "Ref",
+      "Commission %",
+      "Note",
+    ],
     rows: rows.map((r) => [
       format(new Date(r.created_at), "yyyy-MM-dd HH:mm"),
       r.kind,
+      r.customerName ?? "",
+      r.caseRef ?? "",
       r.fee_type ?? "",
       penceToGbp(r.amount_pence),
-      r.beneficiary_role ?? "",
+      r.kind === "commission" ? r.receiverName ?? "" : "",
+      r.kind === "commission" ? r.receiverRef ?? "" : "",
       r.commission_pct != null ? String(r.commission_pct) : "",
       r.note ?? "",
     ]),
@@ -117,6 +135,22 @@ export function rateHistoryToSheet(
       FEE_TYPE_LABELS[h.fee_type as keyof typeof FEE_TYPE_LABELS] ?? h.fee_type,
       h.pct_from != null ? String(h.pct_from) : "new",
       String(h.pct_to),
+    ]),
+  };
+}
+
+export function financeAuditToSheet(
+  rows: Array<{ created_at: string; audit_type: string; summary: string; role?: string | null; fee_type?: string | null }>,
+): ExportSheet {
+  return {
+    name: "Finance audit",
+    headers: ["When", "Type", "Summary", "Role", "Fee type"],
+    rows: rows.map((r) => [
+      format(new Date(r.created_at), "yyyy-MM-dd HH:mm"),
+      r.audit_type,
+      r.summary,
+      r.role ?? "",
+      r.fee_type ?? "",
     ]),
   };
 }

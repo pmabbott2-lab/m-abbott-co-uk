@@ -4,7 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { listMySessions, createSession, getMyRole, listAllSessionsForAdvisor, deleteSession, restoreSession, listUsersWithRoles, setAdvisorRole, setIntroducerRole, listAdvisors, listAdvisorCustomers, allocateSession, unallocateSession, bulkAllocateSessions, softDeleteAdvisor, restoreAdvisor, softDeleteIntroducer, restoreIntroducer, listBinnedStaff, createStaffInvite, listStaffInvites, revokeStaffInvite, listMyCases } from "@/lib/sessions.functions";
 import { listAdmins, setAdminLevel, setAdminPermissions, listUsersForAdminGrant } from "@/lib/admin.functions";
-import { listFinanceLedger, setCommissionRate, getCommissionRate, getRafBonusAmount, listCommissionStaff, listCommissionRateHistory, listCommissionPayouts, FEE_TYPE_LABELS, RAF_BONUS_POUNDS } from "@/lib/finance.functions";
+import { listFinanceLedger, setCommissionRate, getCommissionRate, getRafBonusAmount, listCommissionStaff, listCommissionRateHistory, listCommissionPayouts, listFinanceAuditLog, listCurrentCommissionArrangements, FEE_TYPE_LABELS, RAF_BONUS_POUNDS, type EnrichedLedgerRow } from "@/lib/finance.functions";
 import {
   ADMIN_LEVEL_LABELS,
   DEFAULT_GENERAL_PERMISSIONS,
@@ -14,6 +14,11 @@ import {
   canViewFinanceReport,
   canViewCommissionPayouts,
   canAmendCommissionPayouts,
+  canAmendIntroducer,
+  canRefreshIntroducerCommission,
+  canEditAdminPermissions,
+  canGrantAdminLevel,
+  type AdminAccess,
   type PermissionAccess,
   type PermissionKey,
 } from "@/lib/admin-access";
@@ -22,6 +27,7 @@ import { listAdvisorContacts, markContactOpened, getSessionBooking } from "@/lib
 import type { AdvisorContact } from "@/lib/booking.functions";
 import { AssignVoicemailAdvisor } from "@/components/AssignVoicemailAdvisor";
 import { MarkContactedButton } from "@/components/MarkContactedButton";
+import { IntroducerContactBox } from "@/components/IntroducerContactBox";
 import { PhoneCallDetailDialog } from "@/components/PhoneCallDetailDialog";
 import { checkIsIntroducer } from "@/lib/introducer.functions";
 import { claimReferral, createReferralLink, textReferralLink, textRafInviteToFriend, getPublicShareBaseUrl, listReferralLinks, listAllReferrals, updateReferralBonusStatus, searchCustomers, listMyReferralActivity, ensureMyReferralLink } from "@/lib/referrals.functions";
@@ -35,7 +41,7 @@ import { TestAccountsCard } from "@/components/TestAccountsCard";
 import { ReportExportBox } from "@/components/ReportExportBox";
 import { ReportTableScroll } from "@/components/ReportTableScroll";
 import { OwnerCustomerExportBox } from "@/components/OwnerCustomerExportBox";
-import { commissionRowsToSheet, ledgerRowsToSheet } from "@/lib/report-mappers";
+import { commissionRowsToSheet, ledgerRowsToSheet, rateHistoryToSheet, financeAuditToSheet } from "@/lib/report-mappers";
 import { getAdvisorView } from "@/lib/advisor-view";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -237,7 +243,7 @@ function AdminPermissionMatrix({
   );
 }
 
-function AdminAccessPanel({ isOwner }: { isOwner: boolean }) {
+function AdminAccessPanel({ isOwner, canEditPerms }: { isOwner: boolean; canEditPerms: boolean }) {
   const qc = useQueryClient();
   const listFn = useServerFn(listAdmins);
   const usersFn = useServerFn(listUsersForAdminGrant);
@@ -311,20 +317,20 @@ function AdminAccessPanel({ isOwner }: { isOwner: boolean }) {
         <div>
           <h3 className="font-semibold text-lg">Admin access</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            Owner has full control. Supervisors can grant General Admin only. General Admins get a
-            permission matrix (view / amend / none).
+            Admins register via an invite link from Manage. The owner appoints supervisors; owner
+            and authorised general admins set permission matrices.
           </p>
         </div>
 
         <div className="grid sm:grid-cols-3 gap-3 items-end">
           <div className="space-y-1 sm:col-span-1">
-            <Label>User</Label>
+            <Label>Registered admin</Label>
             <select
               className="w-full h-9 rounded-md border bg-background px-2 text-sm"
               value={grantUserId}
               onChange={(e) => setGrantUserId(e.target.value)}
             >
-              <option value="">Select user…</option>
+              <option value="">Select registered admin…</option>
               {users.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.full_name || u.email || u.id}
@@ -403,7 +409,7 @@ function AdminAccessPanel({ isOwner }: { isOwner: boolean }) {
                       Make supervisor
                     </Button>
                   )}
-                  {a.level === "general" && (
+                  {a.level === "general" && canEditPerms && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -461,9 +467,36 @@ function OwnerFinanceReport() {
   const setRateFn = useServerFn(setCommissionRate);
   const getRateFn = useServerFn(getCommissionRate);
   const historyFn = useServerFn(listCommissionRateHistory);
+  const auditFn = useServerFn(listFinanceAuditLog);
+  const arrangementsFn = useServerFn(listCurrentCommissionArrangements);
   const rafBonusFn = useServerFn(getRafBonusAmount);
   const commissionExportFn = useServerFn(listCommissionPayouts);
   const ledgerQ = useQuery({ queryKey: ["finance-ledger"], queryFn: () => ledgerFn() });
+  const auditQ = useQuery({ queryKey: ["finance-audit"], queryFn: () => auditFn() });
+  const [arrangementRole, setArrangementRole] = useState<"all" | "advisor" | "introducer">("all");
+  const arrangementsQ = useQuery({
+    queryKey: ["commission-arrangements", arrangementRole],
+    queryFn: () => arrangementsFn({ data: { role: arrangementRole } }),
+  });
+  const [rateHistoryFrom, setRateHistoryFrom] = useState("");
+  const [rateHistoryTo, setRateHistoryTo] = useState("");
+  const [rateHistoryFeeType, setRateHistoryFeeType] = useState<string>("");
+  const [showRateHistoryBrowse, setShowRateHistoryBrowse] = useState(false);
+  const browseHistoryQ = useQuery({
+    queryKey: ["commission-history-browse", rateHistoryFrom, rateHistoryTo, rateHistoryFeeType],
+    queryFn: () =>
+      historyFn({
+        data: {
+          from: rateHistoryFrom || undefined,
+          to: rateHistoryTo || undefined,
+          feeType: rateHistoryFeeType
+            ? (rateHistoryFeeType as "fee" | "mortgage_fee" | "insurance_fee" | "other_fee")
+            : undefined,
+        },
+      }),
+    enabled: showRateHistoryBrowse,
+  });
+
   const commissionExportQ = useQuery({
     queryKey: ["finance-export-commission"],
     queryFn: () => commissionExportFn({ data: {} }),
@@ -558,13 +591,17 @@ function OwnerFinanceReport() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not save rates"),
   });
 
-  const rows = ledgerQ.data?.rows ?? [];
+  const rows = (ledgerQ.data?.rows ?? []) as EnrichedLedgerRow[];
+  const auditRows = auditQ.data ?? [];
+  const arrangements = arrangementsQ.data ?? [];
   const staff = staffQ.data ?? [];
   const rafBonusPounds =
     rafBonusQ.data?.amountPence != null ? rafBonusQ.data.amountPence / 100 : RAF_BONUS_POUNDS;
   const exportSheets = [
     ledgerRowsToSheet(rows),
     commissionRowsToSheet(commissionExportQ.data?.rows ?? []),
+    financeAuditToSheet(auditRows),
+    rateHistoryToSheet(browseHistoryQ.data ?? []),
   ];
   const exportPdfSections = exportSheets.map((s) => ({
     title: s.name,
@@ -680,9 +717,133 @@ function OwnerFinanceReport() {
       {rateUserId && (historyQ.data ?? []).length > 0 && (
         <div className="rounded-lg border p-4 space-y-2">
           <h4 className="text-sm font-medium">Rate change history</h4>
-          <ReportTableScroll visibleRows={10}>
+          <ReportTableScroll visibleRows={5}>
             <ul className="text-xs space-y-1.5 text-muted-foreground p-1">
               {(historyQ.data ?? []).map((h, i) => (
+                <li key={i}>
+                  {format(new Date(h.created_at), "d MMM yyyy HH:mm")} ·{" "}
+                  {FEE_TYPE_LABELS[h.fee_type as keyof typeof FEE_TYPE_LABELS] ?? h.fee_type}:{" "}
+                  {h.pct_from != null ? `${h.pct_from}% → ` : "new "}
+                  {h.pct_to}%
+                </li>
+              ))}
+            </ul>
+          </ReportTableScroll>
+        </div>
+      )}
+    </div>
+
+    <div className="rounded-2xl border bg-card p-6 space-y-4">
+      <div>
+        <h3 className="font-semibold text-lg">Commission audit history</h3>
+        <p className="text-sm text-muted-foreground mt-1">
+          Rate changes and introducer amendments. Showing latest entries.
+        </p>
+      </div>
+      <ReportTableScroll visibleRows={5}>
+        <ul className="text-xs divide-y">
+          {auditRows.length === 0 && (
+            <li className="p-3 text-muted-foreground">No audit entries yet.</li>
+          )}
+          {auditRows.slice(0, 50).map((a) => (
+            <li key={a.id} className="p-2.5 text-muted-foreground">
+              <span className="text-foreground font-medium">
+                {format(new Date(a.created_at), "d MMM yyyy HH:mm")}
+              </span>
+              {" · "}
+              {a.summary}
+            </li>
+          ))}
+        </ul>
+      </ReportTableScroll>
+      <ReportExportBox
+        filename={`finance-audit-${new Date().toISOString().slice(0, 10)}`}
+        label="Audit export"
+        sheets={[financeAuditToSheet(auditRows)]}
+        pdfSections={[{ title: "Finance audit", headers: financeAuditToSheet(auditRows).headers, rows: financeAuditToSheet(auditRows).rows }]}
+      />
+    </div>
+
+    <div className="rounded-2xl border bg-card p-6 space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-end gap-3 justify-between">
+        <div>
+          <h3 className="font-semibold text-lg">Current commission arrangements</h3>
+          <p className="text-sm text-muted-foreground mt-1">Active % by role and staff member.</p>
+        </div>
+        <div className="space-y-1 shrink-0">
+          <Label>Role</Label>
+          <select
+            className="h-9 rounded-md border bg-background px-2 text-sm w-full sm:w-44"
+            value={arrangementRole}
+            onChange={(e) => setArrangementRole(e.target.value as "all" | "advisor" | "introducer")}
+          >
+            <option value="all">All roles</option>
+            <option value="advisor">Advisors</option>
+            <option value="introducer">Introducers</option>
+          </select>
+        </div>
+      </div>
+      <ReportTableScroll visibleRows={5}>
+        <table className="w-full text-xs sm:text-sm">
+          <thead>
+            <tr className="border-b text-left text-muted-foreground bg-muted/40">
+              <th className="p-2 font-medium sticky top-0 bg-muted/40">Name</th>
+              <th className="p-2 font-medium sticky top-0 bg-muted/40">Role</th>
+              <th className="p-2 font-medium sticky top-0 bg-muted/40">Ref</th>
+              <th className="p-2 font-medium text-right sticky top-0 bg-muted/40">Fee</th>
+              <th className="p-2 font-medium text-right sticky top-0 bg-muted/40">Mortgage</th>
+              <th className="p-2 font-medium text-right sticky top-0 bg-muted/40">Insurance</th>
+              <th className="p-2 font-medium text-right sticky top-0 bg-muted/40">Other</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {arrangements.map((a) => (
+              <tr key={`${a.userId}-${a.role}`}>
+                <td className="p-2 font-medium max-w-[8rem] truncate">{a.name}</td>
+                <td className="p-2 capitalize">{a.role}</td>
+                <td className="p-2 font-mono text-xs">{a.referenceCode ?? "—"}</td>
+                <td className="p-2 text-right">{a.pctFee}%</td>
+                <td className="p-2 text-right">{a.pctMortgageFee}%</td>
+                <td className="p-2 text-right">{a.pctInsuranceFee}%</td>
+                <td className="p-2 text-right">{a.pctOtherFee}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ReportTableScroll>
+      <Button type="button" variant="outline" size="sm" onClick={() => setShowRateHistoryBrowse((v) => !v)}>
+        {showRateHistoryBrowse ? "Hide" : "Browse"} previous rates by date
+      </Button>
+      {showRateHistoryBrowse && (
+        <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+          <div className="grid sm:grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <Label>From</Label>
+              <Input type="date" value={rateHistoryFrom} onChange={(e) => setRateHistoryFrom(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label>To</Label>
+              <Input type="date" value={rateHistoryTo} onChange={(e) => setRateHistoryTo(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label>Fee type</Label>
+              <select
+                className="w-full h-9 rounded-md border bg-background px-2 text-sm"
+                value={rateHistoryFeeType}
+                onChange={(e) => setRateHistoryFeeType(e.target.value)}
+              >
+                <option value="">All types</option>
+                {Object.entries(FEE_TYPE_LABELS).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <ReportTableScroll visibleRows={5}>
+            <ul className="text-xs space-y-1.5 p-1 text-muted-foreground">
+              {(browseHistoryQ.data ?? []).map((h, i) => (
                 <li key={i}>
                   {format(new Date(h.created_at), "d MMM yyyy HH:mm")} ·{" "}
                   {FEE_TYPE_LABELS[h.fee_type as keyof typeof FEE_TYPE_LABELS] ?? h.fee_type}:{" "}
@@ -716,35 +877,43 @@ function OwnerFinanceReport() {
       {rows.length === 0 && !ledgerQ.isLoading && (
         <p className="text-sm text-muted-foreground">No finance transactions yet.</p>
       )}
-      <ReportTableScroll visibleRows={10}>
-        <table className="w-full text-sm">
+      <ReportTableScroll visibleRows={5}>
+        <table className="w-full text-xs sm:text-sm min-w-[640px]">
           <thead>
             <tr className="border-b text-left text-muted-foreground bg-muted/40">
-              <th className="p-2 font-medium sticky top-0 bg-muted/40">When</th>
+              <th className="p-2 font-medium sticky top-0 bg-muted/40 whitespace-nowrap">When</th>
               <th className="p-2 font-medium sticky top-0 bg-muted/40">Kind</th>
+              <th className="p-2 font-medium sticky top-0 bg-muted/40">Customer</th>
+              <th className="p-2 font-medium sticky top-0 bg-muted/40">Case</th>
               <th className="p-2 font-medium sticky top-0 bg-muted/40">Type</th>
               <th className="p-2 font-medium text-right sticky top-0 bg-muted/40">Amount</th>
-              <th className="p-2 font-medium sticky top-0 bg-muted/40">Note</th>
+              <th className="p-2 font-medium sticky top-0 bg-muted/40">Receiver</th>
+              <th className="p-2 font-medium sticky top-0 bg-muted/40">Ref</th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {rows.map((r) => {
               const red = r.is_reversal || r.kind === "amend" || r.kind === "delete";
+              const isCommission = r.kind === "commission";
               return (
                 <tr key={r.id} className={red ? "text-destructive" : ""}>
                   <td className="p-2 whitespace-nowrap">
-                    {format(new Date(r.created_at), "d MMM yyyy HH:mm")}
+                    {format(new Date(r.created_at), "d MMM yy HH:mm")}
                   </td>
                   <td className="p-2 capitalize">{r.kind}</td>
+                  <td className="p-2 max-w-[7rem] truncate">{r.customerName ?? "—"}</td>
+                  <td className="p-2 font-mono text-[10px] sm:text-xs max-w-[5rem] truncate">
+                    {r.caseRef ?? "—"}
+                  </td>
                   <td className="p-2">{r.fee_type ?? "—"}</td>
-                  <td className="p-2 text-right font-medium">
+                  <td className="p-2 text-right font-medium whitespace-nowrap">
                     £{(r.amount_pence / 100).toFixed(2)}
                   </td>
-                  <td className="p-2 text-muted-foreground max-w-xs truncate">
-                    {r.note ??
-                      (r.beneficiary_role
-                        ? `${r.beneficiary_role} ${r.commission_pct ?? ""}%`
-                        : "—")}
+                  <td className="p-2 max-w-[7rem] truncate">
+                    {isCommission ? r.receiverName ?? "—" : "—"}
+                  </td>
+                  <td className="p-2 font-mono text-[10px] sm:text-xs">
+                    {isCommission ? r.receiverRef ?? "—" : "—"}
                   </td>
                 </tr>
               );
@@ -1306,7 +1475,7 @@ function InviteStaffCard() {
   const revokeFn = useServerFn(revokeStaffInvite);
 
   const [open, setOpen] = useState(false);
-  const [role, setRole] = useState<"advisor" | "introducer">("advisor");
+  const [role, setRole] = useState<"advisor" | "introducer" | "admin">("advisor");
   const [email, setEmail] = useState("");
   const [companyMode, setCompanyMode] = useState<"new" | "join">("new");
   const [companyCode, setCompanyCode] = useState("");
@@ -1428,7 +1597,7 @@ function InviteStaffCard() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <span className="text-sm font-medium">Role</span>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <button
                       type="button"
                       onClick={() => setRole("advisor")}
@@ -1442,6 +1611,13 @@ function InviteStaffCard() {
                       className={`flex items-center gap-2 rounded-lg border p-3 text-sm text-left ${role === "introducer" ? "border-primary bg-primary/5" : ""}`}
                     >
                       <Link2 className="w-4 h-4" /> Introducer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRole("admin")}
+                      className={`flex items-center gap-2 rounded-lg border p-3 text-sm text-left ${role === "admin" ? "border-primary bg-primary/5" : ""}`}
+                    >
+                      <UserCog className="w-4 h-4" /> Admin
                     </button>
                   </div>
                 </div>
@@ -1982,96 +2158,41 @@ function RafLinksAccessCard() {
             No referral links yet — create one above.
           </div>
         )}
+        <ManageListScroll visibleRows={5}>
         {links.map((l) => {
           const linkReferrals = referrals.filter((r) => r.code === l.code);
           return (
-            <div key={l.id} className="p-4 sm:p-5 space-y-4 border-b last:border-b-0">
-              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                <div className="min-w-0 flex-1 space-y-3">
-                  <div>
-                    <div className="font-semibold text-base">{l.referrer_name || "Referrer"}</div>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {l.referralCount} referral{l.referralCount === 1 ? "" : "s"} · £75 bonus when
-                      eligible
-                    </p>
-                  </div>
-                  <dl className="grid sm:grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
-                    {l.referrer_phone && (
-                      <>
-                        <dt className="text-muted-foreground">Referrer mobile</dt>
-                        <dd>{l.referrer_phone}</dd>
-                      </>
-                    )}
-                    <dt className="text-muted-foreground">Link code</dt>
-                    <dd className="font-mono">{l.code}</dd>
-                    <dt className="text-muted-foreground">Share link</dt>
-                    <dd className="break-all text-xs font-mono">
-                      {rafLinkForCode(l.code, shareBase)}
-                    </dd>
-                  </dl>
+            <div key={l.id} className="p-3 sm:p-4 space-y-2 border-b last:border-b-0">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-sm truncate">{l.referrer_name || "Referrer"}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {l.referralCount} referral{l.referralCount === 1 ? "" : "s"} · code{" "}
+                    <span className="font-mono">{l.code}</span>
+                  </p>
                 </div>
-                <div className="flex flex-col sm:flex-row flex-wrap gap-2 shrink-0">
-                  <CopyLinkButton
-                    value={rafShareMessage(l.referrer_name, l.code, shareBase)}
-                    label="Copy message"
-                    successToast="Share message copied"
-                  />
-                  <CopyLinkButton value={rafLinkForCode(l.code, shareBase)} label="Copy link" />
+                <div className="flex flex-wrap gap-1.5 shrink-0">
+                  <CopyLinkButton value={rafLinkForCode(l.code, shareBase)} label="Copy" />
                   <Button
                     variant="outline"
                     size="sm"
+                    className="h-8"
                     disabled={!l.referrer_phone || (text.isPending && text.variables?.id === l.id)}
-                    title={
-                      l.referrer_phone
-                        ? "Texts the referrer so they can forward the link"
-                        : "No phone on file for this referrer"
-                    }
                     onClick={() => text.mutate({ id: l.id })}
                   >
-                    <Send className="w-4 h-4 mr-1.5" />
-                    Text referrer
+                    <Send className="w-3.5 h-3.5" />
                   </Button>
                 </div>
               </div>
-
-              {linkReferrals.length > 0 ? (
-                <div className="rounded-xl border bg-muted/30 p-3 space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                    Referred friends
-                  </p>
-                  <ul className="divide-y rounded-lg border bg-background">
-                    {linkReferrals.map((r) => (
-                      <li
-                        key={r.id}
-                        className="p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm"
-                      >
-                        <div className="min-w-0">
-                          <div className="font-medium">{r.referredName}</div>
-                          <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-                            {r.referredEmail && <span>{r.referredEmail}</span>}
-                            {r.referredPhone && <span>{r.referredPhone}</span>}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-muted">
-                            {STATUS_LABEL[r.status] ?? r.status}
-                          </span>
-                          <span
-                            className={`text-xs px-2 py-0.5 rounded-full ${r.bonus_status === "paid" ? "bg-accent/30" : r.bonus_status === "eligible" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400" : "bg-muted"}`}
-                          >
-                            {BONUS_LABEL[r.bonus_status] ?? r.bonus_status}
-                          </span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">No friends have used this link yet.</p>
+              {linkReferrals.length > 0 && (
+                <p className="text-[10px] text-muted-foreground">
+                  {linkReferrals.length} referred friend{linkReferrals.length === 1 ? "" : "s"} — see Commission tab
+                </p>
               )}
             </div>
           );
         })}
+        </ManageListScroll>
       </div>
 
       <h3 className="text-sm font-medium text-muted-foreground mb-3 mt-8 flex items-center gap-2">
@@ -2845,7 +2966,13 @@ const CALLBACK_WINDOW_LABELS: Record<string, string> = {
 // Advisor Contacts tab: appointments + call-back requests for the signed-in
 // advisor, with NEW / unopened ones highlighted. Opening one (or following the
 // link to the customer) marks it seen for this advisor.
-function ContactsCard() {
+function ContactsCard({
+  adminAccess,
+  isOwner,
+}: {
+  adminAccess: AdminAccess | null;
+  isOwner: boolean;
+}) {
   const qc = useQueryClient();
   const contactsFn = useServerFn(listAdvisorContacts);
   const openFn = useServerFn(markContactOpened);
@@ -2860,6 +2987,8 @@ function ContactsCard() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["advisor-contacts"] }),
   });
 
+  const canAmendIntro = canAmendIntroducer(adminAccess);
+  const canRefreshIntro = canRefreshIntroducerCommission(adminAccess);
   const unopenedCount = contacts.filter((c) => !c.opened).length;
   const unallocatedCount = contacts.filter((c) => c.unallocated).length;
 
@@ -2958,6 +3087,30 @@ function ContactsCard() {
                 </div>
                 {c.summary && (
                   <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{c.summary}</p>
+                )}
+                {(c.introducerCode || c.customerId) && (
+                  <div className="mt-2">
+                    {c.introducerCode ? (
+                      <p className="text-[10px] sm:text-xs text-muted-foreground">
+                        Introducer:{" "}
+                        <span className="font-medium text-foreground">
+                          {c.introducerCompany ?? "Company"}
+                        </span>{" "}
+                        <span className="font-mono">({c.introducerCode})</span>
+                      </p>
+                    ) : (
+                      <p className="text-[10px] sm:text-xs text-muted-foreground">No introducer</p>
+                    )}
+                    {c.customerId && (canAmendIntro || canRefreshIntro) && (
+                      <IntroducerContactBox
+                        customerId={c.customerId}
+                        sessionId={c.sessionId}
+                        canAmend={canAmendIntro}
+                        canRefresh={canRefreshIntro}
+                        compact
+                      />
+                    )}
+                  </div>
                 )}
               </div>
               <div className="flex flex-col gap-1 shrink-0 items-end">
@@ -3647,7 +3800,7 @@ function Home() {
           </TabsContent>
 
           <TabsContent value="contacts">
-            <ContactsCard />
+            <ContactsCard adminAccess={adminAccess} isOwner={isOwner} />
           </TabsContent>
 
           {isMainAdmin && (
@@ -3718,7 +3871,7 @@ function Home() {
 
           {showAccessTab && (
             <TabsContent value="access">
-              <AdminAccessPanel isOwner={isOwner} />
+              <AdminAccessPanel isOwner={isOwner} canEditPerms={canEditAdminPermissions(adminAccess)} />
             </TabsContent>
           )}
 
