@@ -69,6 +69,7 @@ export function IntroducerCustomerBookingCard({ onBooked }: { onBooked?: () => v
           customerPhone: phone,
           customerEmail: email,
           startsAt: selectedSlot!,
+          advisorId: advisorId || undefined,
         },
       }),
     onSuccess: () => {

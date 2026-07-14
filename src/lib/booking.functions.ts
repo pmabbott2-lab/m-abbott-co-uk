@@ -29,15 +29,46 @@ function minutesToTime(total: number): string {
 
 async function getPrimaryAdvisorId(): Promise<string> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data, error } = await supabaseAdmin
+  const { data: advisors, error } = await supabaseAdmin
     .from("user_roles")
     .select("user_id")
-    .eq("role", "advisor")
+    .eq("role", "advisor");
+  if (error) throw new Error(error.message);
+  const ids = [...new Set((advisors ?? []).map((a) => a.user_id).filter(Boolean))];
+  if (ids.length === 0) {
+    throw new Error("No advisor configured. Add an advisor role in Supabase first.");
+  }
+  if (ids.length === 1) return ids[0]!;
+
+  // Prefer ADMIN_EMAILS owners who also hold the advisor role (stable “home” diary).
+  const adminEmails = (process.env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  if (adminEmails.length > 0) {
+    const { data: profiles } = await supabaseAdmin
+      .from("profiles")
+      .select("id, email")
+      .in("id", ids);
+    const owner = (profiles ?? []).find(
+      (p) => p.email && adminEmails.includes(p.email.trim().toLowerCase()),
+    );
+    if (owner?.id) return owner.id;
+  }
+
+  // Prefer an advisor with Teams calendar linked so bookings land where Outlook sync works.
+  const { data: linked } = await supabaseAdmin
+    .from("advisor_profiles")
+    .select("user_id")
+    .in("user_id", ids)
+    .eq("teams_calendar_enabled", true)
+    .order("teams_calendar_linked_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("No advisor configured. Add an advisor role in Supabase first.");
-  return data.user_id;
+  if (linked?.user_id) return linked.user_id;
+
+  // Deterministic fallback (Postgres limit(1) without ORDER BY is not stable).
+  return [...ids].sort()[0]!;
 }
 
 async function resolveBookingAdvisorId(staffUserId?: string): Promise<string> {
@@ -2143,6 +2174,7 @@ export const bookNewCustomerAsIntroducer = createServerFn({ method: "POST" })
         customerPhone: z.string().min(7),
         customerEmail: z.string().email(),
         startsAt: z.string().datetime(),
+        advisorId: z.string().uuid().optional(),
         notes: z.string().max(500).optional(),
         sendSms: z.boolean().optional(),
       })
@@ -2155,7 +2187,8 @@ export const bookNewCustomerAsIntroducer = createServerFn({ method: "POST" })
       customerPhone: data.customerPhone,
       customerEmail: data.customerEmail,
     });
-    const advisorId = await resolveBookingAdvisorId();
+    // Prefer the advisorId used for slot picking so diary + Teams stay consistent.
+    const advisorId = data.advisorId ?? (await getPrimaryAdvisorId());
     return bookAppointment(
       {
         customerId,
