@@ -606,7 +606,22 @@ export const listCommissionRateHistory = createServerFn({ method: "GET" })
     if (data.to) query = query.lte("created_at", data.to);
     const { data: rows, error } = await query;
     if (error && !isMissingTable(error)) throw new Error(error.message);
-    return rows ?? [];
+    const list = rows ?? [];
+    const userIds = [...new Set(list.map((r) => r.user_id).filter(Boolean))] as string[];
+    if (userIds.length === 0) return list;
+
+    const { data: profiles } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", userIds);
+    const nameById = new Map(
+      (profiles ?? []).map((p) => [p.id, p.full_name || p.email || "Unknown"]),
+    );
+
+    return list.map((r) => ({
+      ...r,
+      user_name: nameById.get(r.user_id) ?? "Unknown",
+    }));
   });
 
 export const getCommissionRate = createServerFn({ method: "GET" })

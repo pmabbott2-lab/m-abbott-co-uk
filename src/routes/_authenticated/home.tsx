@@ -14,8 +14,6 @@ import {
   canViewFinanceReport,
   canViewCommissionPayouts,
   canAmendCommissionPayouts,
-  canAmendIntroducer,
-  canRefreshIntroducerCommission,
   canEditAdminPermissions,
   canGrantAdminLevel,
   type AdminAccess,
@@ -27,7 +25,6 @@ import { listAdvisorContacts, markContactOpened, getSessionBooking } from "@/lib
 import type { AdvisorContact } from "@/lib/booking.functions";
 import { AssignVoicemailAdvisor } from "@/components/AssignVoicemailAdvisor";
 import { MarkContactedButton } from "@/components/MarkContactedButton";
-import { IntroducerContactBox } from "@/components/IntroducerContactBox";
 import { PhoneCallDetailDialog } from "@/components/PhoneCallDetailDialog";
 import { checkIsIntroducer } from "@/lib/introducer.functions";
 import { claimReferral, createReferralLink, textReferralLink, textRafInviteToFriend, getPublicShareBaseUrl, listReferralLinks, listAllReferrals, updateReferralBonusStatus, searchCustomers, listMyReferralActivity, ensureMyReferralLink } from "@/lib/referrals.functions";
@@ -481,9 +478,30 @@ function OwnerFinanceReport() {
   const [rateHistoryFrom, setRateHistoryFrom] = useState("");
   const [rateHistoryTo, setRateHistoryTo] = useState("");
   const [rateHistoryFeeType, setRateHistoryFeeType] = useState<string>("");
+  const [rateHistoryRole, setRateHistoryRole] = useState<"" | "advisor" | "introducer">("");
+  const [rateHistoryUserId, setRateHistoryUserId] = useState("");
+  const [rateHistoryStaffSearch, setRateHistoryStaffSearch] = useState("");
   const [showRateHistoryBrowse, setShowRateHistoryBrowse] = useState(false);
+  const browseStaffQ = useQuery({
+    queryKey: ["commission-staff-browse", rateHistoryRole, rateHistoryStaffSearch],
+    queryFn: () =>
+      staffFn({
+        data: {
+          role: rateHistoryRole || "advisor",
+          query: rateHistoryStaffSearch || undefined,
+        },
+      }),
+    enabled: showRateHistoryBrowse && Boolean(rateHistoryRole),
+  });
   const browseHistoryQ = useQuery({
-    queryKey: ["commission-history-browse", rateHistoryFrom, rateHistoryTo, rateHistoryFeeType],
+    queryKey: [
+      "commission-history-browse",
+      rateHistoryFrom,
+      rateHistoryTo,
+      rateHistoryFeeType,
+      rateHistoryRole,
+      rateHistoryUserId,
+    ],
     queryFn: () =>
       historyFn({
         data: {
@@ -492,6 +510,8 @@ function OwnerFinanceReport() {
           feeType: rateHistoryFeeType
             ? (rateHistoryFeeType as "fee" | "mortgage_fee" | "insurance_fee" | "other_fee")
             : undefined,
+          role: rateHistoryRole || undefined,
+          userId: rateHistoryUserId || undefined,
         },
       }),
     enabled: showRateHistoryBrowse,
@@ -540,6 +560,10 @@ function OwnerFinanceReport() {
   useEffect(() => {
     setRateUserId("");
   }, [rateRole]);
+
+  useEffect(() => {
+    setRateHistoryUserId("");
+  }, [rateHistoryRole]);
 
   useEffect(() => {
     const r = existingRateQ.data;
@@ -722,6 +746,7 @@ function OwnerFinanceReport() {
               {(historyQ.data ?? []).map((h, i) => (
                 <li key={i}>
                   {format(new Date(h.created_at), "d MMM yyyy HH:mm")} ·{" "}
+                  <span className="capitalize">{h.role}</span> ·{" "}
                   {FEE_TYPE_LABELS[h.fee_type as keyof typeof FEE_TYPE_LABELS] ?? h.fee_type}:{" "}
                   {h.pct_from != null ? `${h.pct_from}% → ` : "new "}
                   {h.pct_to}%
@@ -816,7 +841,7 @@ function OwnerFinanceReport() {
       </Button>
       {showRateHistoryBrowse && (
         <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
-          <div className="grid sm:grid-cols-3 gap-3">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div className="space-y-1">
               <Label>From</Label>
               <Input type="date" value={rateHistoryFrom} onChange={(e) => setRateHistoryFrom(e.target.value)} />
@@ -840,19 +865,97 @@ function OwnerFinanceReport() {
                 ))}
               </select>
             </div>
+            <div className="space-y-1">
+              <Label>Role</Label>
+              <select
+                className="w-full h-9 rounded-md border bg-background px-2 text-sm"
+                value={rateHistoryRole}
+                onChange={(e) => setRateHistoryRole(e.target.value as "" | "advisor" | "introducer")}
+              >
+                <option value="">All roles</option>
+                <option value="advisor">Advisor</option>
+                <option value="introducer">Introducer</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label>Search name</Label>
+              <Input
+                placeholder="Name or reference code…"
+                value={rateHistoryStaffSearch}
+                onChange={(e) => setRateHistoryStaffSearch(e.target.value)}
+                disabled={!rateHistoryRole}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>{rateHistoryRole === "introducer" ? "Introducer" : rateHistoryRole === "advisor" ? "Advisor" : "Staff member"}</Label>
+              <select
+                className="w-full h-9 rounded-md border bg-background px-2 text-sm"
+                value={rateHistoryUserId}
+                onChange={(e) => setRateHistoryUserId(e.target.value)}
+                disabled={!rateHistoryRole}
+              >
+                <option value="">{rateHistoryRole ? "All in role" : "Select a role first"}</option>
+                {(browseStaffQ.data ?? []).map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name || u.email}
+                    {u.referenceCode ? ` · ${u.referenceCode}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <ReportTableScroll visibleRows={5}>
-            <ul className="text-xs space-y-1.5 p-1 text-muted-foreground">
-              {(browseHistoryQ.data ?? []).map((h, i) => (
-                <li key={i}>
-                  {format(new Date(h.created_at), "d MMM yyyy HH:mm")} ·{" "}
-                  {FEE_TYPE_LABELS[h.fee_type as keyof typeof FEE_TYPE_LABELS] ?? h.fee_type}:{" "}
-                  {h.pct_from != null ? `${h.pct_from}% → ` : "new "}
-                  {h.pct_to}%
-                </li>
-              ))}
-            </ul>
+            <table className="w-full text-xs sm:text-sm">
+              <thead>
+                <tr className="border-b text-left text-muted-foreground bg-muted/40">
+                  <th className="p-2 font-medium sticky top-0 bg-muted/40">When</th>
+                  <th className="p-2 font-medium sticky top-0 bg-muted/40">Name</th>
+                  <th className="p-2 font-medium sticky top-0 bg-muted/40">Role</th>
+                  <th className="p-2 font-medium sticky top-0 bg-muted/40">Fee type</th>
+                  <th className="p-2 font-medium sticky top-0 bg-muted/40">Change</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {(browseHistoryQ.data ?? []).length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="p-3 text-muted-foreground">
+                      No rate changes in this range.
+                    </td>
+                  </tr>
+                )}
+                {(browseHistoryQ.data ?? []).map((h, i) => (
+                  <tr key={i} className="text-muted-foreground">
+                    <td className="p-2 whitespace-nowrap">
+                      {format(new Date(h.created_at), "d MMM yyyy HH:mm")}
+                    </td>
+                    <td className="p-2 font-medium text-foreground max-w-[10rem] truncate">
+                      {"user_name" in h ? String((h as { user_name?: string }).user_name ?? "—") : "—"}
+                    </td>
+                    <td className="p-2 capitalize">{h.role ?? "—"}</td>
+                    <td className="p-2">
+                      {FEE_TYPE_LABELS[h.fee_type as keyof typeof FEE_TYPE_LABELS] ?? h.fee_type}
+                    </td>
+                    <td className="p-2">
+                      {h.pct_from != null ? `${h.pct_from}% → ` : "new "}
+                      {h.pct_to}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </ReportTableScroll>
+          <ReportExportBox
+            filename={`commission-rate-history-${new Date().toISOString().slice(0, 10)}`}
+            label="Rate history"
+            sheets={[rateHistoryToSheet(browseHistoryQ.data ?? [])]}
+            pdfSections={[
+              {
+                title: "Commission rate history",
+                headers: rateHistoryToSheet(browseHistoryQ.data ?? []).headers,
+                rows: rateHistoryToSheet(browseHistoryQ.data ?? []).rows,
+              },
+            ]}
+          />
         </div>
       )}
     </div>
@@ -2987,8 +3090,6 @@ function ContactsCard({
     onSuccess: () => qc.invalidateQueries({ queryKey: ["advisor-contacts"] }),
   });
 
-  const canAmendIntro = canAmendIntroducer(adminAccess);
-  const canRefreshIntro = canRefreshIntroducerCommission(adminAccess);
   const unopenedCount = contacts.filter((c) => !c.opened).length;
   const unallocatedCount = contacts.filter((c) => c.unallocated).length;
 
@@ -3088,28 +3189,15 @@ function ContactsCard({
                 {c.summary && (
                   <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{c.summary}</p>
                 )}
-                {(c.introducerCode || c.customerId) && (
+                {c.introducerCode && (
                   <div className="mt-2">
-                    {c.introducerCode ? (
-                      <p className="text-[10px] sm:text-xs text-muted-foreground">
-                        Introducer:{" "}
-                        <span className="font-medium text-foreground">
-                          {c.introducerCompany ?? "Company"}
-                        </span>{" "}
-                        <span className="font-mono">({c.introducerCode})</span>
-                      </p>
-                    ) : (
-                      <p className="text-[10px] sm:text-xs text-muted-foreground">No introducer</p>
-                    )}
-                    {c.customerId && (canAmendIntro || canRefreshIntro) && (
-                      <IntroducerContactBox
-                        customerId={c.customerId}
-                        sessionId={c.sessionId}
-                        canAmend={canAmendIntro}
-                        canRefresh={canRefreshIntro}
-                        compact
-                      />
-                    )}
+                    <p className="text-[10px] sm:text-xs text-muted-foreground">
+                      Introducer:{" "}
+                      <span className="font-medium text-foreground">
+                        {c.introducerCompany ?? "Company"}
+                      </span>{" "}
+                      <span className="font-mono">({c.introducerCode})</span>
+                    </p>
                   </div>
                 )}
               </div>

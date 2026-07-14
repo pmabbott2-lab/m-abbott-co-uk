@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Check } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { markAdvisorContactHandled } from "@/lib/booking.functions";
 import { toast } from "sonner";
@@ -21,6 +22,7 @@ export function MarkContactedButton({
   size?: "sm" | "default";
 }) {
   const markFn = useServerFn(markAdvisorContactHandled);
+  const [justDone, setJustDone] = useState(false);
 
   const mark = useMutation({
     mutationFn: () =>
@@ -32,13 +34,14 @@ export function MarkContactedButton({
         },
       }),
     onSuccess: () => {
+      setJustDone(true);
       toast.success("Marked as contacted — saved to History");
       onDone?.();
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not update"),
   });
 
-  if (contacted) {
+  if (contacted || justDone) {
     return (
       <Button type="button" size={size} variant="outline" disabled className="opacity-60">
         <Check className="w-3.5 h-3.5 mr-1" />

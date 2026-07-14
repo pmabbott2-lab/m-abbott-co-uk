@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mortgage Hub — Private Equity Investment Pitch</title>
+<style>
+  :root {
+    --navy: #1a2238;
+    --navy-mid: #232c4c;
+    --navy-soft: #2b3658;
+    --accent: #c47e26;
+    --accent-light: #e09a3b;
+    --accent-soft: #f7ead2;
+    --cream: #faf9f6;
+    --ink: #1f2540;
+    --muted: #5c6478;
+    --line: #ddd8ce;
+    --white: #ffffff;
+    --live: #2d6a3e;
+    --soon: #8a6d1a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: "Helvetica Neue", Helvetica, Arial, "Segoe UI", sans-serif;
+    color: var(--ink); background: #ccc;
+    -webkit-font-smoothing: antialiased;
+  }
+  @page { size: A4; margin: 0; }
+  .page {
+    width: 210mm; min-height: 297mm; margin: 0 auto;
+    background: var(--white); position: relative; overflow: hidden;
+    display: flex; flex-direction: column;
+    page-break-after: always; break-after: page;
+  }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+  .page-num {
+    position: absolute; bottom: 7mm; right: 14mm;
+    font-size: 8px; color: var(--muted);
+  }
+  .page-footer {
+    position: absolute; bottom: 7mm; left: 14mm;
+    font-size: 7px; color: var(--muted); letter-spacing: 0.3px;
+  }
+
+  /* Cover */
+  .cover-page {
+    background: linear-gradient(165deg, var(--navy) 0%, var(--navy-mid) 55%, #2a3555 100%);
+    color: #fff; justify-content: space-between; padding: 0;
+  }
+  .cover-top { padding: 18mm 16mm 0; }
+  .cover-conf {
+    font-size: 8px; letter-spacing: 3px; text-transform: uppercase; font-weight: 600;
+    color: rgba(255,255,255,0.92); margin-bottom: 14mm;
+  }
+  .cover-title {
+    font-size: 11px; letter-spacing: 4px; text-transform: uppercase;
+    color: var(--accent-light); font-weight: 700; margin-bottom: 6mm;
+  }
+  .cover-project { font-size: 42px; font-weight: 800; line-height: 1.05; letter-spacing: -0.5px; }
+  .cover-sub { font-size: 16px; font-weight: 400; color: rgba(255,255,255,0.95); margin-top: 5mm; line-height: 1.45; max-width: 140mm; }
+  .cover-bottom {
+    padding: 10mm 16mm 16mm;
+    border-top: 1px solid rgba(255,255,255,0.22);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8mm;
+  }
+  .cover-bottom dt { font-size: 7.5px; letter-spacing: 2px; text-transform: uppercase; font-weight: 600; color: rgba(255,255,255,0.80); margin-bottom: 2px; }
+  .cover-bottom dd { font-size: 11px; font-weight: 700; color: #fff; margin: 0 0 6mm; }
+  .cover-accent-bar {
+    height: 4px; background: linear-gradient(90deg, var(--accent), var(--accent-light));
+  }
+
+  /* Header strip */
+  .memo-header {
+    background: var(--navy); color: #fff;
+    padding: 5mm 14mm 4.5mm;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 3px solid var(--accent);
+  }
+  .memo-header .brand { font-size: 9px; letter-spacing: 2.5px; text-transform: uppercase; font-weight: 700; color: rgba(255,255,255,0.7); }
+  .memo-header .part { font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent-light); }
+
+  /* Body */
+  .memo-body { padding: 7mm 14mm 12mm; flex: 1; }
+  .memo-body h1 { font-size: 20px; font-weight: 800; color: var(--navy); line-height: 1.15; margin-bottom: 4mm; }
+  .memo-body h2 {
+    font-size: 13px; font-weight: 800; color: var(--navy);
+    margin: 5mm 0 2.5mm; padding-bottom: 2px;
+    border-bottom: 2px solid var(--accent);
+  }
+  .memo-body h3 { font-size: 10.5px; font-weight: 700; color: var(--navy-soft); margin: 3.5mm 0 2mm; }
+  .memo-body p, .memo-body li { font-size: 9.2px; line-height: 1.58; color: var(--ink); }
+  .memo-body ul, .memo-body ol { margin: 2mm 0 3mm 14px; }
+  .memo-body li { margin-bottom: 1.5px; }
+  .memo-body .lead { font-size: 10px; color: var(--muted); margin-bottom: 3mm; line-height: 1.55; }
+  .memo-body .divider { border: none; border-top: 1px solid var(--line); margin: 4mm 0; }
+
+  /* Tables */
+  table.memo {
+    width: 100%; border-collapse: collapse; margin: 2.5mm 0 4mm; font-size: 8.5px;
+  }
+  table.memo th, table.memo td {
+    border: 1px solid var(--line); padding: 4px 7px; text-align: left; vertical-align: top;
+  }
+  table.memo th { background: var(--navy); color: #fff; font-weight: 700; }
+  table.memo tr:nth-child(even) td { background: var(--cream); }
+  table.memo .num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.memo .neg { color: #8b2020; }
+
+  /* Callouts */
+  .callout {
+    background: var(--accent-soft); border-left: 3px solid var(--accent);
+    padding: 7px 10px; border-radius: 0 6px 6px 0; margin: 3mm 0;
+  }
+  .callout p { font-size: 8.8px; margin: 0; }
+  .callout b { color: var(--navy); }
+  .callout.ai {
+    background: #eef4fb; border-left-color: var(--navy-mid);
+  }
+
+  /* TOC */
+  .toc { margin-top: 3mm; }
+  .toc-part { font-size: 8px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--accent); margin: 4mm 0 2mm; }
+  .toc-item {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 9px; padding: 3px 0; border-bottom: 1px dotted var(--line);
+  }
+  .toc-item span { color: var(--muted); font-size: 8.5px; }
+
+  /* Diagrams */
+  .diagram {
+    background: var(--cream); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; margin: 3mm 0 4mm;
+  }
+  .diagram-title { font-size: 8.5px; font-weight: 800; color: var(--navy); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+  .funnel { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .funnel-step {
+    background: var(--navy); color: #fff; text-align: center;
+    padding: 5px 10px; border-radius: 4px; font-size: 8px; font-weight: 600;
+    width: var(--w, 100%);
+  }
+  .funnel-step.accent { background: var(--accent); color: var(--navy); }
+  .funnel-step.soft { background: var(--navy-soft); }
+  .funnel-arrow { font-size: 10px; color: var(--muted); line-height: 1; }
+  .engines { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .engine {
+    background: #fff; border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px; border-top: 3px solid var(--accent);
+  }
+  .engine h4 { font-size: 9px; font-weight: 800; color: var(--navy); margin-bottom: 3px; }
+  .engine p, .engine li { font-size: 7.8px; color: var(--muted); line-height: 1.45; }
+  .engine ul { margin: 0; padding-left: 12px; }
+  .roadmap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .roadmap-phase {
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px;
+    background: #fff;
+  }
+  .roadmap-phase .phase-tag {
+    font-size: 7px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 3px;
+  }
+  .roadmap-phase h4 { font-size: 9px; font-weight: 800; color: var(--navy); margin-bottom: 3px; }
+  .roadmap-phase p, .roadmap-phase li { font-size: 7.8px; color: var(--muted); line-height: 1.4; }
+  .roadmap-phase ul { margin: 0; padding-left: 11px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
+  .three-col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+  .badge-live {
+    display: inline-block; font-size: 7px; font-weight: 700; letter-spacing: 0.8px;
+    text-transform: uppercase; background: #e6f4ea; color: var(--live);
+    padding: 1px 6px; border-radius: 999px; margin-left: 4px; vertical-align: middle;
+  }
+  .badge-soon {
+    display: inline-block; font-size: 7px; font-weight: 700; letter-spacing: 0.8px;
+    text-transform: uppercase; background: var(--accent-soft); color: var(--soon);
+    padding: 1px 6px; border-radius: 999px; margin-left: 4px; vertical-align: middle;
+  }
+  .appendix-cover {
+    flex: 1; display: flex; flex-direction: column; justify-content: center;
+    padding: 20mm 16mm; text-align: center; background: var(--cream);
+  }
+  .appendix-cover h1 { font-size: 26px; color: var(--navy); font-weight: 800; }
+  .appendix-cover p { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+
+  /* Cover */
+  .pe-cover { justify-content: space-between; padding: 0; color: #fff; }
+  .pe-cover .cover-top { padding: 22mm 18mm 0; }
+  .pe-cover .conf { font-size: 8px; letter-spacing: 3px; text-transform: uppercase; font-weight: 600; color: rgba(255,255,255,0.92); margin-bottom: 16mm; }
+  .pe-cover .eyebrow { font-size: 11px; letter-spacing: 4px; text-transform: uppercase; color: var(--accent-light); font-weight: 700; margin-bottom: 6mm; }
+  .pe-cover h1 { font-size: 46px; font-weight: 800; line-height: 1.03; letter-spacing: -1px; color: #fff; }
+  .pe-cover .sub { font-size: 16px; font-weight: 400; color: rgba(255,255,255,0.95); margin-top: 6mm; line-height: 1.45; max-width: 150mm; }
+  .pe-cover .cover-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border-top: 1px solid rgba(255,255,255,0.22); }
+  .pe-cover .cm { padding: 9mm 6mm; border-right: 1px solid rgba(255,255,255,0.12); }
+  .pe-cover .cm:last-child { border-right: none; }
+  .pe-cover .cm .n { font-size: 22px; font-weight: 800; color: #fff; line-height: 1; }
+  .pe-cover .cm .l { font-size: 7px; letter-spacing: 1px; text-transform: uppercase; color: var(--accent-light); margin-top: 3mm; font-weight: 600; }
+
+  /* Section divider */
+  .divider-page { justify-content: center; padding: 0 22mm; color: #fff; }
+  .divider-page .d-num { font-size: 64px; font-weight: 800; color: var(--accent); line-height: 1; }
+  .divider-page h1 { font-size: 36px; font-weight: 800; color: #fff; margin-top: 3mm; line-height: 1.05; letter-spacing: -0.5px; }
+  .divider-page p { font-size: 12px; color: rgba(255,255,255,0.85); margin-top: 4mm; max-width: 135mm; line-height: 1.5; }
+  .divider-page .d-bar { width: 40mm; height: 4px; background: linear-gradient(90deg, var(--accent), var(--accent-light)); margin-top: 6mm; }
+
+  /* PE body headlines */
+  .pe-body .eyebrow { font-size: 8px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--accent); font-weight: 800; margin-bottom: 2mm; }
+  .pe-body h1 { font-size: 23px; font-weight: 800; color: var(--navy); line-height: 1.12; margin-bottom: 3mm; letter-spacing: -0.3px; }
+
+  /* Stat tiles */
+  .stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5mm; margin: 4mm 0; }
+  .stat-grid.four { grid-template-columns: repeat(2, 1fr); }
+  .stat-tile { border: 1px solid var(--line); border-top: 3px solid var(--accent); border-radius: 10px; padding: 6mm 5mm; background: var(--cream); }
+  .stat-tile .big { font-size: 30px; font-weight: 800; color: var(--navy); line-height: 1; letter-spacing: -1px; }
+  .stat-tile .lbl { font-size: 8px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--accent); margin-top: 3mm; }
+  .stat-tile .sub { font-size: 8px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+
+  /* KPI strip (dark band) */
+  .kpi-strip { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--navy); border-radius: 10px; overflow: hidden; margin: 3mm 0 4mm; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .kpi-strip.three { grid-template-columns: repeat(3, 1fr); }
+  .kpi-strip .kpi { padding: 5mm 4mm; text-align: center; border-right: 1px solid rgba(255,255,255,0.12); }
+  .kpi-strip .kpi:last-child { border-right: none; }
+  .kpi .k-big { font-size: 19px; font-weight: 800; color: #fff; line-height: 1; }
+  .kpi .k-lbl { font-size: 7px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--accent-light); margin-top: 2.5mm; }
+
+  /* Highlight list */
+  .hl { list-style: none; margin: 2mm 0 0; padding: 0; }
+  .hl li { position: relative; padding-left: 8mm; margin-bottom: 3mm; font-size: 9.5px; line-height: 1.5; color: var(--ink); }
+  .hl li::before { content: "\25B8"; position: absolute; left: 2mm; color: var(--accent); font-weight: 800; }
+  .hl li b { color: var(--navy); }
+
+  /* The Ask */
+  .ask-box { border: 2px solid var(--accent); border-radius: 12px; padding: 6mm; background: var(--accent-soft); margin: 3mm 0 4mm; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .ask-box .amt { font-size: 34px; font-weight: 800; color: var(--navy); line-height: 1; letter-spacing: -1px; }
+  .ask-box .amt-lbl { font-size: 9px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent); margin-top: 2mm; }
+
+  /* Bar chart */
+  .bars { margin: 3mm 0 4mm; }
+  .bar-row { display: flex; align-items: center; gap: 4mm; margin-bottom: 2.5mm; }
+  .bar-row .b-lbl { width: 20mm; font-size: 8px; font-weight: 700; color: var(--navy); text-align: right; }
+  .bar-track { flex: 1; height: 8.5mm; }
+  .bar-fill { height: 100%; background: linear-gradient(90deg, var(--navy), var(--navy-soft)); border-radius: 5px; display: flex; align-items: center; justify-content: flex-end; padding-right: 3mm; color: #fff; font-size: 8px; font-weight: 700; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .bar-fill.accent { background: linear-gradient(90deg, var(--accent), var(--accent-light)); color: var(--navy); }
+
+  /* Feature grid (platform capabilities) */
+  .feat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4mm; margin: 3mm 0; }
+  .feat-grid.three { grid-template-columns: repeat(3, 1fr); }
+  .feat { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: 4.5mm 5mm; background: #fff; }
+  .feat h4 { font-size: 9px; font-weight: 800; color: var(--navy); margin-bottom: 1mm; }
+  .feat h4 .badge-live, .feat h4 .badge-soon { margin-left: 3px; }
+  .feat ul { list-style: none; margin: 1.5mm 0 0; padding: 0; }
+  .feat li { position: relative; padding-left: 5mm; margin-bottom: 1.4mm; font-size: 7.8px; line-height: 1.4; color: var(--ink); }
+  .feat li::before { content: "\2713"; position: absolute; left: 0; color: var(--live); font-weight: 800; }
+  .feat.soon li::before { content: "\2192"; color: var(--soon); }
+
+  /* Regulatory journey timeline */
+  .reg-track { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5mm; margin: 3mm 0 4mm; }
+  .reg-step { border: 1px solid var(--line); border-radius: 10px; padding: 5mm; background: var(--cream); border-top: 3px solid var(--navy-soft); }
+  .reg-step.da { border-top-color: var(--accent); background: var(--accent-soft); }
+  .reg-step .tag { font-size: 7px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--accent); }
+  .reg-step h4 { font-size: 10px; font-weight: 800; color: var(--navy); margin: 1.5mm 0; }
+  .reg-step p { font-size: 7.8px; color: var(--muted); line-height: 1.45; }
+
+  .note { font-size: 7.8px; color: var(--muted); margin-top: 2mm; line-height: 1.4; }
+  .pill-note { display: inline-block; font-size: 7.5px; font-weight: 700; letter-spacing: 0.5px; background: #eef4fb; color: var(--navy-mid); padding: 2px 8px; border-radius: 999px; margin-top: 2mm; }
+
+</style>
+</head>
+<body class="pack"><div class="page pe-cover" style="background: linear-gradient(165deg, var(--navy) 0%, var(--navy-mid) 55%, #2a3555 100%); -webkit-print-color-adjust: exact; print-color-adjust: exact; color:#fff;">
+    <div class="cover-accent-bar"></div>
+    <div class="cover-top">
+      <div class="conf">Strictly Private &amp; Confidential</div>
+      <div class="eyebrow">Private Equity Investment Opportunity</div>
+      <h1>Mortgage Hub</h1>
+      <p class="sub">The technology-enabled mortgage distribution platform — an equity partnership to build one of the UK's most progressive advice businesses.</p>
+    </div>
+    <div class="cover-metrics">
+      <div class="cm"><div class="n">66,500</div><div class="l">Addressable partners</div></div>
+      <div class="cm"><div class="n">~&pound;4m</div><div class="l">Y10 recurring revenue</div></div>
+      <div class="cm"><div class="n">~&pound;2.3m</div><div class="l">Y10 EBITDA</div></div>
+      <div class="cm"><div class="n">Susan AI</div><div class="l">Live platform</div></div>
+    </div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">Notice</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">Important Notice</div>
+    <h1>Confidentiality &amp; Disclaimer</h1>
+    <p class="lead">This document has been prepared solely to facilitate discussions regarding a potential strategic development partnership and equity investment in Mortgage Hub.</p>
+    <p>The information contained within is commercially sensitive and confidential. It should not be copied, distributed or disclosed to any third party without the prior written consent of the author.</p>
+    <p>The financial projections, strategic plans and operational assumptions are management forecasts prepared using reasonable commercial assumptions and are intended to illustrate the proposed growth strategy. They are not guarantees of future performance. Year 5–10 figures are management projections extending the base forecast; renewal figures are drawn from the recurring-revenue model.</p>
+    <hr class="divider" />
+    <p>The names <b>Mortgage Hub</b>, <b>Mortgage Academy</b> and <b>Mortgage Hub Group</b> are temporary working titles; the intended customer-facing brands remain subject to trademark registration. The investment proposition is independent of the final branding.</p>
+    <div class="callout ai"><p><b>Technology philosophy:</b> Technology within Mortgage Hub is designed to augment professional advice, not replace it. Any future expansion of AI capability will be implemented in line with applicable regulation, customer expectations and appropriate human oversight.</p></div></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">Investment Highlights</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">Investment Highlights</div>
+    <h1>A scalable, technology-enabled mortgage platform — not just another brokerage</h1>
+    <div class="stat-grid four">
+      <div class="stat-tile"><div class="big">66,500</div><div class="lbl">Addressable partners</div><div class="sub">UK professional firms across estate agency, legal, accountancy &amp; property</div></div>
+      <div class="stat-tile"><div class="big">~&pound;4m</div><div class="lbl">Y10 recurring revenue</div><div class="sub">Compounding renewal-income portfolio from retained customers</div></div>
+      <div class="stat-tile"><div class="big">~&pound;2.3m</div><div class="lbl">Y10 total EBITDA</div><div class="sub">New mortgage income + renewals + Mortgage Academy</div></div>
+      <div class="stat-tile"><div class="big">&pound;104k&rarr;&pound;600k</div><div class="lbl">Mortgage Academy revenue</div><div class="sub">Standalone talent engine — profitable from Year 3 (Y3&rarr;Y10)</div></div>
+    </div>
+    <h2>Three pillars, each a distinct value driver</h2>
+    <ul class="hl">
+      <li><b>Distribution.</b> A scalable self-employed mortgage &amp; protection business, with advisers earning <b>£36k&rarr;£73k</b> (incl. retained self-introduced 20%) — a compelling recruitment proposition.</li>
+      <li><b>Mortgage Academy — the talent engine.</b> A proprietary, <b>standalone and profitable</b> academy (£104k Y3 → £600k Y10) that de-risks recruitment and supplies trained advisers to Mortgage Hub <b>and the wider network ecosystem</b>.</li>
+      <li><b>Technology.</b> Susan, the AI digital colleague, is <b>already live</b> for booking, fact-find and customer engagement, driving a low cost-to-serve.</li>
+    </ul>
+    <h2>Why invest</h2>
+    <ul class="hl">
+      <li><b>Capital-efficient launch</b> — initially an Appointed Representative of a network selected for the best commercial terms and technology alignment, on a journey to direct authorisation.</li>
+      <li><b>Compounding recurring revenue</b> — a renewal-income portfolio that builds long-term enterprise value beyond new business.</li>
+      <li><b>Experienced founder</b> — 28+ years leading, transforming and scaling mortgage advice businesses.</li>
+    </ul></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">1</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">Total Revenue Forecast</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">The Headline Numbers</div>
+    <h1>Total revenue compounds to ~&pound;10m by Year 10</h1>
+    <p class="lead">Total revenue combines <b>new mortgage income</b>, <b>renewal / recurring income</b> and <b>Mortgage Academy</b> revenue. Recurring income is negligible in Years 1–2 and becomes the dominant driver by Year 10.</p>
+    <table class="memo"><thead><tr><th>Year</th><th class="num">New mortgage income</th><th class="num">Renewal / recurring</th><th class="num">Mortgage Academy</th><th class="num">Total revenue</th></tr></thead><tbody><tr><td>Year 1</td><td class="num">£60,000</td><td class="num">—</td><td class="num">—</td><td class="num">£60,000</td></tr><tr><td>Year 2</td><td class="num">£480,000</td><td class="num">—</td><td class="num">—</td><td class="num">£480,000</td></tr><tr><td>Year 3</td><td class="num">£1,200,000</td><td class="num">£14,400</td><td class="num">£104,000</td><td class="num">£1,318,400</td></tr><tr><td>Year 4</td><td class="num">£2,100,000</td><td class="num">£129,600</td><td class="num">£200,000</td><td class="num">£2,429,600</td></tr><tr><td>Year 5</td><td class="num">£2,700,000</td><td class="num">£417,600</td><td class="num">£300,000</td><td class="num">£3,417,600</td></tr><tr><td>Year 10</td><td class="num">£5,700,000</td><td class="num">£3,945,600</td><td class="num">£600,000</td><td class="num">£10,245,600</td></tr></tbody></table>
+    <div class="bars"><div class="bar-row"><div class="b-lbl">Year 1</div><div class="bar-track"><div class="bar-fill " style="width:6%">£0.06m</div></div></div><div class="bar-row"><div class="b-lbl">Year 2</div><div class="bar-track"><div class="bar-fill " style="width:9%">£0.48m</div></div></div><div class="bar-row"><div class="b-lbl">Year 3</div><div class="bar-track"><div class="bar-fill " style="width:16%">£1.3m</div></div></div><div class="bar-row"><div class="b-lbl">Year 4</div><div class="bar-track"><div class="bar-fill " style="width:26%">£2.4m</div></div></div><div class="bar-row"><div class="b-lbl">Year 5</div><div class="bar-track"><div class="bar-fill " style="width:36%">£3.4m</div></div></div><div class="bar-row"><div class="b-lbl">Year 10</div><div class="bar-track"><div class="bar-fill accent" style="width:100%">£10.2m</div></div></div></div>
+    <div class="callout"><p><b>Mortgage Academy becomes a material revenue stream from Year 3</b> — a standalone, profitable talent business scaling from £104k (Y3) to £600k (Y10), on top of new mortgage and recurring income.</p></div>
+    <p class="note">New mortgage income: from the management forecast (Y10 = 95 advisers &times; ~£60k net). Renewal / recurring income: from the recurring-revenue model. Mortgage Academy: Y3–Y4 forecast, Y5 &amp; Y10 management projections. Year 5–10 are management projections extending the base forecast.</p></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">2</div>
+  </div><div class="page divider-page" style="background: linear-gradient(165deg, var(--navy) 0%, var(--navy-mid) 55%, #2a3555 100%); -webkit-print-color-adjust: exact; print-color-adjust: exact; color:#fff;">
+    <div class="d-num">01</div>
+    <h1>The Opportunity</h1>
+    <p>A large, fragmented market at a technology and talent inflection point.</p>
+    <div class="d-bar"></div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">The Opportunity</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">Market &amp; Timing</div>
+    <h1>A large, fragmented market ready for a technology-led operator</h1>
+    <p class="lead">Mortgage distribution remains heavily intermediated and relationship-driven, yet under-served by modern technology and structured talent development.</p>
+    <div class="kpi-strip "><div class="kpi"><div class="k-big">66,500</div><div class="k-lbl">Target UK firms</div></div><div class="kpi"><div class="k-big">~20,000</div><div class="k-lbl">No mortgage referral partner</div></div><div class="kpi"><div class="k-big">~46,500</div><div class="k-lbl">Conversion opportunities</div></div><div class="kpi"><div class="k-big">60</div><div class="k-lbl">Completions / adviser / yr</div></div></div>
+    <h2>Why now</h2>
+    <ul class="hl">
+      <li><b>Technology inflection.</b> AI and automation now make it possible to remove administrative drag from advisers and materially improve customer experience.</li>
+      <li><b>Talent gap.</b> The industry faces a structural shortage of qualified advisers — the Mortgage Academy turns this constraint into a proprietary supply engine.</li>
+      <li><b>Partnership white space.</b> Roughly 30% of target firms have no established mortgage referral relationship — an immediate acquisition opportunity.</li>
+      <li><b>Capital-light entry.</b> The Appointed Representative model lets the business launch quickly under an established compliance framework while scaling.</li>
+    </ul>
+    <div class="callout"><p><b>The thesis:</b> combine experienced advisers, an always-on AI operating platform and a structured talent pipeline to build a scalable advice business with a compounding recurring-revenue base.</p></div></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">2</div>
+  </div><div class="page divider-page" style="background: linear-gradient(165deg, var(--navy) 0%, var(--navy-mid) 55%, #2a3555 100%); -webkit-print-color-adjust: exact; print-color-adjust: exact; color:#fff;">
+    <div class="d-num">02</div>
+    <h1>The Business</h1>
+    <p>Three engines of growth on one integrated, AI-enabled operating platform.</p>
+    <div class="d-bar"></div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">The Business</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">What We Are</div>
+    <h1>Three engines of growth, one integrated platform</h1>
+    <p class="lead">Mortgage Hub is designed from inception as an operating platform — integrating people, process and technology to scale without proportional increases in management overhead.</p>
+    <div class="diagram"><div class="diagram-title">The Three Engines of Growth</div>
+  <div class="engines">
+    <div class="engine"><h4>Engine One — Distribution</h4><p>The regulated mortgage &amp; protection business.</p><ul>
+      <li>Customer acquisition</li><li>Introducer relationships</li><li>Adviser productivity</li><li>Commercial growth</li></ul></div>
+    <div class="engine"><h4>Engine Two — Talent</h4><p>Mortgage Academy — a proprietary, standalone talent engine, profitable from Year 3.</p><ul>
+      <li>Recruitment &amp; CAS preparation</li><li>Coaching, CPD &amp; sales excellence</li><li>Leadership development</li><li>Standalone business + network pipeline</li></ul></div>
+    <div class="engine"><h4>Engine Three — Technology</h4><p>Proprietary AI-enabled operating platform.</p><ul>
+      <li>Susan AI</li><li>CRM &amp; customer portal</li><li>Telephony &amp; automation</li><li>Business intelligence</li></ul></div>
+  </div></div>
+    <h2>The operating model</h2>
+    <p>The business launches as an <b>Appointed Representative of a network selected for the best commercial terms and technology alignment</b>, leveraging that network's established compliance and governance infrastructure during the early growth phase. This keeps the model capital-efficient and de-risks the regulatory pathway while the adviser base and technology scale. Over the journey to Year 10 the business will transition to becoming <b>directly authorised</b> (see Regulatory Journey).</p>
+    <span class="pill-note">HLP is the leading intended network partner, subject to final commercial terms.</span></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">3</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">Business Model</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">How We Make Money</div>
+    <h1>Diversified income today, compounding recurring income tomorrow</h1>
+    <h2>Revenue streams</h2>
+    <div class="three-col">
+      <div class="engine"><h4>New mortgage income</h4><p>Procuration fees, broker fees and protection &amp; general insurance — net income received from the chosen network.</p></div>
+      <div class="engine"><h4>Recurring / renewal income</h4><p>Renewals, product transfers and remortgages from retained customers — a compounding enterprise-value driver.</p></div>
+      <div class="engine"><h4>Mortgage Academy</h4><p>Structured recruitment, training and development — a talent pipeline and a standalone income stream from Year 3.</p></div>
+    </div>
+    <h2>Per-adviser economics (illustrative, at scale)</h2>
+    <p>Each fully trading adviser is expected to complete approximately <b>60 customer acquisitions annually</b>, generating average annual <b>new mortgage income</b> (net from the network) of:</p>
+    <table class="memo"><thead><tr><th>Revenue source</th><th class="num">Annual new income</th></tr></thead><tbody><tr><td>Procuration fees</td><td class="num">£33,000</td></tr><tr><td>Broker fees</td><td class="num">£8,000</td></tr><tr><td>Protection &amp; general insurance</td><td class="num">£19,000</td></tr><tr><td>Total new mortgage income</td><td class="num">£60,000</td></tr></tbody></table>
+    <p class="note">Figures reflect new mortgage income only and exclude renewal / recurring income, which is shown separately to avoid double-counting.</p></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">4</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">Technology</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">Proprietary Platform</div>
+    <h1>Susan — the AI digital colleague already working today</h1>
+    <p class="lead">Susan improves customer experience and adviser productivity by undertaking structured administrative activities under human oversight. She is not used to provide regulated advice.</p>
+    <div class="diagram"><div class="diagram-title">Susan — Capability Roadmap</div>
+  <div class="roadmap">
+    <div class="roadmap-phase"><div class="phase-tag">Phase 1 · Live</div><h4>Administrative colleague</h4><ul>
+      <li>Welcome &amp; fact-find</li><li>Voice &amp; typed chat</li><li>Appointment booking</li><li>SMS confirmations</li><li>Progress updates</li></ul></div>
+    <div class="roadmap-phase"><div class="phase-tag">Phase 2 · In development</div><h4>Adviser support</h4><ul>
+      <li>Integrated telephony</li><li>Call transcription &amp; AI summary</li><li>Document intelligence</li><li>Workflow management</li><li>Case preparation</li></ul></div>
+    <div class="roadmap-phase"><div class="phase-tag">Future vision</div><h4>Strategic capability</h4><ul>
+      <li>Open Banking integration</li><li>ID verification</li><li>Affordability pre-assessment</li><li>Payment links</li><li>Quality assurance</li></ul></div>
+  </div></div>
+    <h2>Why it matters commercially</h2>
+    <ul class="hl">
+      <li><b>Lower cost-to-serve.</b> Automation removes administrative load, letting advisers spend more time advising.</li>
+      <li><b>Scalability.</b> Technology absorbs growth that would otherwise require proportional headcount.</li>
+      <li><b>Competitive moat.</b> Progressive AI capability, built in line with regulation, compounds into a durable advantage.</li>
+    </ul></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">5</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">The Talent Engine</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">Mortgage Academy · The Talent Engine</div>
+    <h1>A proprietary talent engine — strategic capability, not just training</h1>
+    <p class="lead">The Mortgage Academy turns the industry's structural adviser shortage into a proprietary supply engine — a <b>standalone, profitable business</b> that develops talent for Mortgage Hub <b>and the wider network ecosystem</b>.</p>
+    <div class="kpi-strip "><div class="kpi"><div class="k-big">£104k</div><div class="k-lbl">Y3 · standalone</div></div><div class="kpi"><div class="k-big">£200k</div><div class="k-lbl">Y4 revenue</div></div><div class="kpi"><div class="k-big">£300k</div><div class="k-lbl">Y5 revenue</div></div><div class="kpi"><div class="k-big">£600k</div><div class="k-lbl">Y10 revenue</div></div></div>
+    <div class="diagram"><div class="diagram-title">Adviser Development Pipeline</div><div class="funnel"><div class="funnel-step soft" style="--w:100%">Recruit</div><div class="funnel-arrow">↓</div><div class="funnel-step soft" style="--w:84%">Onboard</div><div class="funnel-arrow">↓</div><div class="funnel-step " style="--w:68%">CAS competency</div><div class="funnel-arrow">↓</div><div class="funnel-step " style="--w:54%">Coach &amp; develop</div><div class="funnel-arrow">↓</div><div class="funnel-step accent" style="--w:42%">Lead &amp; mentor</div></div></div>
+    <div class="two-col">
+      <div>
+        <h3>Programme scope</h3>
+        <ul>
+          <li>Recruitment &amp; CAS preparation</li>
+          <li>CPD, coaching &amp; sales excellence</li>
+          <li>Leadership &amp; management development</li>
+          <li>AI adoption &amp; platform training</li>
+          <li>Business growth coaching</li>
+          <li>Network / platform standards training</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Career pathway</h3>
+        <ul>
+          <li>Trainee &amp; new adviser</li>
+          <li>Fully competent adviser (CAS)</li>
+          <li>Senior adviser &amp; coach</li>
+          <li>Sales &amp; leadership roles</li>
+          <li>Wider network opportunities</li>
+        </ul>
+        <p class="note">Profitable as a standalone business — EBITDAR £34k (Y3) rising to £70k (Y4).</p>
+      </div>
+    </div>
+    <div class="callout"><p><b>Strategic value:</b> a sustainable talent pipeline that improves adviser retention, materially <b>reduces recruitment risk</b>, and supports the direct-authorisation journey by ensuring advisers are trained on the firm's own systems, standards and compliance culture.</p></div></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">6</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">Go-To-Market</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">Customer Acquisition</div>
+    <h1>A predictable, partnership-led acquisition engine</h1>
+    <p class="lead">Rather than relying on purchased leads, Mortgage Hub builds an ecosystem of professional partners who benefit from introducing customers.</p>
+    <table class="memo"><thead><tr><th>Sector</th><th class="num">Estimated UK businesses</th></tr></thead><tbody><tr><td>Independent estate agencies</td><td class="num">11,000</td></tr><tr><td>Residential property developers</td><td class="num">9,000</td></tr><tr><td>Solicitors &amp; conveyancing firms</td><td class="num">9,500</td></tr><tr><td>Accountancy &amp; tax advisory firms</td><td class="num">37,000</td></tr><tr><td>Total addressable market</td><td class="num">66,500</td></tr></tbody></table>
+    <div class="diagram"><div class="diagram-title">Acquisition Framework</div><div class="funnel"><div class="funnel-step soft" style="--w:100%">66,500 professional businesses</div><div class="funnel-arrow">↓</div><div class="funnel-step " style="--w:88%">20,000 new-partnership + 46,500 conversion opportunities</div><div class="funnel-arrow">↓</div><div class="funnel-step " style="--w:72%">Strategic partnership network</div><div class="funnel-arrow">↓</div><div class="funnel-step accent" style="--w:58%">180 introductions / adviser / year</div><div class="funnel-arrow">↓</div><div class="funnel-step " style="--w:46%">60 completions / adviser</div></div></div>
+    <p class="note">Acquisition is diversified across strategic partnerships, refer-a-friend, existing-customer referrals, self-generated business, digital marketing and corporate partnerships.</p></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">7</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">Unit Economics</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">Adviser Projected Income</div>
+    <h1>Advisers who self-generate keep the full economics of their customers</h1>
+    <p class="lead">Standard split: 50% adviser, 20% introducer. Of annual acquisitions, 30 are <b>self-introduced</b> (no external introducer) — so on those the 20% is retained by the adviser, on top of their 50%.</p>
+    <table class="memo"><thead><tr><th>Year</th><th class="num">Case size</th><th class="num">Acq.</th><th class="num">Self-intro</th><th class="num">Adviser 50%</th><th class="num">Retained 20%</th><th class="num">Renewal</th><th class="num">Total adviser income</th></tr></thead><tbody><tr><td>Year 1</td><td class="num">£1,000</td><td class="num">60</td><td class="num">30</td><td class="num">£30,000</td><td class="num">£6,000</td><td class="num">—</td><td class="num">£36,000</td></tr><tr><td>Year 2</td><td class="num">£1,200</td><td class="num">70</td><td class="num">30</td><td class="num">£42,000</td><td class="num">£7,200</td><td class="num">—</td><td class="num">£49,200</td></tr><tr><td>Year 3</td><td class="num">£1,500</td><td class="num">80</td><td class="num">30</td><td class="num">£60,000</td><td class="num">£9,000</td><td class="num">£4,000</td><td class="num">£73,000</td></tr></tbody></table>
+    <p class="note">Total = adviser 50% commission + retained 20% on self-introduced customers + renewal commission. External introducer payments (£6,000 / £9,600 / £15,000) apply only to introducer-sourced customers and are not deducted from adviser income.</p>
+    <h2>The growth story</h2>
+    <ul class="hl">
+      <li><b>Retained self-introduced 20%</b> adds £6,000–£9,000 of income annually for an adviser building their own client base.</li>
+      <li><b>Rising case values</b> (£1,000&rarr;£1,500) as protection and GI attachment deepens.</li>
+      <li><b>Emerging renewal income</b> from Year 3 — a compounding personal income stream earned on relationships already won.</li>
+    </ul></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">8</div>
+  </div><div class="page divider-page" style="background: linear-gradient(165deg, var(--navy) 0%, var(--navy-mid) 55%, #2a3555 100%); -webkit-print-color-adjust: exact; print-color-adjust: exact; color:#fff;">
+    <div class="d-num">03</div>
+    <h1>The Numbers</h1>
+    <p>Planned investment phase, then operating leverage and compounding recurring revenue.</p>
+    <div class="d-bar"></div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">Financials</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">Management Forecast</div>
+    <h1>Planned investment phase, then rapid operating leverage</h1>
+    <p class="lead">Figures reflect <b>new mortgage income only</b> (net from the chosen network) and exclude renewal / recurring income, which is forecast separately.</p>
+    <table class="memo"><thead><tr><th></th><th class="num">Year 1</th><th class="num">Year 2</th><th class="num">Year 3</th><th class="num">Year 4</th><th class="num">Year 5</th></tr></thead><tbody><tr><td>Advisers (trading)</td><td class="num">1</td><td class="num">8</td><td class="num">20</td><td class="num">35</td><td class="num">45</td></tr><tr><td>Revenue (new mortgage income)</td><td class="num">£60,000</td><td class="num">£480,000</td><td class="num">£1,200,000</td><td class="num">£2,100,000</td><td class="num">£2,700,000</td></tr><tr><td>Adviser commission</td><td class="num neg">(£30,000)</td><td class="num neg">(£240,000)</td><td class="num neg">(£600,000)</td><td class="num neg">(£1,050,000)</td><td class="num neg">(£1,350,000)</td></tr><tr><td>Introducer commission</td><td class="num">—</td><td class="num neg">(£96,000)</td><td class="num neg">(£240,000)</td><td class="num neg">(£400,000)</td><td class="num neg">(£500,000)</td></tr><tr><td>Gross profit</td><td class="num">£30,000</td><td class="num">£144,000</td><td class="num">£360,000</td><td class="num">£650,000</td><td class="num">£850,000</td></tr><tr><td>Salaries &amp; costs</td><td class="num neg">(£90,000)</td><td class="num neg">(£160,000)</td><td class="num neg">(£110,000)</td><td class="num neg">(£200,000)</td><td class="num neg">(£265,000)</td></tr><tr><td>Training investment</td><td class="num">—</td><td class="num">—</td><td class="num neg">(£40,000)</td><td class="num neg">(£50,000)</td><td class="num neg">(£60,000)</td></tr><tr><td>EBITDAR</td><td class="num neg">(£60,000)</td><td class="num neg">(£16,000)</td><td class="num">£210,000</td><td class="num">£400,000</td><td class="num">£525,000</td></tr></tbody></table>
+    <p class="note">New mortgage income scales at ~£60,000 net per fully trading adviser (Y4 = 35 advisers; +10/yr &rarr; Y5 = 45). Adviser commission ~50%; introducer commission ~20%, moderated as self-introduced business grows. The business operates at a planned loss during the initial development phase while investing in technology, recruitment, the Mortgage Academy and organisational capability.</p></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">10</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">Recurring Revenue</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">Enterprise Value</div>
+    <h1>A compounding renewal-income portfolio drives long-term value</h1>
+    <p class="lead">Assumptions: 60 completions / adviser / year · 60% retention · £400 average renewal income · +10 advisers annually from Year 5.</p>
+    <table class="memo"><thead><tr><th>Year</th><th class="num">Renewal income</th><th class="num">Adviser (50%)</th><th class="num">Introducer (20%)</th><th class="num">Forecast EBITDAR</th></tr></thead><tbody><tr><td>3</td><td class="num">£14,400</td><td class="num">£7,200</td><td class="num">£2,880</td><td class="num">£2,880</td></tr><tr><td>4</td><td class="num">£129,600</td><td class="num">£64,800</td><td class="num">£25,920</td><td class="num">£25,920</td></tr><tr><td>5</td><td class="num">£417,600</td><td class="num">£208,800</td><td class="num">£83,520</td><td class="num">£83,520</td></tr><tr><td>6</td><td class="num">£921,600</td><td class="num">£460,800</td><td class="num">£184,320</td><td class="num">£221,184</td></tr><tr><td>7</td><td class="num">£1,569,600</td><td class="num">£784,800</td><td class="num">£313,920</td><td class="num">£376,704</td></tr><tr><td>8</td><td class="num">£2,217,600</td><td class="num">£1,108,800</td><td class="num">£443,520</td><td class="num">£532,224</td></tr><tr><td>9</td><td class="num">£3,009,600</td><td class="num">£1,504,800</td><td class="num">£601,920</td><td class="num">£722,304</td></tr><tr><td>10</td><td class="num">£3,945,600</td><td class="num">£1,972,800</td><td class="num">£789,120</td><td class="num">£946,944</td></tr></tbody></table>
+    <p>By Year 10 the recurring-income portfolio is projected to generate almost <b>£4 million</b> of annual recurring revenue, producing forecast EBITDAR approaching <b>£1 million</b> from this stream alone.</p></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">11</div>
+  </div><div class="page divider-page" style="background: linear-gradient(165deg, var(--navy) 0%, var(--navy-mid) 55%, #2a3555 100%); -webkit-print-color-adjust: exact; print-color-adjust: exact; color:#fff;">
+    <div class="d-num">04</div>
+    <h1>The Ask &amp; Returns</h1>
+    <p>Strategic equity partnership to accelerate the establishment phase.</p>
+    <div class="d-bar"></div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">The Ask</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">The Ask &amp; Use of Funds</div>
+    <h1>Strategic investment to accelerate the establishment phase</h1>
+    <div class="ask-box">
+      <div class="amt">Equity partnership</div>
+      <div class="amt-lbl">Strategic partner sought — not a passive investor</div>
+    </div>
+    <p>Investment supports development during the establishment phase — not to prop up an unsustainable model. It funds the build-out of technology, talent and distribution ahead of the recurring-revenue inflection.</p>
+    <h2>Use of funds</h2>
+    <div class="three-col">
+      <div class="engine"><h4>Technology</h4><p>Susan AI, customer portal, workflow automation, telephony &amp; network integration.</p></div>
+      <div class="engine"><h4>Working capital</h4><p>Planned operating losses during Years 1–2 while the adviser base scales.</p></div>
+      <div class="engine"><h4>Mortgage Academy</h4><p>Recruitment, structured onboarding and leadership capability.</p></div>
+      <div class="engine"><h4>Recruitment</h4><p>Attraction and onboarding of experienced self-employed advisers.</p></div>
+      <div class="engine"><h4>Marketing</h4><p>Brand development, digital marketing and customer acquisition.</p></div>
+      <div class="engine"><h4>Infrastructure</h4><p>Systems, licences, professional services and business support.</p></div>
+    </div></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">12</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">Returns</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">EBITDA Trajectory &amp; Value Creation</div>
+    <h1>From planned investment to a ~£2.3m EBITDA business</h1>
+    <p class="lead">Total EBITDA builds from new mortgage income, a compounding renewal portfolio and Mortgage Academy.</p>
+    <div class="bars"><div class="bar-row"><div class="b-lbl">Year 1</div><div class="bar-track"><div class="bar-fill " style="width:8%">(£0.06m)</div></div></div><div class="bar-row"><div class="b-lbl">Year 4</div><div class="bar-track"><div class="bar-fill " style="width:20%">£0.4m</div></div></div><div class="bar-row"><div class="b-lbl">Year 5</div><div class="bar-track"><div class="bar-fill " style="width:32%">~£0.7m</div></div></div><div class="bar-row"><div class="b-lbl">Year 10</div><div class="bar-track"><div class="bar-fill accent" style="width:100%">~£2.3m</div></div></div></div>
+    <p class="note">Year 5–10 are management projections extending the base forecast; renewal figures are drawn from the recurring-revenue model. Bars indicative for illustration.</p>
+    <h2>Value creation plan</h2>
+    <table class="memo"><thead><tr><th>Value driver</th><th>Mechanism</th><th>Timeline</th></tr></thead><tbody><tr><td>Adviser distribution</td><td>Scalable self-employed model with technology leverage</td><td>Years 1–4</td></tr><tr><td>Technology platform</td><td>Susan AI, CRM, telephony &amp; automation reducing cost-to-serve</td><td>Ongoing</td></tr><tr><td>Mortgage Academy</td><td>Standalone talent business + network-ecosystem expansion</td><td>Year 3+ (standalone Y3)</td></tr><tr><td>Partnership network</td><td>66,500-addressable-market acquisition engine</td><td>Years 2–5</td></tr><tr><td>Recurring revenue</td><td>Compounding renewal-income portfolio</td><td>Years 3–10</td></tr><tr><td>AI capability</td><td>Progressive Susan phases creating a competitive moat</td><td>Years 1–5+</td></tr><tr><td>Direct authorisation</td><td>AR &rarr; DA transition — margin expansion + compliance/sourcing moat</td><td>By Year 10</td></tr></tbody></table></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">13</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">Regulatory Journey</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">Governance Evolution &amp; Margin Expansion</div>
+    <h1>From Appointed Representative to Directly Authorised by Year 10</h1>
+    <p class="lead">The firm launches capital-efficiently under a network, then earns its way to direct authorisation — converting network charges into owned capability, margin and moat.</p>
+    <div class="reg-track">
+      <div class="reg-step"><div class="tag">Now · Phase 1</div><h4>Appointed Representative</h4><p>Operate as an AR of a network selected for the best commercial terms and technology alignment, leveraging established compliance and governance during early growth.</p></div>
+      <div class="reg-step"><div class="tag">Transition · Phases 2–3</div><h4>Building DA readiness</h4><p>Scale advisers, systems and oversight; invest in proprietary compliance and product-sourcing capability. Transition cost is <b>absorbed by network charges no longer paid away</b> — not an additional attributed cost.</p></div>
+      <div class="reg-step da"><div class="tag">By Year 10 · Target</div><h4>Directly Authorised</h4><p>Full regulatory control. Network charges are redirected into backend AI for compliance and product sourcing — capabilities that supersede what networks provide.</p></div>
+    </div>
+    <h2>Why this is a powerful value driver</h2>
+    <ul class="hl">
+      <li><b>Margin expansion, self-funded.</b> The cost of becoming DA is absorbed by network fees that are no longer paid away — so it is funded from existing economics rather than added as new cost.</li>
+      <li><b>A compliance &amp; sourcing moat.</b> Direct authorisation unlocks investment in backend AI focused on compliance and product sourcing — proprietary capability that supersedes standard network provision.</li>
+      <li><b>Attracts customers and advisers.</b> Better compliance, better product sourcing and superior technology make the platform more compelling to both customers and the advisers the firm recruits.</li>
+      <li><b>Compounding advantage.</b> Owning the regulatory and sourcing stack strengthens every other engine — distribution, talent and recurring revenue.</li>
+    </ul></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">14</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">Roadmap &amp; Risk</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">Execution</div>
+    <h1>A clear, phased path — with risks actively managed</h1>
+    <div class="roadmap">
+      <div class="roadmap-phase"><div class="phase-tag">Phase 1 · Yrs 1–2</div><h4>Foundation</h4><ul>
+        <li>Launch as network AR</li><li>Deploy Susan Phase 1</li><li>First adviser cohort</li><li>Establish Academy</li><li>Build introducer network</li></ul></div>
+      <div class="roadmap-phase"><div class="phase-tag">Phase 2 · Yrs 3–4</div><h4>Operational scale</h4><ul>
+        <li>Academy standalone</li><li>First Sales Manager</li><li>Susan Phase 2 &amp; telephony</li><li>Positive profitability</li><li>Deepen integration</li></ul></div>
+      <div class="roadmap-phase"><div class="phase-tag">Phase 3 · Yr 5+</div><h4>Strategic growth</h4><ul>
+        <li>Academy across network</li><li>Enhanced AI</li><li>Technology licensing</li><li>Selective acquisitions</li><li>National platform</li></ul></div>
+    </div>
+    <h2>Risk management</h2>
+    <table class="memo"><thead><tr><th>Risk</th><th>Mitigation</th></tr></thead><tbody><tr><td>Adviser recruitment</td><td>Mortgage Academy creates a structured recruitment &amp; development pipeline</td></tr><tr><td>Regulatory change</td><td>Operate within the network's governance framework; adapt as requirements evolve</td></tr><tr><td>Technology delivery</td><td>Phased implementation with testing before wider deployment</td></tr><tr><td>Customer acquisition</td><td>Diversified lead generation across partnerships, digital and adviser-led BD</td></tr><tr><td>Scalability</td><td>Technology and automation reduce reliance on rising management overhead</td></tr></tbody></table></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">15</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">Live Platform · I</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">Live Platform — Not a Concept</div>
+    <h1>A comprehensive, operational platform today</h1>
+    <p class="lead">The full customer, introducer and adviser experience is already live in production — the same depth of functionality set out in detail in the memorandum, delivered end to end.</p>
+    <div class="feat-grid">
+      <div class="feat"><h4>Susan — AI digital colleague <span class="badge-live">Live</span></h4><ul>
+        <li>Spoken (voice) fact-find and typed chat alternative</li>
+        <li>Structured welcome &amp; data capture under human oversight</li>
+        <li>AI conversation summaries on the customer timeline</li>
+        <li>Progress updates &amp; customer prompts</li></ul></div>
+      <div class="feat"><h4>Customer portal &amp; hub <span class="badge-live">Live</span></h4><ul>
+        <li>Digital onboarding &amp; self-serve appointment booking</li>
+        <li>SMS + email confirmations; attend-only or full fact-find</li>
+        <li>View cases, update contact details &amp; address</li>
+        <li>Refer-a-friend with admin-configurable limits</li></ul></div>
+      <div class="feat"><h4>Introducer portal <span class="badge-live">Live</span></h4><ul>
+        <li>Shareable referral links with automatic attribution</li>
+        <li>Portal booking (email + SMS) and manual lead logging</li>
+        <li>Referral dashboard — stage, adviser, days at stage, last contact</li>
+        <li>Commission statement with payout dates; company code for teams</li></ul></div>
+      <div class="feat"><h4>Adviser workspace <span class="badge-live">Live</span></h4><ul>
+        <li>Tabbed customer profile — contact, notes &amp; history, fact-find, journey, CRM</li>
+        <li>Needs-attention highlights for call-backs &amp; ready-to-review</li>
+        <li>Journey milestones with automatic customer SMS</li>
+        <li>Personal commission statement</li></ul></div>
+    </div>
+    <h2>Integrated telephony <span class="badge-live">Live</span></h2>
+    <div class="feat-grid">
+      <div class="feat"><h4>Softphone</h4><ul>
+        <li>Outbound &amp; inbound calls in-app with call recording</li>
+        <li>Click-to-call from customer records</li></ul></div>
+      <div class="feat"><h4>AI call intelligence</h4><ul>
+        <li>Automatic call transcription &amp; conversation summaries</li>
+        <li>Voicemail capture and transcription on the timeline</li></ul></div>
+    </div></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">16</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Investment Pitch</div>
+      <div class="part">Live Platform · II</div>
+    </div>
+    <div class="memo-body pe-body"><div class="eyebrow">Owner, Finance &amp; Roadmap</div>
+    <h1>Enterprise-grade finance, controls and a clear roadmap</h1>
+    <div class="feat-grid">
+      <div class="feat"><h4>Commission &amp; finance <span class="badge-live">Live</span></h4><ul>
+        <li>Finance ledger enriched with customer, case ref, receiver &amp; reference</li>
+        <li>Commission management, audit history &amp; current arrangements</li>
+        <li>Previous-rate browse by date range and fee type</li>
+        <li>Excel &amp; PDF exports (finance, commission, audit, customers)</li></ul></div>
+      <div class="feat"><h4>Admin &amp; access control <span class="badge-live">Live</span></h4><ul>
+        <li>Admin hierarchy — owner, supervisor, general admin</li>
+        <li>Granular per-permission control across the platform</li>
+        <li>Admin invite flow and advisor-view impersonation</li>
+        <li>Manage advisers, introducers, RAF limits &amp; test accounts</li></ul></div>
+    </div>
+    <h2>Roadmap</h2>
+    <div class="feat-grid three">
+      <div class="feat soon"><h4>Document &amp; identity <span class="badge-soon">Soon</span></h4><ul>
+        <li>Document upload &amp; AI scanning</li>
+        <li>Integrated ID verification</li></ul></div>
+      <div class="feat soon"><h4>Data &amp; payments <span class="badge-soon">Soon</span></h4><ul>
+        <li>Open Banking integration</li>
+        <li>Payment links &amp; smarter document workflows</li></ul></div>
+      <div class="feat soon"><h4>Intelligence <span class="badge-soon">Soon</span></h4><ul>
+        <li>Network / DA system integration</li>
+        <li>Data warehouse &amp; BI dashboards</li></ul></div>
+    </div>
+    <div class="kpi-strip three">
+      <div class="kpi"><div class="k-big">End-to-end</div><div class="k-lbl">Customer &rarr; completion</div></div>
+      <div class="kpi"><div class="k-big">AI-native</div><div class="k-lbl">Susan + call intelligence</div></div>
+      <div class="kpi"><div class="k-big">Audit-ready</div><div class="k-lbl">Finance &amp; permissions</div></div>
+    </div>
+    <hr class="divider" />
+    <h2>Why partner now</h2>
+    <p>Mortgage Hub is seeking a strategic partner to help build one of the UK's most progressive, technology-enabled mortgage distribution platforms — a long-term relationship founded on shared values, aligned incentives and a common ambition.</p>
+    <p style="font-size:9px;font-weight:700;margin-top:3mm;">Peter Mabbott · Founder &amp; Managing Director</p></div>
+    <div class="page-footer">Private &amp; Confidential · Mortgage Hub</div>
+    <div class="page-num">17</div>
+  </div></body>
+</html>

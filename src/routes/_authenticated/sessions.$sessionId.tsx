@@ -27,7 +27,13 @@ import {
   amendPostedFee,
   FEE_TYPE_LABELS,
 } from "@/lib/finance.functions";
-import { canAmend, canView, canAmendHistory } from "@/lib/admin-access";
+import {
+  canAmend,
+  canView,
+  canAmendHistory,
+  canAmendIntroducer,
+  canRefreshIntroducerCommission,
+} from "@/lib/admin-access";
 import { SECTIONS } from "@/lib/interview-script";
 import { mergeKeyFacts, formatGBP as fmtGBP } from "@/lib/structured-answers";
 import {
@@ -50,6 +56,7 @@ import {
 } from "@/components/PostCompletionBooking";
 import { CustomerHubBookingDialog } from "@/components/CustomerHubBookingDialog";
 import { CrmContactCard } from "@/components/CrmContactCard";
+import { IntroducerContactBox } from "@/components/IntroducerContactBox";
 import { ReportExportBox } from "@/components/ReportExportBox";
 import { ReportTableScroll } from "@/components/ReportTableScroll";
 import { contactHistoryToSheet } from "@/lib/report-mappers";
@@ -222,6 +229,14 @@ function SessionDetail() {
           {isAdvisor && isCase && (
             <TabsContent value="crm" className="space-y-6 mt-4">
               <CrmContactCard sessionId={sessionId} customer={customer} clickToCall />
+              {customerId && (canAmendIntroducer(adminAccess) || canRefreshIntroducerCommission(adminAccess)) && (
+                <IntroducerContactBox
+                  customerId={customerId}
+                  sessionId={sessionId}
+                  canAmend={canAmendIntroducer(adminAccess)}
+                  canRefresh={canRefreshIntroducerCommission(adminAccess)}
+                />
+              )}
               {customerId && (
                 <Link to="/customers/$customerId" params={{ customerId }}>
                   <Button variant="outline" size="sm">Open customer record</Button>

@@ -125,13 +125,22 @@ export function customerReportToSheet(rows: OwnerCustomerExportRow[]): ExportShe
 }
 
 export function rateHistoryToSheet(
-  rows: Array<{ created_at: string; fee_type: string; pct_from: number | null; pct_to: number }>,
+  rows: Array<{
+    created_at: string;
+    fee_type: string;
+    pct_from: number | null;
+    pct_to: number;
+    role?: string | null;
+    user_name?: string | null;
+  }>,
 ): ExportSheet {
   return {
     name: "Rate history",
-    headers: ["When", "Fee type", "From %", "To %"],
+    headers: ["When", "Name", "Role", "Fee type", "From %", "To %"],
     rows: rows.map((h) => [
       format(new Date(h.created_at), "yyyy-MM-dd HH:mm"),
+      h.user_name ?? "",
+      h.role ?? "",
       FEE_TYPE_LABELS[h.fee_type as keyof typeof FEE_TYPE_LABELS] ?? h.fee_type,
       h.pct_from != null ? String(h.pct_from) : "new",
       String(h.pct_to),

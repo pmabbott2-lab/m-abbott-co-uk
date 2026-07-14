@@ -1,0 +1,1253 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8" />
+<title>Project Atlas — Confidential Investment Memorandum</title>
+<style>
+  :root {
+    --navy: #1a2238;
+    --navy-mid: #232c4c;
+    --navy-soft: #2b3658;
+    --accent: #c47e26;
+    --accent-light: #e09a3b;
+    --accent-soft: #f7ead2;
+    --cream: #faf9f6;
+    --ink: #1f2540;
+    --muted: #5c6478;
+    --line: #ddd8ce;
+    --white: #ffffff;
+    --live: #2d6a3e;
+    --soon: #8a6d1a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: "Helvetica Neue", Helvetica, Arial, "Segoe UI", sans-serif;
+    color: var(--ink); background: #ccc;
+    -webkit-font-smoothing: antialiased;
+  }
+  @page { size: A4; margin: 0; }
+  .page {
+    width: 210mm; min-height: 297mm; margin: 0 auto;
+    background: var(--white); position: relative; overflow: hidden;
+    display: flex; flex-direction: column;
+    page-break-after: always; break-after: page;
+  }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+  .page-num {
+    position: absolute; bottom: 7mm; right: 14mm;
+    font-size: 8px; color: var(--muted);
+  }
+  .page-footer {
+    position: absolute; bottom: 7mm; left: 14mm;
+    font-size: 7px; color: var(--muted); letter-spacing: 0.3px;
+  }
+
+  /* Cover */
+  .cover-page {
+    background: linear-gradient(165deg, var(--navy) 0%, var(--navy-mid) 55%, #2a3555 100%);
+    color: #fff; justify-content: space-between; padding: 0;
+  }
+  .cover-top { padding: 18mm 16mm 0; }
+  .cover-conf {
+    font-size: 8px; letter-spacing: 3px; text-transform: uppercase; font-weight: 600;
+    color: rgba(255,255,255,0.92); margin-bottom: 14mm;
+  }
+  .cover-title {
+    font-size: 11px; letter-spacing: 4px; text-transform: uppercase;
+    color: var(--accent-light); font-weight: 700; margin-bottom: 6mm;
+  }
+  .cover-project { font-size: 42px; font-weight: 800; line-height: 1.05; letter-spacing: -0.5px; }
+  .cover-sub { font-size: 16px; font-weight: 400; color: rgba(255,255,255,0.95); margin-top: 5mm; line-height: 1.45; max-width: 140mm; }
+  .cover-bottom {
+    padding: 10mm 16mm 16mm;
+    border-top: 1px solid rgba(255,255,255,0.22);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8mm;
+  }
+  .cover-bottom dt { font-size: 7.5px; letter-spacing: 2px; text-transform: uppercase; font-weight: 600; color: rgba(255,255,255,0.80); margin-bottom: 2px; }
+  .cover-bottom dd { font-size: 11px; font-weight: 700; color: #fff; margin: 0 0 6mm; }
+  .cover-accent-bar {
+    height: 4px; background: linear-gradient(90deg, var(--accent), var(--accent-light));
+  }
+
+  /* Header strip */
+  .memo-header {
+    background: var(--navy); color: #fff;
+    padding: 5mm 14mm 4.5mm;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 3px solid var(--accent);
+  }
+  .memo-header .brand { font-size: 9px; letter-spacing: 2.5px; text-transform: uppercase; font-weight: 700; color: rgba(255,255,255,0.7); }
+  .memo-header .part { font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent-light); }
+
+  /* Body */
+  .memo-body { padding: 7mm 14mm 12mm; flex: 1; }
+  .memo-body h1 { font-size: 20px; font-weight: 800; color: var(--navy); line-height: 1.15; margin-bottom: 4mm; }
+  .memo-body h2 {
+    font-size: 13px; font-weight: 800; color: var(--navy);
+    margin: 5mm 0 2.5mm; padding-bottom: 2px;
+    border-bottom: 2px solid var(--accent);
+  }
+  .memo-body h3 { font-size: 10.5px; font-weight: 700; color: var(--navy-soft); margin: 3.5mm 0 2mm; }
+  .memo-body p, .memo-body li { font-size: 9.2px; line-height: 1.58; color: var(--ink); }
+  .memo-body ul, .memo-body ol { margin: 2mm 0 3mm 14px; }
+  .memo-body li { margin-bottom: 1.5px; }
+  .memo-body .lead { font-size: 10px; color: var(--muted); margin-bottom: 3mm; line-height: 1.55; }
+  .memo-body .divider { border: none; border-top: 1px solid var(--line); margin: 4mm 0; }
+
+  /* Tables */
+  table.memo {
+    width: 100%; border-collapse: collapse; margin: 2.5mm 0 4mm; font-size: 8.5px;
+  }
+  table.memo th, table.memo td {
+    border: 1px solid var(--line); padding: 4px 7px; text-align: left; vertical-align: top;
+  }
+  table.memo th { background: var(--navy); color: #fff; font-weight: 700; }
+  table.memo tr:nth-child(even) td { background: var(--cream); }
+  table.memo .num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.memo .neg { color: #8b2020; }
+
+  /* Callouts */
+  .callout {
+    background: var(--accent-soft); border-left: 3px solid var(--accent);
+    padding: 7px 10px; border-radius: 0 6px 6px 0; margin: 3mm 0;
+  }
+  .callout p { font-size: 8.8px; margin: 0; }
+  .callout b { color: var(--navy); }
+  .callout.ai {
+    background: #eef4fb; border-left-color: var(--navy-mid);
+  }
+
+  /* TOC */
+  .toc { margin-top: 3mm; }
+  .toc-part { font-size: 8px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--accent); margin: 4mm 0 2mm; }
+  .toc-item {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 9px; padding: 3px 0; border-bottom: 1px dotted var(--line);
+  }
+  .toc-item span { color: var(--muted); font-size: 8.5px; }
+
+  /* Diagrams */
+  .diagram {
+    background: var(--cream); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; margin: 3mm 0 4mm;
+  }
+  .diagram-title { font-size: 8.5px; font-weight: 800; color: var(--navy); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+  .funnel { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .funnel-step {
+    background: var(--navy); color: #fff; text-align: center;
+    padding: 5px 10px; border-radius: 4px; font-size: 8px; font-weight: 600;
+    width: var(--w, 100%);
+  }
+  .funnel-step.accent { background: var(--accent); color: var(--navy); }
+  .funnel-step.soft { background: var(--navy-soft); }
+  .funnel-arrow { font-size: 10px; color: var(--muted); line-height: 1; }
+  .engines { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .engine {
+    background: #fff; border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px; border-top: 3px solid var(--accent);
+  }
+  .engine h4 { font-size: 9px; font-weight: 800; color: var(--navy); margin-bottom: 3px; }
+  .engine p, .engine li { font-size: 7.8px; color: var(--muted); line-height: 1.45; }
+  .engine ul { margin: 0; padding-left: 12px; }
+  .roadmap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .roadmap-phase {
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px;
+    background: #fff;
+  }
+  .roadmap-phase .phase-tag {
+    font-size: 7px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 3px;
+  }
+  .roadmap-phase h4 { font-size: 9px; font-weight: 800; color: var(--navy); margin-bottom: 3px; }
+  .roadmap-phase p, .roadmap-phase li { font-size: 7.8px; color: var(--muted); line-height: 1.4; }
+  .roadmap-phase ul { margin: 0; padding-left: 11px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
+  .three-col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+  .badge-live {
+    display: inline-block; font-size: 7px; font-weight: 700; letter-spacing: 0.8px;
+    text-transform: uppercase; background: #e6f4ea; color: var(--live);
+    padding: 1px 6px; border-radius: 999px; margin-left: 4px; vertical-align: middle;
+  }
+  .badge-soon {
+    display: inline-block; font-size: 7px; font-weight: 700; letter-spacing: 0.8px;
+    text-transform: uppercase; background: var(--accent-soft); color: var(--soon);
+    padding: 1px 6px; border-radius: 999px; margin-left: 4px; vertical-align: middle;
+  }
+  .appendix-cover {
+    flex: 1; display: flex; flex-direction: column; justify-content: center;
+    padding: 20mm 16mm; text-align: center; background: var(--cream);
+  }
+  .appendix-cover h1 { font-size: 26px; color: var(--navy); font-weight: 800; }
+  .appendix-cover p { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+  /* Appendix inherits manual table/callout styles */
+  
+  
+  :root {
+    --navy: #232c4c;
+    --navy-deep: #1a2238;
+    --primary: #2b3658;
+    --accent: #e09a3b;
+    --accent-deep: #c47e26;
+    --accent-soft: #f7ead2;
+    --cream: #fbfaf4;
+    --ink: #1f2540;
+    --muted: #6a7184;
+    --line: #e7e3d8;
+    --white: #ffffff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: "Helvetica Neue", Helvetica, Arial, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: #d9d7cf;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+  @page { size: A4; margin: 0; }
+  .page {
+    width: 210mm; min-height: 297mm; margin: 0 auto;
+    background: var(--cream); position: relative; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .header {
+    background: var(--navy); color: #fff;
+    padding: 8mm 12mm 7mm;
+    display: flex; align-items: center; justify-content: space-between;
+    position: relative;
+  }
+  .header::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-deep));
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand .mark {
+    width: 34px; height: 34px; border-radius: 50%;
+    background: linear-gradient(145deg, var(--accent), var(--accent-deep));
+    display: flex; align-items: center; justify-content: center;
+    color: var(--navy-deep); font-weight: 800; font-size: 17px;
+    box-shadow: inset 0 0 0 3px rgba(255,255,255,0.12);
+  }
+  .brand .name { font-size: 21px; font-weight: 700; letter-spacing: 0.2px; }
+  .header .tag {
+    font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+    color: rgba(255,255,255,0.7); text-align: right; line-height: 1.5;
+  }
+  .hero {
+    padding: 8mm 12mm 5mm;
+    display: grid; grid-template-columns: 1fr 44mm; gap: 8mm; align-items: center;
+  }
+  .hero.solo { grid-template-columns: 1fr; }
+  .eyebrow {
+    display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--accent-deep);
+    background: var(--accent-soft); padding: 4px 10px; border-radius: 999px; margin-bottom: 8px;
+  }
+  .hero h1 {
+    font-size: 26px; line-height: 1.12; letter-spacing: -0.4px;
+    color: var(--navy); font-weight: 800;
+  }
+  .hero h1.sm { font-size: 24px; }
+  .hero h1 .hl { color: var(--accent-deep); }
+  .hero p.lead {
+    margin-top: 8px; font-size: 11.5px; line-height: 1.5; color: var(--muted); max-width: 108mm;
+  }
+  .chips { margin-top: 9px; display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip {
+    font-size: 9.5px; font-weight: 600; color: var(--navy);
+    background: #fff; border: 1px solid var(--line);
+    padding: 4px 9px; border-radius: 999px;
+  }
+  .chip b { color: var(--accent-deep); }
+  .avatar-card {
+    background: #fff; border: 1px solid var(--line); border-radius: 16px;
+    padding: 9px; text-align: center;
+    box-shadow: 0 10px 24px rgba(35,44,76,0.10);
+  }
+  .avatar-card .photo {
+    width: 100%; aspect-ratio: 1 / 1; border-radius: 12px;
+    object-fit: cover; object-position: 50% 18%; display: block;
+  }
+  .avatar-card .cap {
+    margin-top: 7px; font-size: 9px; color: var(--muted); line-height: 1.4;
+  }
+  .avatar-card .cap b { color: var(--navy); }
+  .section { padding: 0 12mm; }
+  .section + .section { margin-top: 5mm; }
+  .section.tight + .section { margin-top: 4mm; }
+  .section-title {
+    font-size: 13px; font-weight: 800; color: var(--navy);
+    display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  }
+  .section-title.sm { font-size: 12px; margin-bottom: 5px; }
+  .section-title .bar {
+    width: 16px; height: 3px; border-radius: 2px; background: var(--accent);
+  }
+  .section-sub {
+    font-size: 9.5px; color: var(--muted); margin: -4px 0 6px 24px; line-height: 1.45;
+  }
+  .ways { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .way {
+    background: #fff; border: 1px solid var(--line); border-radius: 12px;
+    padding: 9px 10px;
+  }
+  .way .ico {
+    width: 26px; height: 26px; border-radius: 8px;
+    background: var(--navy); color: #fff;
+    display: flex; align-items: center; justify-content: center; margin-bottom: 6px;
+  }
+  .way .ico svg { width: 14px; height: 14px; }
+  .way h3 { font-size: 11px; color: var(--navy); font-weight: 700; }
+  .way p { font-size: 9px; line-height: 1.45; color: var(--muted); margin-top: 2px; }
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .step {
+    background: var(--navy); color: #fff; border-radius: 12px; padding: 9px 10px;
+  }
+  .step .num {
+    font-size: 20px; font-weight: 800; color: var(--accent); line-height: 1; margin-bottom: 4px;
+  }
+  .step h4 { font-size: 10.5px; font-weight: 700; }
+  .step p { font-size: 9px; line-height: 1.45; color: rgba(255,255,255,0.78); margin-top: 2px; }
+  .benefits { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .benefits.three { grid-template-columns: repeat(3, 1fr); }
+  .benefit {
+    background: #fff; border: 1px solid var(--line); border-radius: 11px;
+    padding: 8px 9px; display: flex; gap: 8px; align-items: flex-start;
+  }
+  .benefit .ico {
+    flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px;
+    background: var(--accent-soft); color: var(--accent-deep);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .benefit .ico.navy { background: var(--navy); color: #fff; }
+  .benefit .ico svg { width: 13px; height: 13px; }
+  .benefit h4 { font-size: 10.5px; color: var(--navy); font-weight: 700; }
+  .benefit p { font-size: 9px; line-height: 1.4; color: var(--muted); margin-top: 2px; }
+  .highlight {
+    margin: 4mm 12mm 0;
+    background: linear-gradient(120deg, var(--accent-soft), #fff);
+    border: 1px solid var(--accent); border-radius: 14px;
+    padding: 10px 14px; display: flex; align-items: center; gap: 12px;
+  }
+  .highlight .ico {
+    flex: 0 0 auto; width: 36px; height: 36px; border-radius: 10px;
+    background: var(--accent); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .highlight .ico svg { width: 20px; height: 20px; }
+  .highlight h3 { font-size: 12px; color: var(--navy); font-weight: 800; }
+  .highlight p { font-size: 9.5px; color: var(--primary); line-height: 1.45; margin-top: 2px; }
+  .pill-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+  .pill {
+    font-size: 8.5px; font-weight: 600; color: var(--navy);
+    background: #fff; border: 1px solid var(--line); padding: 3px 8px; border-radius: 999px;
+  }
+  .footer {
+    margin-top: auto; background: var(--navy-deep); color: #fff;
+    padding: 9mm 12mm 8mm; position: relative;
+  }
+  .footer::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent-deep), var(--accent));
+  }
+  .cta-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .cta-row h2 { font-size: 17px; font-weight: 800; line-height: 1.2; }
+  .cta-row h2 span { color: var(--accent); }
+  .cta-btn {
+    flex: 0 0 auto;
+    background: linear-gradient(145deg, var(--accent), var(--accent-deep));
+    color: var(--navy-deep); font-weight: 800; font-size: 11px;
+    padding: 10px 16px; border-radius: 10px; white-space: nowrap;
+  }
+  .contact {
+    margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.14);
+    display: flex; flex-wrap: wrap; gap: 5px 18px;
+    font-size: 9px; color: rgba(255,255,255,0.78);
+  }
+  .contact b { color: #fff; font-weight: 700; }
+  .roles { font-size: 8.5px; color: rgba(255,255,255,0.55); margin-top: 6px; line-height: 1.45; }
+  .coming-hero {
+    padding: 10mm 12mm 4mm; text-align: center;
+  }
+  .coming-hero h1 { font-size: 28px; color: var(--navy); font-weight: 800; line-height: 1.1; }
+  .coming-hero h1 .hl { color: var(--accent-deep); }
+  .coming-hero p { margin-top: 8px; font-size: 11px; color: var(--muted); line-height: 1.5; max-width: 150mm; margin-left: auto; margin-right: auto; }
+  .soon-badge {
+    display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--navy-deep);
+    background: linear-gradient(145deg, var(--accent), var(--accent-deep));
+    padding: 5px 14px; border-radius: 999px; margin-bottom: 10px;
+  }
+  .roadmap { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; padding: 0 12mm; }
+  .roadmap-item {
+    background: #fff; border: 1px dashed var(--accent); border-radius: 14px;
+    padding: 10px 11px; position: relative;
+  }
+  .roadmap-item .tag {
+    position: absolute; top: 8px; right: 8px;
+    font-size: 7px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--accent-deep); background: var(--accent-soft);
+    padding: 2px 7px; border-radius: 999px;
+  }
+  .roadmap-item .ico {
+    width: 30px; height: 30px; border-radius: 9px;
+    background: var(--navy); color: #fff;
+    display: flex; align-items: center; justify-content: center; margin-bottom: 7px;
+  }
+  .roadmap-item .ico svg { width: 16px; height: 16px; }
+  .roadmap-item h3 { font-size: 11.5px; color: var(--navy); font-weight: 800; padding-right: 42px; }
+  .roadmap-item p { font-size: 9px; line-height: 1.45; color: var(--muted); margin-top: 3px; }
+  .roadmap-wide { grid-column: 1 / -1; }
+
+  
+  
+  .cover {
+    flex: 1; display: flex; flex-direction: column; justify-content: center;
+    padding: 20mm 16mm; text-align: center;
+  }
+  .cover .mark-lg {
+    width: 56px; height: 56px; border-radius: 50%; margin: 0 auto 12px;
+    background: linear-gradient(145deg, var(--accent), var(--accent-deep));
+    display: flex; align-items: center; justify-content: center;
+    color: var(--navy-deep); font-weight: 800; font-size: 28px;
+    box-shadow: inset 0 0 0 4px rgba(255,255,255,0.12);
+  }
+  .cover h1 { font-size: 32px; color: var(--navy); font-weight: 800; line-height: 1.15; }
+  .cover .sub { margin-top: 10px; font-size: 14px; color: var(--muted); line-height: 1.5; }
+  .cover .meta { margin-top: 24px; font-size: 10px; color: var(--muted); }
+  .body { padding: 8mm 14mm 4mm; flex: 1; }
+  .body h2 {
+    font-size: 16px; color: var(--navy); font-weight: 800;
+    margin: 0 0 6px; padding-bottom: 4px; border-bottom: 2px solid var(--accent);
+  }
+  .body h3 { font-size: 11.5px; color: var(--navy); font-weight: 700; margin: 8px 0 4px; }
+  .body p, .body li { font-size: 9.5px; line-height: 1.55; color: var(--primary); }
+  .body ul, .body ol { margin: 4px 0 8px 16px; }
+  .body li { margin-bottom: 3px; }
+  .body .lead { font-size: 10.5px; color: var(--muted); margin-bottom: 8px; }
+  .toc { columns: 2; column-gap: 10mm; margin-top: 6px; }
+  .toc-item {
+    break-inside: avoid; font-size: 9.5px; padding: 4px 0;
+    border-bottom: 1px dotted var(--line); display: flex; justify-content: space-between;
+  }
+  .toc-item span { color: var(--muted); }
+  .callout {
+    background: var(--accent-soft); border-left: 3px solid var(--accent);
+    padding: 8px 10px; border-radius: 0 8px 8px 0; margin: 8px 0;
+  }
+  .callout p { font-size: 9px; color: var(--primary); margin: 0; }
+  .callout b { color: var(--navy); }
+  table.data {
+    width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 9px;
+  }
+  table.data th, table.data td {
+    border: 1px solid var(--line); padding: 5px 7px; text-align: left; vertical-align: top;
+  }
+  table.data th { background: var(--navy); color: #fff; font-weight: 700; }
+  table.data tr:nth-child(even) td { background: #fff; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 8mm; }
+  .role-badge {
+    display: inline-block; font-size: 8px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--accent-deep);
+    background: var(--accent-soft); padding: 2px 8px; border-radius: 999px; margin-bottom: 4px;
+  }
+  .pack .page { page-break-after: always; break-after: page; }
+  .pack .page:last-child { page-break-after: auto; break-after: auto; }
+
+  .memo-body table.data { width:100%; border-collapse:collapse; margin:2.5mm 0 4mm; font-size:8.5px; }
+  .memo-body table.data th, .memo-body table.data td { border:1px solid var(--line); padding:4px 7px; }
+  .memo-body table.data th { background:var(--navy); color:#fff; }
+  .memo-body .role-badge { display:inline-block; font-size:7px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:var(--accent); background:var(--accent-soft); padding:2px 8px; border-radius:999px; margin-bottom:4px; }
+  .memo-body .callout { background:var(--accent-soft); border-left:3px solid var(--accent); padding:7px 10px; border-radius:0 6px 6px 0; margin:3mm 0; }
+  .memo-body h2 { font-size:13px; font-weight:800; color:var(--navy); margin:4mm 0 2mm; padding-bottom:2px; border-bottom:2px solid var(--accent); }
+  .memo-body h3 { font-size:10.5px; font-weight:700; color:var(--navy-soft); margin:3mm 0 2mm; }
+  .memo-body .lead { font-size:10px; color:var(--muted); margin-bottom:3mm; }
+  .memo-body p, .memo-body li { font-size:9px; line-height:1.55; }
+  /* Reassert cover background AFTER manual CSS so FLYER_CSS's base .page (cream) can't override it */
+  .page.cover-page { background: linear-gradient(165deg, var(--navy) 0%, var(--navy-mid) 55%, #2a3555 100%) !important; color:#fff !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+</style>
+</head>
+<body class="pack"><div class="page cover-page" style="background: linear-gradient(165deg, var(--navy) 0%, var(--navy-mid) 55%, #2a3555 100%); color:#fff; -webkit-print-color-adjust: exact; print-color-adjust: exact;">
+    <div class="cover-accent-bar"></div>
+    <div class="cover-top">
+      <div class="cover-conf">Strictly Private &amp; Confidential</div>
+      <div class="cover-title">Confidential Investment Memorandum</div>
+      <div class="cover-project">Project Atlas</div>
+      <p class="cover-sub">Strategic Development &amp; Equity Partnership Proposal</p>
+    </div>
+    <div class="cover-bottom">
+      <div>
+        <dl>
+          <dt>Prepared for</dt><dd>HLP</dd>
+          <dt>Version</dt><dd>0.1 — Founder Draft</dd>
+        </dl>
+      </div>
+      <div>
+        <dl>
+          <dt>Founder</dt><dd>Peter Mabbott</dd>
+          <dt>Date</dt><dd>July 2026</dd>
+        </dl>
+      </div>
+    </div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Notice</div>
+    </div>
+    <div class="memo-body"><h1>Confidentiality Notice</h1>
+    <p class="lead">This Investment Memorandum has been prepared solely for the purpose of facilitating discussions with HLP regarding a potential strategic development partnership and equity investment.</p>
+    <p>The information contained within this document is commercially sensitive and confidential. It should not be copied, distributed or disclosed to any third party without the prior written consent of the author.</p>
+    <p>The financial projections, strategic plans and operational assumptions contained within this memorandum are management forecasts prepared using reasonable commercial assumptions and are intended to illustrate the proposed growth strategy. They should not be interpreted as guarantees of future performance.</p>
+    <hr class="divider" />
+    <p>Throughout this document the names <b>Mortgage Hub</b>, <b>Mortgage Academy</b> and <b>Mortgage Hub Group</b> are used as temporary working titles only. The intended customer-facing brands remain subject to intellectual property protection and trademark registration. The investment proposition described within this document is independent of the final branding.</p>
+    <div class="callout ai"><p><b>Technology philosophy:</b> Technology within Mortgage Hub is designed to augment professional advice, not replace it. Any future expansion of AI capability will be implemented in line with applicable regulation, customer expectations and appropriate human oversight.</p></div></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">ii</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Contents</div>
+    </div>
+    <div class="memo-body"><h1>Contents</h1>
+    <div class="toc">
+      <div class="toc-part">Part 1 — Strategic Overview</div>
+      <div class="toc-item"><span>Executive Summary</span><span>1</span></div>
+      <div class="toc-item"><span>A Different Approach to Mortgage Advice</span><span>1</span></div>
+      <div class="toc-item"><span>Artificial Intelligence &amp; Technology Strategy</span><span>2</span></div>
+      <div class="toc-item"><span>Strategic Partnership with HLP</span><span>3</span></div>
+      <div class="toc-item"><span>Founder</span><span>3</span></div>
+      <div class="toc-part">Part 2 — Operating Model</div>
+      <div class="toc-item"><span>The Three Engines of Growth</span><span>4</span></div>
+      <div class="toc-item"><span>Adviser &amp; Customer Proposition</span><span>5</span></div>
+      <div class="toc-item"><span>Susan — AI Digital Colleague</span><span>5</span></div>
+      <div class="toc-item"><span>Mortgage Academy</span><span>6</span></div>
+      <div class="toc-item"><span>Integration with HLP</span><span>6</span></div>
+      <div class="toc-part">Part 3 — Commercial Strategy</div>
+      <div class="toc-item"><span>Financial Strategy &amp; Forecasts</span><span>7</span></div>
+      <div class="toc-item"><span>Adviser Projected Income</span><span>9</span></div>
+      <div class="toc-item"><span>Strategic Partnerships &amp; Customer Acquisition</span><span>10</span></div>
+      <div class="toc-item"><span>Recurring Revenue &amp; Enterprise Value</span><span>11</span></div>
+      <div class="toc-item"><span>Funding Requirement &amp; Use of Funds</span><span>12</span></div>
+      <div class="toc-item"><span>Value Creation Plan</span><span>12</span></div>
+      <div class="toc-part">Part 4 — Strategic Roadmap</div>
+      <div class="toc-item"><span>Development Phases</span><span>13</span></div>
+      <div class="toc-item"><span>Risk Management</span><span>14</span></div>
+      <div class="toc-item"><span>Investment Proposition &amp; Conclusion</span><span>14</span></div>
+      <div class="toc-part">Platform</div>
+      <div class="toc-item"><span>Live Platform Capabilities</span><span>15</span></div>
+      <div class="toc-part">Appendix</div>
+      <div class="toc-item"><span>Appendix A — Mortgage Hub User Guide</span><span>A-1</span></div>
+    </div></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">iii</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Part 1 · Overview</div>
+    </div>
+    <div class="memo-body"><h1>Executive Summary</h1>
+      <p class="lead">Building the Next Generation Mortgage Distribution Platform</p>
+      <p>Mortgage Hub has been established to create a modern, technology-enabled mortgage distribution platform designed around adviser productivity, customer experience and sustainable long-term growth.</p>
+      <p>The proposition combines three complementary capabilities:</p>
+      <ul>
+        <li>A scalable self-employed mortgage and protection business.</li>
+        <li><b>Mortgage Academy</b>, providing structured adviser recruitment, development and leadership capability.</li>
+        <li>A proprietary technology platform integrating artificial intelligence, workflow automation and digital customer engagement.</li>
+      </ul>
+      <p>Unlike many traditional mortgage businesses, Mortgage Hub has been designed from inception as an <b>operating platform</b> rather than simply another brokerage. Technology, people and process have been integrated to improve adviser productivity, reduce administration and create a business capable of significant scale without proportional increases in management overhead.</p>
+      <p>The initial operating model has been intentionally structured to operate as an <b>Appointed Representative within the HLP network</b>, leveraging HLP's established compliance framework and governance infrastructure during the early stages of growth.</p>
+      <p>Combining new mortgage income, a compounding renewal-income portfolio and Mortgage Academy, management projects total EBITDA of approximately <b>£700,000 by Year 5</b>, rising to approximately <b>£2.3 million by Year 10</b> as the recurring-revenue portfolio matures and operating leverage increases. <span style="font-size:8px;color:var(--muted);">(Year 5–10 figures are management projections extending the base forecast; renewal figures are drawn directly from the recurring-revenue model.)</span></p>
+      <hr class="divider" />
+      <h2>A Different Approach to Mortgage Advice</h2>
+      <p>The mortgage advice market is evolving rapidly. Customers increasingly expect digital engagement, faster communication and greater transparency while continuing to value trusted professional advice for one of the most important financial decisions they will make.</p>
+      <p>At the same time, advisers face growing administrative demands, fragmented technology and increasing regulatory expectations that reduce the time available to advise customers.</p>
+      <p>Mortgage Hub has been designed to address these challenges by combining experienced advisers with intelligent technology, structured development and operational excellence. <b>The objective is not to replace advisers with technology — it is to enable advisers to spend more time advising customers</b> by removing unnecessary administrative activity.</p>
+      <div class="callout"><p><b>Strategic intent:</b> Mortgage Hub is not seeking to change HLP — it is seeking to become an innovation partner that strengthens HLP's future capability.</p></div></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">1</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Part 1 · Technology</div>
+    </div>
+    <div class="memo-body"><h1>Artificial Intelligence &amp; Technology Strategy</h1>
+      <p class="lead">A key differentiator within the Mortgage Hub proposition is <b>Susan</b>, an AI-powered digital colleague designed to support customers and advisers throughout the mortgage journey.</p>
+      <p>Susan initially operates as an intelligent administrative assistant, undertaking activities that traditionally consume significant adviser time:</p>
+      <ul>
+        <li>Welcoming new customers and conducting the initial fact-find (voice or typed chat).</li>
+        <li>Gathering customer information and scheduling appointments.</li>
+        <li>Responding to routine customer enquiries and providing application progress updates.</li>
+        <li>Integrated telephony with call recording, transcription and AI summaries <span class="badge-live">Live</span></li>
+      </ul>
+      <div class="diagram"><div class="diagram-title">Susan — Capability Roadmap</div>
+  <div class="roadmap">
+    <div class="roadmap-phase"><div class="phase-tag">Phase 1 · Live</div><h4>Administrative colleague</h4><ul>
+      <li>Welcome &amp; fact-find</li><li>Voice &amp; typed chat</li><li>Appointment booking</li><li>SMS confirmations</li><li>Progress updates</li></ul></div>
+    <div class="roadmap-phase"><div class="phase-tag">Phase 2 · In development</div><h4>Adviser support</h4><ul>
+      <li>Integrated telephony</li><li>Call transcription &amp; AI summary</li><li>Document intelligence</li><li>Workflow management</li><li>Case preparation</li></ul></div>
+    <div class="roadmap-phase"><div class="phase-tag">Future vision</div><h4>Strategic capability</h4><ul>
+      <li>Open Banking integration</li><li>ID verification</li><li>Affordability pre-assessment</li><li>Payment links</li><li>Quality assurance</li></ul></div>
+  </div></div>
+      <h2>Technology Architecture</h2>
+      <p>The platform has been built as a single operating architecture integrating the following capabilities:</p>
+      <table class="memo"><thead><tr><th>Capability</th><th>Status</th><th>Description</th></tr></thead><tbody><tr><td>Customer Relationship Management</td><td><span class="badge-live">Live</span></td><td>Tabbed customer profiles, contact sync, journey milestones, audit timeline</td></tr><tr><td>Customer Portal</td><td><span class="badge-live">Live</span></td><td>Digital onboarding, fact-find, booking, hub and refer-a-friend</td></tr><tr><td>Susan AI</td><td><span class="badge-live">Live</span></td><td>Voice &amp; typed fact-find, AI summaries, administrative engagement</td></tr><tr><td>Introducer Portal</td><td><span class="badge-live">Live</span></td><td>Referral links, portal booking, commission tracking, journey visibility</td></tr><tr><td>Workflow Automation</td><td><span class="badge-live">Live</span></td><td>SMS/email confirmations, milestone notifications, needs-attention alerts</td></tr><tr><td>Telephony Integration</td><td><span class="badge-live">Live</span></td><td>Browser softphone, recording, transcription, voicemail</td></tr><tr><td>Commission &amp; Finance</td><td><span class="badge-live">Live</span></td><td>Fee ledger, commission mgmt, audit history, Excel/PDF exports</td></tr><tr><td>Admin &amp; Permissions</td><td><span class="badge-live">Live</span></td><td>Owner/supervisor/general hierarchy, granular permissions, admin invites</td></tr><tr><td>Open Banking</td><td><span class="badge-soon">Roadmap</span></td><td>Automated income and affordability data collection</td></tr><tr><td>Identity Verification</td><td><span class="badge-soon">Roadmap</span></td><td>Built-in digital ID checks linked to journey milestones</td></tr><tr><td>Document Intelligence</td><td><span class="badge-soon">Roadmap</span></td><td>AI scanning of payslips, bank statements and uploads</td></tr><tr><td>Payment Links</td><td><span class="badge-soon">Roadmap</span></td><td>Secure online fee collection tracked against cases</td></tr><tr><td>HLP System Integration</td><td><span class="badge-soon">Planned</span></td><td>Aligned case coding, reporting structures and case transfer</td></tr><tr><td>Data Warehouse &amp; BI</td><td><span class="badge-soon">Roadmap</span></td><td>Management information, performance dashboards, KPI scorecard</td></tr></tbody></table></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">2</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Part 1 · Partnership</div>
+    </div>
+    <div class="memo-body"><h1>Strategic Partnership with HLP</h1>
+      <p class="lead">This proposal is not simply seeking a network appointment. It is an invitation for HLP to become a <b>strategic development partner and equity investor</b> in a business designed to create long-term enterprise value.</p>
+      <p>Mortgage Hub has been intentionally designed to complement HLP's existing strengths rather than replicate them. The technology platform will integrate with HLP's operational environment through aligned case coding, compatible reporting structures and consistent financial data architecture.</p>
+      <h2>Phased Governance Model</h2>
+      <div class="diagram"><div class="diagram-title">Governance Maturity</div>
+  <div class="roadmap">
+    <div class="roadmap-phase"><div class="phase-tag">Phase 1</div><h4>Launch</h4><p>Founder-led · HLP supervision · Technology build · Recruitment</p></div>
+    <div class="roadmap-phase"><div class="phase-tag">Phase 2 · ~10 advisers</div><h4>Enhanced capability</h4><p>Shared supervisory responsibilities · Formal management reporting</p></div>
+    <div class="roadmap-phase"><div class="phase-tag">Phase 3 · 25 advisers</div><h4>Operational maturity</h4><p>Sales Manager · Structured coaching · Leadership development</p></div>
+  </div></div>
+      <h2>Responsibility Separation</h2>
+      <div class="two-col">
+        <div>
+          <h3>Mortgage Hub</h3>
+          <ul>
+            <li>Recruitment &amp; customer acquisition</li>
+            <li>Technology &amp; marketing</li>
+            <li>Adviser productivity &amp; Academy</li>
+            <li>Commercial performance &amp; customer experience</li>
+          </ul>
+        </div>
+        <div>
+          <h3>HLP</h3>
+          <ul>
+            <li>Regulatory oversight &amp; compliance supervision</li>
+            <li>Governance &amp; approved advice framework</li>
+            <li>Network standards &amp; regulatory assurance</li>
+          </ul>
+        </div>
+      </div>
+      <hr class="divider" />
+      <h1>Founder</h1>
+      <h2>Peter Mabbott — Founder &amp; Managing Director</h2>
+      <p>Peter Mabbott brings more than <b>28 years' financial services experience</b> spanning retail banking, mortgage distribution, intermediary services and executive leadership.</p>
+      <p>Having held senior leadership positions within one of the UK's largest banking groups and one of the UK's largest mortgage distribution businesses, Peter has built extensive expertise in commercial leadership, business transformation, adviser development, technology innovation and operational excellence.</p>
+      <p>Mortgage Hub represents the culmination of this experience, bringing together technology, adviser development and scalable operating practices to create a next-generation mortgage distribution platform.</p></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">3</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Part 2 · Operating Model</div>
+    </div>
+    <div class="memo-body"><h1>The Mortgage Hub Operating Model</h1>
+      <p class="lead">A business designed for scale — maximising the time advisers spend advising customers while technology undertakes administrative activity wherever possible.</p>
+      <div class="diagram"><div class="diagram-title">The Three Engines of Growth</div>
+  <div class="engines">
+    <div class="engine"><h4>Engine One — Distribution</h4><p>The regulated mortgage &amp; protection business.</p><ul>
+      <li>Customer acquisition</li><li>Introducer relationships</li><li>Adviser productivity</li><li>Commercial growth</li></ul></div>
+    <div class="engine"><h4>Engine Two — Talent</h4><p>Mortgage Academy — the long-term talent engine.</p><ul>
+      <li>Recruitment &amp; CAS prep</li><li>Leadership development</li><li>CPD &amp; coaching</li><li>HLP ecosystem pipeline</li></ul></div>
+    <div class="engine"><h4>Engine Three — Technology</h4><p>Proprietary AI-enabled operating platform.</p><ul>
+      <li>Susan AI</li><li>CRM &amp; customer portal</li><li>Telephony &amp; automation</li><li>Business intelligence</li></ul></div>
+  </div></div>
+      <h2>Business Structure</h2>
+      <p>The initial structure is intentionally lean:</p>
+      <div class="diagram"><div class="diagram-title">Organisational Structure</div><div class="funnel"><div class="funnel-step accent" style="--w:55%">Managing Director</div><div class="funnel-arrow">↓</div><div class="funnel-step " style="--w:65%">Mortgage Academy</div><div class="funnel-arrow">↓</div><div class="funnel-step " style="--w:80%">Self-employed Advisers</div><div class="funnel-arrow">↓</div><div class="funnel-step " style="--w:90%">Technology Platform</div><div class="funnel-arrow">↓</div><div class="funnel-step " style="--w:100%">HLP Regulatory Framework</div></div></div>
+      <p>Operational support functions will only be introduced as adviser numbers justify additional investment, maximising operational leverage during the early stages of growth.</p></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">4</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Part 2 · Propositions</div>
+    </div>
+    <div class="memo-body"><h1>Adviser &amp; Customer Proposition</h1>
+      <div class="two-col">
+        <div>
+          <h2>The Adviser Proposition</h2>
+          <p>Designed for ambitious self-employed advisers who want to build successful long-term businesses:</p>
+          <ul>
+            <li>Competitive commercial arrangements</li>
+            <li>Modern technology &amp; AI-enabled administration</li>
+            <li>Structured coaching &amp; Mortgage Academy</li>
+            <li>Digital customer engagement</li>
+            <li>Clear career progression &amp; leadership opportunities</li>
+          </ul>
+        </div>
+        <div>
+          <h2>The Customer Proposition</h2>
+          <p>Digital convenience without sacrificing professional advice:</p>
+          <ul>
+            <li>Digital onboarding &amp; AI-supported engagement</li>
+            <li>Voice or typed fact-find with Susan</li>
+            <li>Fast document collection &amp; transparent communication</li>
+            <li>Human advisers throughout the advice journey</li>
+            <li>Secure customer portal &amp; progress updates</li>
+          </ul>
+        </div>
+      </div>
+      <h2>Adviser Development Journey</h2>
+      <div class="diagram"><div class="diagram-title">Adviser Journey</div><div class="funnel"><div class="funnel-step soft" style="--w:100%">Stage 1 — Recruitment · Business planning · Onboarding · Compliance</div><div class="funnel-arrow">↓</div><div class="funnel-step soft" style="--w:85%">Stage 2 — Supported launch · Customer acquisition · Coaching</div><div class="funnel-arrow">↓</div><div class="funnel-step accent" style="--w:70%">Stage 3 — High performer · Mentoring · Leadership · Academy</div></div></div>
+      <hr class="divider" />
+      <h1>Susan — AI Digital Colleague</h1>
+      <p>Susan has not been developed to provide regulated mortgage advice. She improves customer experience and adviser productivity by undertaking structured administrative activities under appropriate human oversight.</p>
+      <div class="diagram"><div class="diagram-title">Susan — Capability Roadmap</div>
+  <div class="roadmap">
+    <div class="roadmap-phase"><div class="phase-tag">Phase 1 · Live</div><h4>Administrative colleague</h4><ul>
+      <li>Welcome &amp; fact-find</li><li>Voice &amp; typed chat</li><li>Appointment booking</li><li>SMS confirmations</li><li>Progress updates</li></ul></div>
+    <div class="roadmap-phase"><div class="phase-tag">Phase 2 · In development</div><h4>Adviser support</h4><ul>
+      <li>Integrated telephony</li><li>Call transcription &amp; AI summary</li><li>Document intelligence</li><li>Workflow management</li><li>Case preparation</li></ul></div>
+    <div class="roadmap-phase"><div class="phase-tag">Future vision</div><h4>Strategic capability</h4><ul>
+      <li>Open Banking integration</li><li>ID verification</li><li>Affordability pre-assessment</li><li>Payment links</li><li>Quality assurance</li></ul></div>
+  </div></div></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">5</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Part 2 · Academy & Integration</div>
+    </div>
+    <div class="memo-body"><h1>Mortgage Academy</h1>
+      <p class="lead">The long-term talent engine supporting both Mortgage Hub and, over time, the wider HLP ecosystem.</p>
+      <p>Unlike traditional training functions, Mortgage Academy combines technical knowledge with practical business development, technology adoption and commercial capability:</p>
+      <ul>
+        <li>Adviser recruitment &amp; structured onboarding</li>
+        <li>Competent Adviser Status preparation</li>
+        <li>Sales excellence &amp; customer relationship management</li>
+        <li>Leadership development &amp; AI adoption</li>
+        <li>Business growth coaching &amp; HLP platform training</li>
+      </ul>
+      <p>As careers develop, advisers may continue growing within Mortgage Hub, become senior advisers, move into coaching, join leadership roles, or progress into wider opportunities within HLP.</p>
+      <hr class="divider" />
+      <h1>Integration with HLP</h1>
+      <p>Mortgage Hub has been designed from inception to complement HLP rather than operate independently. The technology platform will align with HLP's operational environment through:</p>
+      <ul>
+        <li>Standardised case coding &amp; automated case transfer</li>
+        <li>Common financial reporting structures &amp; reconciliation</li>
+        <li>Shared compliance data &amp; management reporting</li>
+        <li>Performance dashboards &amp; operational insight</li>
+      </ul>
+      <h2>Value Created for HLP</h2>
+      <table class="memo"><thead><tr><th>Dimension</th><th>Strategic Value</th></tr></thead><tbody><tr><td>Distribution</td><td>A scalable, technology-enabled advice business capable of sustainable growth</td></tr><tr><td>Talent</td><td>Structured adviser recruitment and development supporting the HLP ecosystem</td></tr><tr><td>Technology</td><td>A modern AI-enabled operating platform creating wider innovation opportunities</td></tr><tr><td>Enterprise Value</td><td>Participation in long-term shareholder value through strategic equity investment</td></tr></tbody></table></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">6</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Part 3 · Financials</div>
+    </div>
+    <div class="memo-body"><h1>Commercial Strategy &amp; Financial Proposition</h1>
+      <p class="lead">A scalable, technology-enabled operating platform capable of delivering long-term shareholder value while maintaining excellent customer outcomes.</p>
+      <p>All revenue shown represents <b>new net income received from the network (HLP)</b>, after the network has deducted applicable charges and fees. These forecasts reflect <b>new mortgage income only</b> and exclude renewal / recurring income, which is shown separately in the Recurring Revenue section to avoid double-counting. The business is expected to operate at a planned loss during the initial development phase while investment is made in technology, recruitment, Mortgage Academy and organisational capability.</p>
+      <h2>New Mortgage Income — Revenue Assumptions</h2>
+      <p>Each fully trading adviser is expected to complete approximately <b>60 customer acquisitions annually</b>, producing average annual <b>new mortgage income</b> (net from the network, HLP) of:</p>
+      <table class="memo"><thead><tr><th>Revenue Source</th><th class="num">Annual New Income</th></tr></thead><tbody><tr><td>Procuration Fees</td><td class="num">£33,000</td></tr><tr><td>Broker Fees</td><td class="num">£8,000</td></tr><tr><td>Protection & General Insurance</td><td class="num">£19,000</td></tr><tr><td>Total New Mortgage Income</td><td class="num">£60,000</td></tr></tbody></table>
+      <h2>Adviser Commercial Model</h2>
+      <table class="memo"><thead><tr><th>Commercial Arrangement</th><th>Typical Range</th></tr></thead><tbody><tr><td>Adviser Commission</td><td>40–60%</td></tr><tr><td>Introducer Commission</td><td>10–25%</td></tr><tr><td>Maximum Combined Pay-away</td><td>85%</td></tr><tr><td>Technology & Business Services</td><td>£150 per month</td></tr></tbody></table>
+      <h2>Growth Assumptions</h2>
+      <table class="memo"><thead><tr><th>Year</th><th>Founder</th><th>Trading Advisers</th><th>Onboarding</th><th>Academy</th></tr></thead><tbody><tr><td>Year 1</td><td>Trading</td><td>1</td><td>5</td><td>Internal</td></tr><tr><td>Year 2</td><td>Trading</td><td>8</td><td>5</td><td>Internal</td></tr><tr><td>Year 3</td><td>Strategic Leadership</td><td>20</td><td>10</td><td>Standalone</td></tr><tr><td>Year 4</td><td>Strategic Leadership</td><td>35</td><td>10</td><td>Standalone</td></tr></tbody></table></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">7</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Part 3 · Forecast</div>
+    </div>
+    <div class="memo-body"><h1>Management Forecast</h1>
+      <h2>Mortgage Hub</h2>
+      <p class="lead">Figures below reflect <b>new mortgage income only</b> (net from the network, HLP) and exclude renewal / recurring income, which is forecast separately in the Recurring Revenue section.</p>
+      <table class="memo"><thead><tr><th></th><th class="num">Year 1</th><th class="num">Year 2</th><th class="num">Year 3</th><th class="num">Year 4</th></tr></thead><tbody><tr><td>Revenue (new mortgage income, net from network HLP)</td><td class="num">£60,000</td><td class="num">£480,000</td><td class="num">£1,200,000</td><td class="num">£2,100,000</td></tr><tr><td>Adviser Commission</td><td class="num neg">(£30,000)</td><td class="num neg">(£240,000)</td><td class="num neg">(£600,000)</td><td class="num neg">(£1,050,000)</td></tr><tr><td>Introducer Commission</td><td class="num">—</td><td class="num neg">(£96,000)</td><td class="num neg">(£240,000)</td><td class="num neg">(£400,000)</td></tr><tr><td>Gross Profit</td><td class="num">£30,000</td><td class="num">£144,000</td><td class="num">£360,000</td><td class="num">£650,000</td></tr><tr><td>Salaries</td><td class="num neg">(£140,000)</td><td class="num neg">(£160,000)</td><td class="num neg">(£110,000)</td><td class="num neg">(£200,000)</td></tr><tr><td>Training Investment</td><td class="num">—</td><td class="num">—</td><td class="num neg">(£40,000)</td><td class="num neg">(£50,000)</td></tr><tr><td>EBITDAR</td><td class="num neg">(£110,000)</td><td class="num neg">(£16,000)</td><td class="num">£210,000</td><td class="num">£400,000</td></tr></tbody></table>
+      <h2>Mortgage Academy</h2>
+      <table class="memo"><thead><tr><th></th><th class="num">Year 3</th><th class="num">Year 4</th></tr></thead><tbody><tr><td>Revenue</td><td class="num">£104,000</td><td class="num">£200,000</td></tr><tr><td>Salaries</td><td class="num neg">(£50,000)</td><td class="num neg">(£90,000)</td></tr><tr><td>Operating Costs</td><td class="num neg">(£20,000)</td><td class="num neg">(£40,000)</td></tr><tr><td>EBITDAR</td><td class="num">£34,000</td><td class="num">£70,000</td></tr></tbody></table>
+      <h2>Organisational Growth</h2>
+      <table class="memo"><thead><tr><th>Stage</th><th>Structure</th></tr></thead><tbody><tr><td>Launch</td><td>Founder, Trainer, Technology Platform</td></tr><tr><td>8 advisers</td><td>Lean central team</td></tr><tr><td>20 advisers</td><td>Mortgage Academy operating independently</td></tr><tr><td>25 advisers</td><td>First Sales Manager</td></tr><tr><td>35 advisers</td><td>Sales Manager and Administrator</td></tr><tr><td>£2m+ turnover</td><td>Business Development Manager</td></tr><tr><td>Every +25 advisers</td><td>Additional Sales Manager</td></tr></tbody></table></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">8</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Part 3 · Adviser Income</div>
+    </div>
+    <div class="memo-body"><h1>Adviser Projected Income</h1>
+      <p class="lead">An illustrative earnings journey for a single adviser — showing how rising case sizes, growing customer acquisition and the emergence of renewal income build a compounding personal income stream.</p>
+      <p>The illustration assumes the standard commercial split of <b>50% to the adviser</b> and a <b>20% introducer share</b>. Of the annual acquisitions, <b>30 are self-introduced</b> (the adviser's own customers, with no external introducer) — so on those cases the 20% is <b>not paid away and is retained by the adviser</b>, on top of their 50%. The external introducer payment therefore applies only to genuinely introducer-sourced customers. Renewal commission is the adviser's 50% share of £400 renewal income on retained customers.</p>
+      <table class="memo"><thead><tr><th>Year</th><th class="num">Case size</th><th class="num">Acq.</th><th class="num">Self-intro</th><th class="num">Adviser 50%</th><th class="num">Retained 20% (self-intro)</th><th class="num">Renewal comm.</th><th class="num">Total adviser income</th><th class="num">External introducer paid</th></tr></thead><tbody><tr><td>Year 1</td><td class="num">£1,000</td><td class="num">60</td><td class="num">30</td><td class="num">£30,000</td><td class="num">£6,000</td><td class="num">—</td><td class="num">£36,000</td><td class="num">£6,000</td></tr><tr><td>Year 2</td><td class="num">£1,200</td><td class="num">70</td><td class="num">30</td><td class="num">£42,000</td><td class="num">£7,200</td><td class="num">—</td><td class="num">£49,200</td><td class="num">£9,600</td></tr><tr><td>Year 3</td><td class="num">£1,500</td><td class="num">80</td><td class="num">30</td><td class="num">£60,000</td><td class="num">£9,000</td><td class="num">£4,000</td><td class="num">£73,000</td><td class="num">£15,000</td></tr></tbody></table>
+      <p style="font-size:8px;color:var(--muted);">Total adviser income = Adviser 50% commission + retained 20% on self-introduced customers + renewal commission. The final column is paid to external introducers on introducer-sourced customers only and is not deducted from adviser income.</p>
+      <h2>A growth story, not a snapshot</h2>
+      <p>The value of the Mortgage Hub model to an adviser is not a single year's earnings — it is the trajectory:</p>
+      <ul>
+        <li><b>Self-introduced economics.</b> When an adviser brings their own customer, there is no external introducer to pay — so the adviser keeps their 50% <i>and</i> the 20% introducer share. For an adviser self-introducing 30 customers a year this adds <b>£6,000–£9,000</b> of retained income annually.</li>
+        <li><b>Rising case values.</b> Average case size grows from £1,000 to £1,500 as advisers deepen protection and general insurance attachment alongside each mortgage.</li>
+        <li><b>Growing acquisition.</b> Supported by the partnership network, refer-a-friend and Susan-enabled administration, annual acquisitions rise from 60 to 80 while the adviser's own self-introduced business stays a dependable core.</li>
+        <li><b>Emerging renewal income.</b> From Year 3 the adviser begins to earn renewal commission (£4,000) on retained customers — income earned on relationships already won, at a fraction of the effort of new business.</li>
+      </ul>
+      <p>Total adviser income grows from <b>£36,000 in Year 1 to £73,000 by Year 3</b> — materially boosted by the self-introduced 20% the adviser retains — and because renewal income compounds year on year as the customer portfolio matures, the adviser's earnings continue to build well beyond the period shown.</p>
+      <div class="callout"><p><b>Why this matters:</b> advisers who self-generate keep the full economics of their own customers — their 50% plus the 20% that would otherwise go to an introducer — creating a powerful incentive to build a personal client base. For the firm and its investors, the same dynamic drives rising revenue per adviser and a compounding renewal-income portfolio at the firm level.</p></div>
+      <p style="font-size:8px;color:var(--muted);">Illustrative figures for a single representative adviser; actual earnings vary with productivity, case mix and lead source. Consistent with firm-level assumptions elsewhere in this document.</p></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">9</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Part 3 · Partnerships</div>
+    </div>
+    <div class="memo-body"><h1>Strategic Partnerships &amp; Scalable Customer Acquisition</h1>
+      <p class="lead">Building a predictable, scalable and diversified customer acquisition engine through long-term strategic partnerships with organisations that regularly advise customers during key property and financial decisions.</p>
+      <p>Rather than relying on purchased leads, Mortgage Hub will establish an ecosystem of professional partners who benefit from introducing customers into the platform.</p>
+      <h2>Target Partnership Sectors</h2>
+      <ul>
+        <li>Independent estate agencies · Residential property developers</li>
+        <li>Solicitors &amp; conveyancing firms · Accountancy &amp; tax advisory practices</li>
+        <li>Independent financial advisers · Wealth management firms</li>
+        <li>Employee benefit providers · Property investment specialists</li>
+      </ul>
+      <h2>Addressable Market</h2>
+      <table class="memo"><thead><tr><th>Sector</th><th class="num">Estimated UK Businesses</th></tr></thead><tbody><tr><td>Independent estate agencies</td><td class="num">11,000</td></tr><tr><td>Residential property developers</td><td class="num">9,000</td></tr><tr><td>Solicitors & conveyancing firms</td><td class="num">9,500</td></tr><tr><td>Accountancy & tax advisory firms</td><td class="num">37,000</td></tr><tr><td>Total Addressable Market</td><td class="num">66,500</td></tr></tbody></table>
+      <p>Approximately <b>30% (~20,000)</b> currently operate without an established mortgage referral relationship — immediate partnership opportunities. The remaining <b>70% (~46,500)</b> represent competitive conversion opportunities where Mortgage Hub differentiates through technology, transparency, renewal income participation and dedicated relationship management.</p>
+      <div class="diagram"><div class="diagram-title">Acquisition Framework</div><div class="funnel"><div class="funnel-step soft" style="--w:100%">66,500 Professional businesses</div><div class="funnel-arrow">↓</div><div class="funnel-step " style="--w:90%">20,000 New partnership opportunities + 46,500 Competitive conversions</div><div class="funnel-arrow">↓</div><div class="funnel-step " style="--w:80%">Strategic Partnership Network</div><div class="funnel-arrow">↓</div><div class="funnel-step accent" style="--w:70%">180 Introductions per adviser per year</div><div class="funnel-arrow">↓</div><div class="funnel-step " style="--w:60%">60 Mortgage completions per adviser</div><div class="funnel-arrow">↓</div><div class="funnel-step accent" style="--w:50%">Scalable National Growth</div></div></div>
+      <p>Customer acquisition will be diversified across strategic partnerships, refer-a-friend, existing customer referrals, self-generated business, digital marketing, corporate partnerships and local networking.</p></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">10</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Part 3 · Recurring Revenue</div>
+    </div>
+    <div class="memo-body"><h1>Recurring Revenue &amp; Enterprise Value</h1>
+      <p class="lead">Building long-term shareholder value through predictable recurring revenue from retained customer relationships.</p>
+      <p>Whilst new mortgage completions generate immediate income, long-term enterprise value is created by retaining customers through future mortgage events, product transfers and remortgages.</p>
+      <h2>Management Assumptions</h2>
+      <ul>
+        <li>Average mortgage completions per adviser: <b>60 per annum</b></li>
+        <li>Customer retention: <b>60%</b></li>
+        <li>Average renewal income: <b>£400</b> per retained customer</li>
+        <li>Adviser growth increasing by ten advisers annually from Year 5</li>
+      </ul>
+      <h2>Illustrative Recurring Revenue Forecast</h2>
+      <table class="memo"><thead><tr><th>Year</th><th class="num">Renewal Income</th><th class="num">Adviser (50%)</th><th class="num">Introducer (20%)</th><th class="num">Admin</th><th class="num">Forecast EBITDAR</th></tr></thead><tbody><tr><td>3</td><td class="num">£14,400</td><td class="num">£7,200</td><td class="num">£2,880</td><td class="num">£1,440 (10%)</td><td class="num">£2,880</td></tr><tr><td>4</td><td class="num">£129,600</td><td class="num">£64,800</td><td class="num">£25,920</td><td class="num">£12,960 (10%)</td><td class="num">£25,920</td></tr><tr><td>5</td><td class="num">£417,600</td><td class="num">£208,800</td><td class="num">£83,520</td><td class="num">£41,760 (10%)</td><td class="num">£83,520</td></tr><tr><td>6</td><td class="num">£921,600</td><td class="num">£460,800</td><td class="num">£184,320</td><td class="num">£55,296 (6%)</td><td class="num">£221,184</td></tr><tr><td>7</td><td class="num">£1,569,600</td><td class="num">£784,800</td><td class="num">£313,920</td><td class="num">£94,176 (6%)</td><td class="num">£376,704</td></tr><tr><td>8</td><td class="num">£2,217,600</td><td class="num">£1,108,800</td><td class="num">£443,520</td><td class="num">£133,056 (6%)</td><td class="num">£532,224</td></tr><tr><td>9</td><td class="num">£3,009,600</td><td class="num">£1,504,800</td><td class="num">£601,920</td><td class="num">£180,576 (6%)</td><td class="num">£722,304</td></tr><tr><td>10</td><td class="num">£3,945,600</td><td class="num">£1,972,800</td><td class="num">£789,120</td><td class="num">£236,736 (6%)</td><td class="num">£946,944</td></tr></tbody></table>
+      <p>By Year 10 the recurring income portfolio is projected to generate almost <b>£4 million</b> of annual recurring revenue, producing forecast EBITDAR approaching <b>£1 million</b> from this income stream alone — a significant driver of long-term shareholder value.</p></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">11</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Part 3 · Investment</div>
+    </div>
+    <div class="memo-body"><h1>Funding Requirement &amp; Use of Funds</h1>
+      <p class="lead">Strategic investment to accelerate development during the establishment phase — not to support an unsustainable business model.</p>
+      <h2>Investment will support</h2>
+      <div class="three-col">
+        <div class="engine"><h4>Technology</h4><p>Susan AI, customer portal, workflow automation, telephony and HLP integration.</p></div>
+        <div class="engine"><h4>Working Capital</h4><p>Planned operating losses during Years 1–2 while the adviser population scales.</p></div>
+        <div class="engine"><h4>Mortgage Academy</h4><p>Recruitment, structured onboarding and leadership capability.</p></div>
+        <div class="engine"><h4>Recruitment</h4><p>Attraction and onboarding of experienced self-employed advisers.</p></div>
+        <div class="engine"><h4>Marketing</h4><p>Brand development, digital marketing and customer acquisition.</p></div>
+        <div class="engine"><h4>Infrastructure</h4><p>Systems, licences, professional services and business support.</p></div>
+      </div>
+      <hr class="divider" />
+      <h1>Value Creation Plan</h1>
+      <p>HLP's equity stake becomes more valuable over time through multiple compounding value drivers:</p>
+      <table class="memo"><thead><tr><th>Value Driver</th><th>Mechanism</th><th>Timeline</th></tr></thead><tbody><tr><td>Adviser distribution</td><td>Scalable self-employed model with technology leverage</td><td>Years 1–4</td></tr><tr><td>Technology platform</td><td>Susan AI, CRM, telephony and automation reducing cost-to-serve</td><td>Ongoing</td></tr><tr><td>Mortgage Academy</td><td>Talent pipeline for Mortgage Hub and HLP ecosystem</td><td>Year 3+</td></tr><tr><td>Partnership network</td><td>66,500-addressable-market acquisition engine</td><td>Years 2–5</td></tr><tr><td>Recurring revenue</td><td>Compounding renewal income portfolio</td><td>Year 3–10</td></tr><tr><td>AI capability</td><td>Progressive Susan phases creating competitive moat</td><td>Years 1–5+</td></tr><tr><td>Adjacent services</td><td>Optional expansion: licensing, acquisitions, network services</td><td>Year 5+</td></tr></tbody></table>
+      <h2>Key Performance Indicators</h2>
+      <p>Management success measured through a balanced scorecard: commercial (revenue per adviser, protection penetration), operational (journey times, AI utilisation), people (recruitment, retention, Academy completion) and customer (satisfaction, referral rates, digital engagement).</p></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">12</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Part 4 · Roadmap</div>
+    </div>
+    <div class="memo-body"><h1>Strategic Roadmap</h1>
+      <p class="lead">Delivering the vision through clearly defined phases of development.</p>
+      <div class="roadmap">
+        <div class="roadmap-phase"><div class="phase-tag">Phase 1 · Years 1–2</div><h4>Foundation</h4><ul>
+          <li>Launch as HLP Appointed Representative</li>
+          <li>Deploy Susan Phase 1</li>
+          <li>Recruit first adviser cohort</li>
+          <li>Establish Mortgage Academy</li>
+          <li>Build introducer relationships</li>
+          <li>Validate commercial proposition</li></ul>
+          <p><b>Target:</b> 8 advisers trading, 5 onboarding</p></div>
+        <div class="roadmap-phase"><div class="phase-tag">Phase 2 · Years 3–4</div><h4>Operational Scale</h4><ul>
+          <li>Academy as standalone business</li>
+          <li>First Sales Manager appointed</li>
+          <li>Susan Phase 2 &amp; telephony</li>
+          <li>Positive operating profitability</li>
+          <li>Strengthen HLP integration</li></ul>
+          <p><b>Target:</b> 35 advisers trading</p></div>
+        <div class="roadmap-phase"><div class="phase-tag">Phase 3 · Year 5+</div><h4>Strategic Growth</h4><ul>
+          <li>Academy services across HLP</li>
+          <li>Enhanced AI &amp; document intelligence</li>
+          <li>Additional adviser services</li>
+          <li>Technology licensing</li>
+          <li>Selective acquisitions</li></ul>
+          <p><b>Target:</b> National growth platform</p></div>
+      </div>
+      <h2>Planned Milestones</h2>
+      <table class="memo"><thead><tr><th>Year</th><th>Key Milestones</th></tr></thead><tbody><tr><td>Year 1</td><td>Launch · Susan Phase 1 · First adviser cohort · Academy established · Platform validated</td></tr><tr><td>Year 2</td><td>8 advisers trading · Expand introducer network · Refine customer journey · AI investment</td></tr><tr><td>Year 3</td><td>20 advisers · Academy standalone · Susan Phase 2 · Profitability · HLP integration</td></tr><tr><td>Year 4</td><td>35 advisers · Sales Manager · Administrator · BDM (subject to turnover) · Academy for HLP</td></tr></tbody></table></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">13</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Part 4 · Risk & Conclusion</div>
+    </div>
+    <div class="memo-body"><h1>Risk Management</h1>
+      <table class="memo"><thead><tr><th>Risk</th><th>Mitigation</th></tr></thead><tbody><tr><td>Adviser recruitment</td><td>Mortgage Academy creates structured recruitment and development pipeline</td></tr><tr><td>Regulatory change</td><td>Operate within HLP governance framework; adapt processes as requirements evolve</td></tr><tr><td>Technology delivery</td><td>Phased implementation with testing before wider deployment</td></tr><tr><td>AI adoption</td><td>Susan initially supports administrative activities only; future capability introduced where compliant</td></tr><tr><td>Customer acquisition</td><td>Diversified lead generation through partnerships, digital marketing and adviser-led BD</td></tr><tr><td>Operational scalability</td><td>Technology and automation reduce reliance on increasing management overheads</td></tr></tbody></table>
+      <hr class="divider" />
+      <h1>Why HLP? Why Invest Now?</h1>
+      <p>Mortgage Hub is at the beginning of its development journey. Investment at this stage provides the opportunity to influence strategy, shape the operating model and participate in future value creation from inception.</p>
+      <div class="two-col">
+        <div><h3>Benefits to HLP</h3><ul>
+          <li>Participate in equity value creation</li>
+          <li>Access modern technology platform</li>
+          <li>Develop future advisers via Academy</li>
+          <li>Improve productivity across network</li>
+          <li>Strengthen long-term recruitment</li></ul></div>
+        <div><h3>The Proposition</h3><ul>
+          <li>Experienced founder (28+ years)</li>
+          <li>Clearly defined commercial model</li>
+          <li>Scalable technology strategy</li>
+          <li>Structured adviser development</li>
+          <li>AI roadmap centred on Susan</li>
+          <li>Disciplined operating model</li></ul></div>
+      </div>
+      <hr class="divider" />
+      <h1>Conclusion</h1>
+      <p>Mortgage Hub has not been conceived as a traditional mortgage brokerage. It has been designed as a scalable operating platform that combines experienced advisers, intelligent technology and structured talent development.</p>
+      <p>The partnership proposed with HLP is intended to create mutual value. Mortgage Hub benefits from HLP's governance, regulatory expertise and established market presence. HLP benefits from participation in a business designed around innovation, adviser development and long-term enterprise value.</p>
+      <div class="callout"><p><b>The investment proposition:</b> Mortgage Hub is seeking a strategic partner rather than a passive investor — a long-term relationship founded on shared values, aligned incentives and a common ambition to build one of the UK's most progressive technology-enabled mortgage distribution platforms.</p></div>
+      <p style="margin-top:4mm;font-size:9.5px;font-style:italic;">For almost three decades I have had the privilege of leading teams, transforming businesses and helping customers achieve their financial goals. Mortgage Hub represents the opportunity to bring together everything I have learned into a business designed for the future. I believe HLP is the right organisation to help bring that vision to life.</p>
+      <p style="font-size:9px;font-weight:700;margin-top:3mm;">Peter Mabbott · Founder &amp; Managing Director</p></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">14</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Live Platform</div>
+    </div>
+    <div class="memo-body"><h1>Live Platform Capabilities</h1>
+    <p class="lead">The Mortgage Hub platform is operational today. The following capabilities are live and demonstrated in the accompanying user guide (Appendix A).</p>
+    <h2>Customer Experience <span class="badge-live">Live</span></h2>
+    <ul>
+      <li><b>Susan AI</b> — spoken fact-find (voice) and typed chat alternative</li>
+      <li><b>Appointment booking</b> — self-serve diary with SMS and email confirmation</li>
+      <li><b>Post-booking choice</b> — complete fact-find or confirm attendance only</li>
+      <li><b>Customer hub</b> — view cases, update contact details and address</li>
+      <li><b>Refer-a-friend</b> — personal referral links with admin-configurable limits</li>
+    </ul>
+    <h2>Introducer Portal <span class="badge-live">Live</span></h2>
+    <ul>
+      <li>Shareable referral link with automatic attribution</li>
+      <li>Portal booking with email + SMS confirmation</li>
+      <li>SMS booking links and manual lead logging</li>
+      <li>Referral dashboard — journey stage, advisor, days at stage, last contact</li>
+      <li>Commission statement with payout dates</li>
+      <li>Company code for team onboarding</li>
+    </ul>
+    <h2>Advisor Workspace <span class="badge-live">Live</span></h2>
+    <ul>
+      <li>Tabbed customer profile — Contact, Notes &amp; history, Fact find, Journey, CRM</li>
+      <li>Needs-attention highlights for call-backs and ready-to-review customers</li>
+      <li>Integrated softphone — outbound/inbound calls with recording</li>
+      <li>AI call transcription and conversation summaries on customer timeline</li>
+      <li>Voicemail capture and transcription</li>
+      <li>Contacts tab with mark-contacted workflow (disables once actioned)</li>
+      <li>Customer profile introducer attribution — amend/refresh (owner-only)</li>
+      <li>Journey milestones with customer SMS on confirmation</li>
+      <li>Personal commission statement</li>
+    </ul>
+    <h2>Owner &amp; Admin <span class="badge-live">Live</span></h2>
+    <ul>
+      <li>Finance ledger enriched with customer, case ref, receiver and reference</li>
+      <li>Commission management, audit history and current arrangements</li>
+      <li>Previous rates browse by date range and fee type</li>
+      <li>Excel and PDF exports (finance, commission, audit, customers)</li>
+      <li>Admin hierarchy — owner, supervisor, general admin with granular permissions</li>
+      <li>Admin invite flow and advisor view impersonation</li>
+      <li>Manage advisors, introducers, RAF limits and test accounts</li>
+    </ul>
+    <h2>Coming Soon <span class="badge-soon">Roadmap</span></h2>
+    <ul>
+      <li>Document upload &amp; AI scanning · Integrated ID checks</li>
+      <li>Open Banking · Payment links · Smarter document workflows</li>
+      <li>HLP system integration · Data warehouse &amp; BI dashboards</li>
+    </ul></div>
+    <div class="page-footer">Project Atlas · Strictly Private & Confidential</div>
+    <div class="page-num">15</div>
+  </div><div class="page">
+    <div class="memo-header">
+      <div class="brand">Mortgage Hub · Project Atlas</div>
+      <div class="part">Appendix A</div>
+    </div>
+    <div class="appendix-cover">
+      <h1>Appendix A</h1>
+      <p>Mortgage Hub — User Guide &amp; Instruction Manual</p>
+      <p style="font-size:9px;margin-top:10px;color:#888;">Complete guide for customers, introducers, advisors, admin staff and firm owners.<br/>Version 2026</p>
+    </div>
+    <div class="page-num">A-1</div>
+  </div><div class="page">
+        <div class="memo-header">
+          <div class="brand">Mortgage Hub · Project Atlas</div>
+          <div class="part">Appendix A · Overview</div>
+        </div>
+        <div class="memo-body" style="font-size:inherit;"><h2>1. Overview &amp; roles</h2>
+      <p class="lead">Mortgage Hub is a multi-role platform that prepares customers before their first advisor meeting, tracks introducer referrals, and gives advisors and owners a single workspace for cases, commission, telephony and reporting.</p>
+      <table class="data">
+        <tr><th>Role</th><th>Who</th><th>Main purpose</th></tr>
+        <tr><td><b>Customer</b></td><td>Homebuyers &amp; remortgagers</td><td>Complete fact-find (voice or type), book appointments, manage contact details, refer friends.</td></tr>
+        <tr><td><b>Introducer</b></td><td>Estate agents, solicitors, planners</td><td>Share referral link, book customers, track journey stage, view commission.</td></tr>
+        <tr><td><b>Advisor</b></td><td>Mortgage advisors</td><td>Manage customers, CRM, diary, fact-finds, calls, milestones and personal commission.</td></tr>
+        <tr><td><b>General admin</b></td><td>Support staff</td><td>Operational tasks and reporting within permissions granted by the owner.</td></tr>
+        <tr><td><b>Supervisor</b></td><td>Senior admin</td><td>Elevated admin able to manage permissions and team, as delegated by the owner.</td></tr>
+        <tr><td><b>Owner</b></td><td>Firm principal</td><td>Full finance, commission, audit, admin and team management across the firm.</td></tr>
+      </table>
+      <h2>2. Signing in</h2>
+      <p>All users sign in at <b>m-abbott.co.uk</b>. Available methods depend on role:</p>
+      <ul>
+        <li><b>Email &amp; password</b> — standard for advisors, introducers and customers.</li>
+        <li><b>Google sign-in</b> — available where configured for customers.</li>
+        <li><b>SMS one-time code</b> — customers can sign in with their mobile number.</li>
+        <li><b>Authenticator app</b> — advisors and admin staff use two-factor authentication.</li>
+      </ul>
+      <div class="callout"><p><b>Test accounts:</b> Firm owners can provision test accounts (Manage → Test accounts) for training. Test emails bypass SMS verification when configured.</p></div></div>
+        <div class="page-footer">Appendix A — User Guide · Strictly Private &amp; Confidential</div>
+        <div class="page-num">A-2</div>
+      </div><div class="page">
+        <div class="memo-header">
+          <div class="brand">Mortgage Hub · Project Atlas</div>
+          <div class="part">Appendix A · Customers</div>
+        </div>
+        <div class="memo-body" style="font-size:inherit;"><span class="role-badge">Customer</span>
+      <h2>3. Customer portal</h2>
+      <p class="lead">After sign-in, customers choose how to start: spoken fact-find with Susan, typed chat, or book an appointment immediately.</p>
+      <h3>Three ways to get started</h3>
+      <ol>
+        <li><b>Spoken fact-find</b> — Susan (AI voice guide) asks each question aloud and listens to answers.</li>
+        <li><b>Typed fact-find</b> — Same questions in a quiet chat; pause and resume any time.</li>
+        <li><b>Book an appointment</b> — Pick an available advisor slot from the diary.</li>
+      </ol>
+      <h3>After booking</h3>
+      <p>When a customer books (or is booked by staff/introducer), they receive <b>SMS and email</b> confirmation. They can then:</p>
+      <ul>
+        <li>Complete the spoken fact-find</li>
+        <li>Complete the typed fact-find</li>
+        <li><b>Confirm attendance only</b> — skip fact-find and just confirm they will attend</li>
+      </ul>
+      <h3>Customer hub</h3>
+      <p>Customers can view their cases and update contact details including name, email, phone and address. Changes sync to the advisor CRM automatically.</p>
+      <h3>Refer a friend</h3>
+      <p>Customers receive a personal Refer-a-Friend link. When friends sign up through that link, the referrer is credited. Admin can configure RAF limits in Manage.</p>
+      <div class="callout"><p><b>Tip:</b> Completing the fact-find before the meeting means the advisor already has an AI summary — the first call starts with context, not basic questions.</p></div></div>
+        <div class="page-footer">Appendix A — User Guide · Strictly Private &amp; Confidential</div>
+        <div class="page-num">A-3</div>
+      </div><div class="page">
+        <div class="memo-header">
+          <div class="brand">Mortgage Hub · Project Atlas</div>
+          <div class="part">Appendix A · Introducers</div>
+        </div>
+        <div class="memo-body" style="font-size:inherit;"><span class="role-badge">Introducer</span>
+      <h2>4. Introducer portal</h2>
+      <p class="lead">Introducers refer customers, book appointments on their behalf, and track progress without seeing sensitive fact-find answers.</p>
+      <h3>Referral link</h3>
+      <p>Every introducer has a unique shareable link. Customers who sign up through it are automatically attributed to that introducer.</p>
+      <h3>Book a customer (portal booking)</h3>
+      <ol>
+        <li>Open the <b>Book customer</b> card on your dashboard.</li>
+        <li>Enter customer name, <b>email</b> (required) and phone number.</li>
+        <li>Select an advisor and available appointment slot.</li>
+        <li>Submit — the customer receives SMS and email with a link to confirm and choose next steps.</li>
+      </ol>
+      <h3>Other introducer tools</h3>
+      <ul>
+        <li><b>SMS booking link</b> — send a personalised link for the customer to pick their own time.</li>
+        <li><b>Manual lead logging</b> — record name, phone and notes for telephone enquiries.</li>
+        <li><b>Company code</b> — 4-digit code so colleagues join the same introducer company.</li>
+        <li><b>Referral dashboard</b> — see name, journey stage, lead source, allocated advisor, days at stage and last contact date.</li>
+        <li><b>My commission</b> — view introducer commission entries and payout dates.</li>
+      </ul>
+      <div class="callout"><p><b>Privacy:</b> Introducers see journey stage and contact metadata — not full fact-find answers or financial detail.</p></div></div>
+        <div class="page-footer">Appendix A — User Guide · Strictly Private &amp; Confidential</div>
+        <div class="page-num">A-4</div>
+      </div><div class="page">
+        <div class="memo-header">
+          <div class="brand">Mortgage Hub · Project Atlas</div>
+          <div class="part">Appendix A · Advisors</div>
+        </div>
+        <div class="memo-body" style="font-size:inherit;"><span class="role-badge">Advisor</span>
+      <h2>5. Advisor workspace</h2>
+      <p class="lead">Advisors manage their customer caseload from a tabbed dashboard with needs-attention highlights on the home screen.</p>
+      <h3>Home screen</h3>
+      <ul>
+        <li><b>Needs attention</b> — customers with pending call-backs or fact-finds ready for review.</li>
+        <li><b>Customer booking card</b> — book a new customer or send SMS + email booking link (same as staff/introducer flow).</li>
+        <li><b>Diary summary</b> — upcoming appointments at a glance.</li>
+      </ul>
+      <h3>Contacts tab</h3>
+      <ul>
+        <li><b>Appointments &amp; call-backs</b> to work through, with lead source and last-contact detail.</li>
+        <li><b>Mark contacted</b> — once a contact is actioned the button greys out and disables, so nobody is called twice.</li>
+        <li><b>Introducer box</b> — shows the customer's introducer code and company, with an <b>Amend</b> option (permission-controlled) and, for owners, <b>Refresh commission</b> to recalculate attribution.</li>
+      </ul>
+      <h3>Customer profile (tabs)</h3>
+      <table class="data">
+        <tr><th>Tab</th><th>Contents</th></tr>
+        <tr><td><b>Contact</b></td><td>Name, email, phone, address — editable; syncs with customer hub.</td></tr>
+        <tr><td><b>Notes &amp; history</b></td><td>Advisor notes and full audit timeline (calls, SMS, appointments, milestones).</td></tr>
+        <tr><td><b>Fact find</b></td><td>Structured answers and AI-generated summary.</td></tr>
+        <tr><td><b>Customer journey</b></td><td>Milestone tracker: appointment seen, ID confirmed, AIP completed.</td></tr>
+        <tr><td><b>CRM</b></td><td>Contact card on cases — quick view of customer details linked to the case.</td></tr>
+      </table>
+      <h3>My commission</h3>
+      <p>Advisors view their personal commission statement. Commission is credited when fees are submitted on a case (see Finance section).</p></div>
+        <div class="page-footer">Appendix A — User Guide · Strictly Private &amp; Confidential</div>
+        <div class="page-num">A-5</div>
+      </div><div class="page">
+        <div class="memo-header">
+          <div class="brand">Mortgage Hub · Project Atlas</div>
+          <div class="part">Appendix A · Telephony</div>
+        </div>
+        <div class="memo-body" style="font-size:inherit;"><h2>6. Calls &amp; telephony</h2>
+      <p class="lead">Mortgage Hub includes integrated telephony so advisors can call customers from within the platform, with recordings and AI summaries logged to the customer timeline.</p>
+      <h3>Making &amp; receiving calls</h3>
+      <ul>
+        <li><b>Softphone</b> — advisors call customers directly from the browser; outbound calls are linked to the customer record.</li>
+        <li><b>Inbound handling</b> — incoming calls are routed and, when unanswered, captured as voicemail.</li>
+      </ul>
+      <h3>Recording, transcription &amp; summaries</h3>
+      <ul>
+        <li>Calls are <b>recorded</b> and attached to the phone-call record for the customer.</li>
+        <li><b>AI transcription</b> converts the recording to text.</li>
+        <li>An <b>AI summary</b> of the conversation is written to the customer's Notes &amp; history timeline.</li>
+        <li><b>Voicemail</b> messages are transcribed and surfaced for follow-up.</li>
+      </ul>
+      <div class="callout"><p><b>Audit:</b> Every call, recording, transcript and summary is retained on the customer timeline alongside SMS, appointments and milestones — a single, reviewable record.</p></div>
+      <h2>7. Diary &amp; appointments</h2>
+      <h3>Diary</h3>
+      <ul>
+        <li>View upcoming and past appointments and available slots.</li>
+        <li><b>Amend appointments</b> — change date/time for an existing booking.</li>
+        <li>Book customers directly from the booking card.</li>
+      </ul>
+      <h3>Journey milestones</h3>
+      <ol>
+        <li><b>Appointment seen</b> — customer attended or spoke with advisor.</li>
+        <li><b>ID confirmed</b> — identity documents verified.</li>
+        <li><b>AIP completed</b> — agreement in principle obtained.</li>
+      </ol>
+      <p>Confirming milestones can trigger customer SMS notifications. Log contact attempts and next-contact dates so no customer is forgotten.</p></div>
+        <div class="page-footer">Appendix A — User Guide · Strictly Private &amp; Confidential</div>
+        <div class="page-num">A-6</div>
+      </div><div class="page">
+        <div class="memo-header">
+          <div class="brand">Mortgage Hub · Project Atlas</div>
+          <div class="part">Appendix A · Finance</div>
+        </div>
+        <div class="memo-body" style="font-size:inherit;"><h2>8. Commission &amp; finance</h2>
+      <div class="two-col">
+        <div>
+          <h3>How commission works</h3>
+          <ul>
+            <li>When an advisor submits a fee on a case, commission is calculated automatically.</li>
+            <li><b>Advisor commission</b> is credited to the advisor's statement.</li>
+            <li><b>Introducer commission</b> is credited using the introducer effective at the fee date.</li>
+            <li>Payout dates appear on My commission and Commission mgmt.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Owner finance tabs</h3>
+          <ul>
+            <li><b>Finance</b> — firm-wide fee ledger, enriched with customer, case ref, receiver and reference.</li>
+            <li><b>Commission mgmt</b> — all commission entries across advisors and introducers.</li>
+            <li><b>My commission</b> — owner's own advisor commission (if applicable).</li>
+          </ul>
+        </div>
+      </div>
+      <h3>Commission audit &amp; arrangements</h3>
+      <ul>
+        <li><b>Commission audit history</b> — a combined log of rate changes and introducer amendments, with who/when.</li>
+        <li><b>Current commission arrangements</b> — the live rates in force per advisor / introducer role.</li>
+        <li><b>Previous rates by date range</b> — browse historic rates filtered by fee type and date range.</li>
+      </ul>
+      <h3>Report exports</h3>
+      <p>On Finance, Commission mgmt, My commission and the owner Customers tab, use the export box (bottom-left) to download:</p>
+      <ul>
+        <li><b>Excel (.xlsx)</b> — including finance audit and rate-history sheets.</li>
+        <li><b>PDF</b> — formatted report for printing or filing.</li>
+      </ul>
+      <div class="callout"><p><b>Note:</b> Finance tables show the most recent rows with scroll for older entries. Exports include the full dataset.</p></div></div>
+        <div class="page-footer">Appendix A — User Guide · Strictly Private &amp; Confidential</div>
+        <div class="page-num">A-7</div>
+      </div><div class="page">
+        <div class="memo-header">
+          <div class="brand">Mortgage Hub · Project Atlas</div>
+          <div class="part">Appendix A · Administration</div>
+        </div>
+        <div class="memo-body" style="font-size:inherit;"><span class="role-badge">Owner / Admin</span>
+      <h2>9. Owner &amp; admin tools</h2>
+      <h3>Admin hierarchy</h3>
+      <table class="data">
+        <tr><th>Level</th><th>Can do</th></tr>
+        <tr><td><b>Owner</b></td><td>Everything: finance, commission, audit, grant admin levels, edit all permissions, manage team.</td></tr>
+        <tr><td><b>Supervisor</b></td><td>Elevated admin; can edit general-admin permissions and manage team as delegated.</td></tr>
+        <tr><td><b>General admin</b></td><td>Operational access limited to the specific permissions granted by the owner/supervisor.</td></tr>
+      </table>
+      <h3>Inviting &amp; managing admins</h3>
+      <ul>
+        <li><b>Invite an admin</b> from the Manage tab — the invitee registers, then the owner assigns supervisor or general-admin access.</li>
+        <li><b>Admin access panel</b> — select a registered admin and set their level and granular permissions (e.g. introducer amend, finance, exports).</li>
+        <li>"Make supervisor" and "Permissions" controls appear only for those authorised to grant them.</li>
+      </ul>
+      <h3>Advisor view tab</h3>
+      <p>Owners and supervisors open the <b>Advisor view</b> tab to see any advisor's dashboard — their customers, diary and workload. Exit advisor view to return.</p>
+      <h3>Manage tab</h3>
+      <ul>
+        <li><b>Advisors</b> — invite, suspend, reinstate and delete advisors.</li>
+        <li><b>Introducers</b> — manage introducer companies and access.</li>
+        <li><b>Refer-a-friend limits</b> — configure RAF bonus rules (compact, scrollable list).</li>
+        <li><b>Test accounts</b> — provision or revoke test accounts for training.</li>
+      </ul>
+      <h3>Security</h3>
+      <p>Admin and advisor accounts require authenticator-app two-factor authentication. Customer accounts support email, Google or SMS sign-in.</p></div>
+        <div class="page-footer">Appendix A — User Guide · Strictly Private &amp; Confidential</div>
+        <div class="page-num">A-8</div>
+      </div><div class="page">
+        <div class="memo-header">
+          <div class="brand">Mortgage Hub · Project Atlas</div>
+          <div class="part">Appendix A · Reference</div>
+        </div>
+        <div class="memo-body" style="font-size:inherit;"><h2>10. Quick reference</h2>
+      <table class="data">
+        <tr><th>Task</th><th>Where to go</th><th>Role</th></tr>
+        <tr><td>Start spoken fact-find</td><td>Customer home → Talk to Susan</td><td>Customer</td></tr>
+        <tr><td>Book appointment</td><td>Customer home → Book a call</td><td>Customer</td></tr>
+        <tr><td>Confirm attendance only</td><td>Link in booking SMS/email</td><td>Customer</td></tr>
+        <tr><td>Book customer for someone</td><td>Book customer card</td><td>Introducer / Advisor</td></tr>
+        <tr><td>Send SMS booking link</td><td>Book customer card → Send link</td><td>Introducer / Advisor</td></tr>
+        <tr><td>Call a customer</td><td>Customer profile → Call</td><td>Advisor</td></tr>
+        <tr><td>Read call summary</td><td>Customer profile → Notes &amp; history</td><td>Advisor</td></tr>
+        <tr><td>Mark contact as contacted</td><td>Contacts tab → Mark contacted</td><td>Advisor</td></tr>
+        <tr><td>Amend introducer</td><td>Contacts → Introducer box → Amend</td><td>Advisor (permitted)</td></tr>
+        <tr><td>Amend appointment</td><td>Diary → select appointment → Amend</td><td>Advisor</td></tr>
+        <tr><td>Mark journey milestone</td><td>Customer profile → Customer journey</td><td>Advisor</td></tr>
+        <tr><td>Check my commission</td><td>My commission tab</td><td>Advisor / Introducer</td></tr>
+        <tr><td>View commission audit</td><td>Finance → Commission audit history</td><td>Owner</td></tr>
+        <tr><td>Export finance report</td><td>Finance tab → Export box (bottom-left)</td><td>Owner</td></tr>
+        <tr><td>Invite an admin</td><td>Manage → Invite admin</td><td>Owner</td></tr>
+        <tr><td>Set admin permissions</td><td>Admin access panel</td><td>Owner / Supervisor</td></tr>
+        <tr><td>View as advisor</td><td>Advisor view tab → select advisor</td><td>Owner</td></tr>
+        <tr><td>Provision test account</td><td>Manage → Test accounts</td><td>Owner</td></tr>
+      </table>
+      <h3>Support</h3>
+      <ul>
+        <li><b>Web:</b> m-abbott.co.uk</li>
+        <li><b>Email:</b> hello@m-abbott.co.uk</li>
+        <li><b>Phone:</b> 01234 567 890</li>
+      </ul></div>
+        <div class="page-footer">Appendix A — User Guide · Strictly Private &amp; Confidential</div>
+        <div class="page-num">A-9</div>
+      </div></body>
+</html>

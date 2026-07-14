@@ -525,6 +525,22 @@ async function bookAppointment(
     await clearSessionAttention(sessionForAlloc, actingUserId, "appointment_booked");
   }
 
+  try {
+    const { syncAppointmentToTeams } = await import("@/lib/teams-calendar.server");
+    await syncAppointmentToTeams({
+      appointmentId: appointment.id,
+      advisorId,
+      customerName: data.customerName,
+      customerEmail: data.customerEmail || null,
+      customerPhone: data.customerPhone,
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      notes: data.notes || null,
+    });
+  } catch (e) {
+    console.error("Teams calendar sync failed", e);
+  }
+
   return { ...appointment, session_id: linkedSessionId ?? appointment.session_id };
 }
 
@@ -2307,6 +2323,23 @@ export const rescheduleAppointment = createServerFn({ method: "POST" })
       } catch (e) {
         console.error("reschedule confirmation failed", e);
       }
+    }
+
+    try {
+      const { syncAppointmentToTeams } = await import("@/lib/teams-calendar.server");
+      await syncAppointmentToTeams({
+        appointmentId: appt.id,
+        advisorId: appt.advisor_id,
+        customerName: appt.customer_name,
+        customerEmail: appt.customer_email,
+        customerPhone: appt.customer_phone,
+        startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
+        notes: appt.notes,
+        existingEventId: (appt as { ms_event_id?: string | null }).ms_event_id ?? null,
+      });
+    } catch (e) {
+      console.error("Teams calendar sync on reschedule failed", e);
     }
 
     return { ok: true as const };

@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { formatDobDisplay } from "@/lib/dob-parse";
+import { AddressSearchInput } from "@/components/AddressSearchInput";
 
 export const Route = createFileRoute("/_authenticated/customers/$customerId")({
   component: CustomerHubPage,
@@ -516,7 +517,12 @@ function CustomerContactSection({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="cust-address">Address</Label>
-            <Input id="cust-address" value={address} onChange={(e) => setAddress(e.target.value)} />
+            <AddressSearchInput
+              id="cust-address"
+              value={address}
+              onChange={setAddress}
+              placeholder="Start typing address or postcode…"
+            />
           </div>
           <div className="flex gap-2">
             <Button size="sm" disabled={save.isPending} onClick={() => save.mutate()}>

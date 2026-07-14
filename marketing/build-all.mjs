@@ -23,3 +23,5 @@ function run(script) {
 
 await run("build-flyers.mjs");
 await run("build-manual.mjs");
+await run("build-memorandum.mjs");
+await run("build-pe-pitch.mjs");

@@ -25,7 +25,9 @@
     "fix:env-url": "node scripts/fix-env-app-base-url.mjs",
     "backfill:voicemails": "node scripts/backfill-twilio-voicemails.mjs",
     "backfill:call-transcripts": "node scripts/backfill-call-transcripts.mjs",
-    "build:marketing": "node marketing/build-all.mjs"
+    "build:marketing": "node marketing/build-all.mjs",
+    "build:memorandum": "node marketing/build-memorandum.mjs",
+    "build:pe-pitch": "node marketing/build-pe-pitch.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

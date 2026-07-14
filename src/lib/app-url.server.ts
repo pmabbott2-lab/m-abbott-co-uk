@@ -2,6 +2,7 @@
 export function getServerAppOrigin(request?: Request): string {
   const fromEnv =
     process.env.VITE_APP_URL?.trim() ||
+    process.env.APP_BASE_URL?.trim() ||
     process.env.APP_URL?.trim();
   if (fromEnv) return fromEnv.replace(/\/$/, "");
 

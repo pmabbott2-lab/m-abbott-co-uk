@@ -170,3 +170,50 @@ export async function resolveAddress(postcodeRaw: string, houseRaw: string): Pro
     provider: "manual",
   };
 }
+
+export type AddressSuggestion = {
+  id: string;
+  label: string;
+};
+
+function formatGetAddressRecord(a: Record<string, unknown>, postcode: string): string {
+  const parts = [a.line_1, a.line_2, a.line_3, a.line_4, a.locality, a.town_or_city, a.county]
+    .map((p) => (typeof p === "string" ? p.trim() : ""))
+    .filter(Boolean);
+  const pc = typeof a.postcode === "string" ? normalisePostcode(a.postcode) : postcode;
+  return [...new Set([...parts, pc].filter(Boolean))].join(", ");
+}
+
+/** UK address autocomplete for staff editing customer profiles. */
+export async function searchUkAddresses(query: string): Promise<AddressSuggestion[]> {
+  const term = (query ?? "").trim();
+  if (term.length < 3) return [];
+
+  const key = process.env.GETADDRESS_API_KEY;
+  if (!key) return [];
+
+  const url = `https://api.getAddress.io/autocomplete/${encodeURIComponent(term)}?api-key=${encodeURIComponent(key)}&all=true`;
+  const data = (await fetchJson(url)) as
+    | { suggestions?: Array<{ id?: string; address?: string }> }
+    | null;
+  if (!data?.suggestions?.length) return [];
+
+  return data.suggestions
+    .filter((s) => s.id && s.address)
+    .slice(0, 8)
+    .map((s) => ({ id: s.id!, label: s.address! }));
+}
+
+/** Resolve a getAddress.io suggestion id to a formatted address string. */
+export async function resolveUkAddressId(id: string): Promise<string> {
+  const key = process.env.GETADDRESS_API_KEY;
+  if (!key || !id.trim()) return "";
+
+  const url = `https://api.getAddress.io/get/${encodeURIComponent(id)}?api-key=${encodeURIComponent(key)}`;
+  const data = (await fetchJson(url)) as Record<string, unknown> | null;
+  if (!data) return "";
+
+  const postcode =
+    typeof data.postcode === "string" ? normalisePostcode(data.postcode) : "";
+  return formatGetAddressRecord(data, postcode);
+}

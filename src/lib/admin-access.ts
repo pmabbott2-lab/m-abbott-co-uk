@@ -14,7 +14,6 @@ export const PERMISSION_KEYS = [
   "customers",
   "advisors",
   "introducers",
-  "introducer_amend",
   "allocations",
   "raf",
   "invites",
@@ -34,7 +33,6 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   customers: "Customers",
   advisors: "Advisors",
   introducers: "Introducers",
-  introducer_amend: "Introducer amend (customer)",
   allocations: "Fact-find allocations",
   raf: "RAF / referrals",
   invites: "Staff invite links",
@@ -53,7 +51,6 @@ export const DEFAULT_GENERAL_PERMISSIONS: Record<PermissionKey, PermissionAccess
   customers: "amend",
   advisors: "none",
   introducers: "none",
-  introducer_amend: "none",
   allocations: "view",
   raf: "none",
   invites: "none",
@@ -134,11 +131,9 @@ export function canAmendHistory(access: AdminAccess | null | undefined): boolean
   return Boolean(access?.isOwner);
 }
 
-/** Amend customer introducer code — owner, supervisor, or general with introducer_amend. */
+/** Amend customer introducer code — owner only. */
 export function canAmendIntroducer(access: AdminAccess | null | undefined): boolean {
-  if (!access?.isAdmin) return false;
-  if (access.isOwner || access.isSupervisor) return true;
-  return canAmend(access, "introducer_amend");
+  return Boolean(access?.isOwner);
 }
 
 /** Backdate introducer commission after amendment — owner only. */

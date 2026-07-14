@@ -26,6 +26,7 @@ import { Route as AuthenticatedHomeRouteImport } from './routes/_authenticated/h
 import { Route as AuthenticatedDiaryRouteImport } from './routes/_authenticated/diary'
 import { Route as AuthenticatedCasesRouteImport } from './routes/_authenticated/cases'
 import { Route as AuthenticatedBookingRouteImport } from './routes/_authenticated/booking'
+import { Route as ApiTeamsCallbackRouteImport } from './routes/api/teams/callback'
 import { Route as ApiSmsInboundRouteImport } from './routes/api/sms/inbound'
 import { Route as ApiAuthRequestPasswordResetRouteImport } from './routes/api/auth/request-password-reset'
 import { Route as AuthenticatedTextSessionIdRouteImport } from './routes/_authenticated/text.$sessionId'
@@ -123,6 +124,11 @@ const AuthenticatedBookingRoute = AuthenticatedBookingRouteImport.update({
   path: '/booking',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiTeamsCallbackRoute = ApiTeamsCallbackRouteImport.update({
+  id: '/api/teams/callback',
+  path: '/api/teams/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSmsInboundRoute = ApiSmsInboundRouteImport.update({
   id: '/api/sms/inbound',
   path: '/api/sms/inbound',
@@ -216,6 +222,7 @@ export interface FileRoutesByFullPath {
   '/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
+  '/api/teams/callback': typeof ApiTeamsCallbackRoute
   '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
   '/api/twilio/voice/inbound': typeof ApiTwilioVoiceInboundRoute
   '/api/twilio/voice/recording': typeof ApiTwilioVoiceRecordingRoute
@@ -246,6 +253,7 @@ export interface FileRoutesByTo {
   '/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
+  '/api/teams/callback': typeof ApiTeamsCallbackRoute
   '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
   '/api/twilio/voice/inbound': typeof ApiTwilioVoiceInboundRoute
   '/api/twilio/voice/recording': typeof ApiTwilioVoiceRecordingRoute
@@ -278,6 +286,7 @@ export interface FileRoutesById {
   '/_authenticated/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
+  '/api/teams/callback': typeof ApiTeamsCallbackRoute
   '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
   '/api/twilio/voice/inbound': typeof ApiTwilioVoiceInboundRoute
   '/api/twilio/voice/recording': typeof ApiTwilioVoiceRecordingRoute
@@ -310,6 +319,7 @@ export interface FileRouteTypes {
     | '/text/$sessionId'
     | '/api/auth/request-password-reset'
     | '/api/sms/inbound'
+    | '/api/teams/callback'
     | '/api/twilio/voice/client-outbound'
     | '/api/twilio/voice/inbound'
     | '/api/twilio/voice/recording'
@@ -340,6 +350,7 @@ export interface FileRouteTypes {
     | '/text/$sessionId'
     | '/api/auth/request-password-reset'
     | '/api/sms/inbound'
+    | '/api/teams/callback'
     | '/api/twilio/voice/client-outbound'
     | '/api/twilio/voice/inbound'
     | '/api/twilio/voice/recording'
@@ -371,6 +382,7 @@ export interface FileRouteTypes {
     | '/_authenticated/text/$sessionId'
     | '/api/auth/request-password-reset'
     | '/api/sms/inbound'
+    | '/api/teams/callback'
     | '/api/twilio/voice/client-outbound'
     | '/api/twilio/voice/inbound'
     | '/api/twilio/voice/recording'
@@ -392,6 +404,7 @@ export interface RootRouteChildren {
   RafCodeRoute: typeof RafCodeRoute
   ApiAuthRequestPasswordResetRoute: typeof ApiAuthRequestPasswordResetRoute
   ApiSmsInboundRoute: typeof ApiSmsInboundRoute
+  ApiTeamsCallbackRoute: typeof ApiTeamsCallbackRoute
   ApiTwilioVoiceClientOutboundRoute: typeof ApiTwilioVoiceClientOutboundRoute
   ApiTwilioVoiceInboundRoute: typeof ApiTwilioVoiceInboundRoute
   ApiTwilioVoiceRecordingRoute: typeof ApiTwilioVoiceRecordingRoute
@@ -519,6 +532,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/booking'
       preLoaderRoute: typeof AuthenticatedBookingRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/api/teams/callback': {
+      id: '/api/teams/callback'
+      path: '/api/teams/callback'
+      fullPath: '/api/teams/callback'
+      preLoaderRoute: typeof ApiTeamsCallbackRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/sms/inbound': {
       id: '/api/sms/inbound'
@@ -660,6 +680,7 @@ const rootRouteChildren: RootRouteChildren = {
   RafCodeRoute: RafCodeRoute,
   ApiAuthRequestPasswordResetRoute: ApiAuthRequestPasswordResetRoute,
   ApiSmsInboundRoute: ApiSmsInboundRoute,
+  ApiTeamsCallbackRoute: ApiTeamsCallbackRoute,
   ApiTwilioVoiceClientOutboundRoute: ApiTwilioVoiceClientOutboundRoute,
   ApiTwilioVoiceInboundRoute: ApiTwilioVoiceInboundRoute,
   ApiTwilioVoiceRecordingRoute: ApiTwilioVoiceRecordingRoute,

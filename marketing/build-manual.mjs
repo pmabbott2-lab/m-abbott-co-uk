@@ -1,4 +1,6 @@
 // Builds Mortgage Hub instruction manual (multi-page A4 PDF).
+// Also exports MANUAL_CSS + manualSections so the investment memorandum
+// can embed the same user guide as an appendix.
 // Run: node marketing/build-manual.mjs
 
 import { writeFile } from "node:fs/promises";
@@ -9,7 +11,7 @@ import { launchBrowser, renderHtmlToPdf } from "./pdf-render.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const MANUAL_CSS = `
+export const MANUAL_CSS = `
   ${FLYER_CSS}
   .manual .page { min-height: 297mm; padding-bottom: 14mm; }
   .manual .page-num {
@@ -70,58 +72,32 @@ const MANUAL_CSS = `
   .pack .page:last-child { page-break-after: auto; break-after: auto; }
 `;
 
-function page(title, tag, content, pageNum) {
+function manualPage(tag, content, pageNum) {
   return `<div class="page">
     <div class="header">
       <div class="brand"><div class="mark">M</div><div class="name">Mortgage&nbsp;Hub</div></div>
       <div class="tag">${tag}</div>
     </div>
     <div class="body">${content}</div>
-    <div class="page-num">${pageNum}</div>
+    ${pageNum ? `<div class="page-num">${pageNum}</div>` : ""}
   </div>`;
 }
 
-function coverPage() {
-  return `<div class="page">
-    <div class="header">
-      <div class="brand"><div class="mark">M</div><div class="name">Mortgage&nbsp;Hub</div></div>
-      <div class="tag">Instruction manual</div>
-    </div>
-    <div class="cover">
-      <div class="mark-lg">M</div>
-      <h1>Instruction Manual</h1>
-      <p class="sub">Complete guide for customers, introducers, advisors and firm owners.<br/>Covers sign-in, booking, CRM, diary, commission and admin tools.</p>
-      <p class="meta">${CONTACT.web} · ${CONTACT.email} · Version 2026</p>
-    </div>
-  </div>`;
-}
-
-function buildManualHtml() {
-  const pages = [
-    coverPage(),
-    page(
-      "Contents",
-      "Overview",
-      `<h2>Contents</h2>
-      <div class="toc">
-        <div class="toc-item"><b>1. Overview &amp; roles</b> <span>3</span></div>
-        <div class="toc-item"><b>2. Signing in</b> <span>3</span></div>
-        <div class="toc-item"><b>3. Customer portal</b> <span>3</span></div>
-        <div class="toc-item"><b>4. Introducer portal</b> <span>4</span></div>
-        <div class="toc-item"><b>5. Advisor workspace</b> <span>5</span></div>
-        <div class="toc-item"><b>6. CRM, diary &amp; appointments</b> <span>6</span></div>
-        <div class="toc-item"><b>7. Commission &amp; finance</b> <span>7</span></div>
-        <div class="toc-item"><b>8. Owner &amp; admin tools</b> <span>8</span></div>
-        <div class="toc-item"><b>9. Quick reference</b> <span>9</span></div>
-      </div>
-      <h2>1. Overview &amp; roles</h2>
-      <p class="lead">Mortgage Hub is a multi-role platform that prepares customers before their first advisor meeting, tracks introducer referrals, and gives advisors and owners a single workspace for cases, commission and reporting.</p>
+// Body content for each user-guide section (excluding cover + contents).
+// Exported so the investment memorandum can render them as an appendix.
+export const manualSections = [
+  {
+    tag: "Overview",
+    content: `<h2>1. Overview &amp; roles</h2>
+      <p class="lead">Mortgage Hub is a multi-role platform that prepares customers before their first advisor meeting, tracks introducer referrals, and gives advisors and owners a single workspace for cases, commission, telephony and reporting.</p>
       <table class="data">
         <tr><th>Role</th><th>Who</th><th>Main purpose</th></tr>
         <tr><td><b>Customer</b></td><td>Homebuyers &amp; remortgagers</td><td>Complete fact-find (voice or type), book appointments, manage contact details, refer friends.</td></tr>
         <tr><td><b>Introducer</b></td><td>Estate agents, solicitors, planners</td><td>Share referral link, book customers, track journey stage, view commission.</td></tr>
-        <tr><td><b>Advisor</b></td><td>Mortgage advisors</td><td>Manage customers, CRM, diary, fact-finds, milestones and personal commission.</td></tr>
-        <tr><td><b>Owner / Admin</b></td><td>Firm owner, supervisor</td><td>Finance ledger, commission management, exports, advisor view, team management.</td></tr>
+        <tr><td><b>Advisor</b></td><td>Mortgage advisors</td><td>Manage customers, CRM, diary, fact-finds, calls, milestones and personal commission.</td></tr>
+        <tr><td><b>General admin</b></td><td>Support staff</td><td>Operational tasks and reporting within permissions granted by the owner.</td></tr>
+        <tr><td><b>Supervisor</b></td><td>Senior admin</td><td>Elevated admin able to manage permissions and team, as delegated by the owner.</td></tr>
+        <tr><td><b>Owner</b></td><td>Firm principal</td><td>Full finance, commission, audit, admin and team management across the firm.</td></tr>
       </table>
       <h2>2. Signing in</h2>
       <p>All users sign in at <b>${CONTACT.web}</b>. Available methods depend on role:</p>
@@ -132,12 +108,10 @@ function buildManualHtml() {
         <li><b>Authenticator app</b> — advisors and admin staff use two-factor authentication.</li>
       </ul>
       <div class="callout"><p><b>Test accounts:</b> Firm owners can provision test accounts (Manage → Test accounts) for training. Test emails bypass SMS verification when configured.</p></div>`,
-      "2",
-    ),
-    page(
-      "Customer portal",
-      "Customers",
-      `<span class="role-badge">Customer</span>
+  },
+  {
+    tag: "Customers",
+    content: `<span class="role-badge">Customer</span>
       <h2>3. Customer portal</h2>
       <p class="lead">After sign-in, customers choose how to start: spoken fact-find with Susan, typed chat, or book an appointment immediately.</p>
       <h3>Three ways to get started</h3>
@@ -158,12 +132,10 @@ function buildManualHtml() {
       <h3>Refer a friend</h3>
       <p>Customers receive a personal Refer-a-Friend link. When friends sign up through that link, the referrer is credited. Admin can configure RAF limits in Manage.</p>
       <div class="callout"><p><b>Tip:</b> Completing the fact-find before the meeting means the advisor already has an AI summary — the first call starts with context, not basic questions.</p></div>`,
-      "3",
-    ),
-    page(
-      "Introducer portal",
-      "Introducers",
-      `<span class="role-badge">Introducer</span>
+  },
+  {
+    tag: "Introducers",
+    content: `<span class="role-badge">Introducer</span>
       <h2>4. Introducer portal</h2>
       <p class="lead">Introducers refer customers, book appointments on their behalf, and track progress without seeing sensitive fact-find answers.</p>
       <h3>Referral link</h3>
@@ -184,12 +156,10 @@ function buildManualHtml() {
         <li><b>My commission</b> — view introducer commission entries and payout dates.</li>
       </ul>
       <div class="callout"><p><b>Privacy:</b> Introducers see journey stage and contact metadata — not full fact-find answers or financial detail.</p></div>`,
-      "4",
-    ),
-    page(
-      "Advisor workspace",
-      "Advisors",
-      `<span class="role-badge">Advisor</span>
+  },
+  {
+    tag: "Advisors",
+    content: `<span class="role-badge">Advisor</span>
       <h2>5. Advisor workspace</h2>
       <p class="lead">Advisors manage their customer caseload from a tabbed dashboard with needs-attention highlights on the home screen.</p>
       <h3>Home screen</h3>
@@ -198,104 +168,124 @@ function buildManualHtml() {
         <li><b>Customer booking card</b> — book a new customer or send SMS + email booking link (same as staff/introducer flow).</li>
         <li><b>Diary summary</b> — upcoming appointments at a glance.</li>
       </ul>
+      <h3>Contacts tab</h3>
+      <ul>
+        <li><b>Appointments &amp; call-backs</b> to work through, with lead source and last-contact detail.</li>
+        <li><b>Mark contacted</b> — once a contact is actioned the button greys out and disables, so nobody is called twice.</li>
+        <li><b>Introducer box</b> — shows the customer's introducer code and company, with an <b>Amend</b> option (permission-controlled) and, for owners, <b>Refresh commission</b> to recalculate attribution.</li>
+      </ul>
       <h3>Customer profile (tabs)</h3>
       <table class="data">
         <tr><th>Tab</th><th>Contents</th></tr>
         <tr><td><b>Contact</b></td><td>Name, email, phone, address — editable; syncs with customer hub.</td></tr>
-        <tr><td><b>Notes &amp; history</b></td><td>Advisor notes and full audit timeline (SMS, appointments, milestones).</td></tr>
+        <tr><td><b>Notes &amp; history</b></td><td>Advisor notes and full audit timeline (calls, SMS, appointments, milestones).</td></tr>
         <tr><td><b>Fact find</b></td><td>Structured answers and AI-generated summary.</td></tr>
         <tr><td><b>Customer journey</b></td><td>Milestone tracker: appointment seen, ID confirmed, AIP completed.</td></tr>
         <tr><td><b>CRM</b></td><td>Contact card on cases — quick view of customer details linked to the case.</td></tr>
       </table>
       <h3>My commission</h3>
       <p>Advisors view their personal commission statement. Commission is credited when fees are submitted on a case (see Finance section).</p>`,
-      "5",
-    ),
-    page(
-      "CRM, diary & appointments",
-      "Operations",
-      `<h2>6. CRM, diary &amp; appointments</h2>
-      <h3>Diary</h3>
-      <p>The advisor diary shows booked appointments and available slots. Advisors and admin can:</p>
+  },
+  {
+    tag: "Telephony",
+    content: `<h2>6. Calls &amp; telephony</h2>
+      <p class="lead">Mortgage Hub includes integrated telephony so advisors can call customers from within the platform, with recordings and AI summaries logged to the customer timeline.</p>
+      <h3>Making &amp; receiving calls</h3>
       <ul>
-        <li>View upcoming and past appointments</li>
-        <li><b>Amend appointments</b> — change date/time for an existing booking</li>
-        <li>Book customers directly from the booking card</li>
+        <li><b>Softphone</b> — advisors call customers directly from the browser; outbound calls are linked to the customer record.</li>
+        <li><b>Inbound handling</b> — incoming calls are routed and, when unanswered, captured as voicemail.</li>
       </ul>
-      <h3>Appointments &amp; confirmations</h3>
-      <p>Every booking triggers SMS and email to the customer. Customers can confirm attendance or continue their fact-find from the link provided.</p>
-      <h3>CRM contact sync</h3>
-      <p>Customer contact details (name, email, phone, address) are stored centrally. When a customer updates their hub, advisors see changes on the Contact tab and CRM card immediately.</p>
+      <h3>Recording, transcription &amp; summaries</h3>
+      <ul>
+        <li>Calls are <b>recorded</b> and attached to the phone-call record for the customer.</li>
+        <li><b>AI transcription</b> converts the recording to text.</li>
+        <li>An <b>AI summary</b> of the conversation is written to the customer's Notes &amp; history timeline.</li>
+        <li><b>Voicemail</b> messages are transcribed and surfaced for follow-up.</li>
+      </ul>
+      <div class="callout"><p><b>Audit:</b> Every call, recording, transcript and summary is retained on the customer timeline alongside SMS, appointments and milestones — a single, reviewable record.</p></div>
+      <h2>7. Diary &amp; appointments</h2>
+      <h3>Diary</h3>
+      <ul>
+        <li>View upcoming and past appointments and available slots.</li>
+        <li><b>Amend appointments</b> — change date/time for an existing booking.</li>
+        <li>Book customers directly from the booking card.</li>
+      </ul>
       <h3>Journey milestones</h3>
-      <p>Advisors mark milestones as customers progress:</p>
       <ol>
-        <li><b>Appointment seen</b> — customer attended or spoke with advisor</li>
-        <li><b>ID confirmed</b> — identity documents verified</li>
-        <li><b>AIP completed</b> — agreement in principle obtained</li>
+        <li><b>Appointment seen</b> — customer attended or spoke with advisor.</li>
+        <li><b>ID confirmed</b> — identity documents verified.</li>
+        <li><b>AIP completed</b> — agreement in principle obtained.</li>
       </ol>
-      <p>Confirming milestones can trigger customer SMS notifications.</p>
-      <h3>Call-back management</h3>
-      <p>Log contact attempts, set next-contact dates, and use needs-attention alerts so no customer is forgotten.</p>`,
-      "6",
-    ),
-    page(
-      "Commission & finance",
-      "Finance",
-      `<h2>7. Commission &amp; finance</h2>
+      <p>Confirming milestones can trigger customer SMS notifications. Log contact attempts and next-contact dates so no customer is forgotten.</p>`,
+  },
+  {
+    tag: "Finance",
+    content: `<h2>8. Commission &amp; finance</h2>
       <div class="two-col">
         <div>
           <h3>How commission works</h3>
           <ul>
             <li>When an advisor submits a fee on a case, commission is calculated automatically.</li>
             <li><b>Advisor commission</b> is credited to the advisor's statement.</li>
-            <li><b>Introducer commission</b> is credited based on the percentage set on the advisor table.</li>
-            <li>Payout dates appear on My commission (advisor/introducer) and Commission mgmt (owner).</li>
+            <li><b>Introducer commission</b> is credited using the introducer effective at the fee date.</li>
+            <li>Payout dates appear on My commission and Commission mgmt.</li>
           </ul>
         </div>
         <div>
           <h3>Owner finance tabs</h3>
           <ul>
-            <li><b>Finance</b> — firm-wide fee ledger with scrollable history.</li>
+            <li><b>Finance</b> — firm-wide fee ledger, enriched with customer, case ref, receiver and reference.</li>
             <li><b>Commission mgmt</b> — all commission entries across advisors and introducers.</li>
             <li><b>My commission</b> — owner's own advisor commission (if applicable).</li>
           </ul>
         </div>
       </div>
+      <h3>Commission audit &amp; arrangements</h3>
+      <ul>
+        <li><b>Commission audit history</b> — a combined log of rate changes and introducer amendments, with who/when.</li>
+        <li><b>Current commission arrangements</b> — the live rates in force per advisor / introducer role.</li>
+        <li><b>Previous rates by date range</b> — browse historic rates filtered by fee type and date range.</li>
+      </ul>
       <h3>Report exports</h3>
       <p>On Finance, Commission mgmt, My commission and the owner Customers tab, use the export box (bottom-left) to download:</p>
       <ul>
-        <li><b>Excel (.xlsx)</b> — spreadsheet for further analysis</li>
-        <li><b>PDF</b> — formatted report for printing or filing</li>
+        <li><b>Excel (.xlsx)</b> — including finance audit and rate-history sheets.</li>
+        <li><b>PDF</b> — formatted report for printing or filing.</li>
       </ul>
-      <div class="callout"><p><b>Note:</b> Finance tables show the most recent 10 rows with scroll for older entries. Exports include the full dataset.</p></div>`,
-      "7",
-    ),
-    page(
-      "Owner & admin tools",
-      "Administration",
-      `<span class="role-badge">Owner / Admin</span>
-      <h2>8. Owner &amp; admin tools</h2>
+      <div class="callout"><p><b>Note:</b> Finance tables show the most recent rows with scroll for older entries. Exports include the full dataset.</p></div>`,
+  },
+  {
+    tag: "Administration",
+    content: `<span class="role-badge">Owner / Admin</span>
+      <h2>9. Owner &amp; admin tools</h2>
+      <h3>Admin hierarchy</h3>
+      <table class="data">
+        <tr><th>Level</th><th>Can do</th></tr>
+        <tr><td><b>Owner</b></td><td>Everything: finance, commission, audit, grant admin levels, edit all permissions, manage team.</td></tr>
+        <tr><td><b>Supervisor</b></td><td>Elevated admin; can edit general-admin permissions and manage team as delegated.</td></tr>
+        <tr><td><b>General admin</b></td><td>Operational access limited to the specific permissions granted by the owner/supervisor.</td></tr>
+      </table>
+      <h3>Inviting &amp; managing admins</h3>
+      <ul>
+        <li><b>Invite an admin</b> from the Manage tab — the invitee registers, then the owner assigns supervisor or general-admin access.</li>
+        <li><b>Admin access panel</b> — select a registered admin and set their level and granular permissions (e.g. introducer amend, finance, exports).</li>
+        <li>"Make supervisor" and "Permissions" controls appear only for those authorised to grant them.</li>
+      </ul>
       <h3>Advisor view tab</h3>
-      <p>Owners and supervisors open the <b>Advisor view</b> tab to impersonate any advisor's dashboard — see their customers, diary and workload exactly as they do. Exit advisor view to return to the owner dashboard.</p>
+      <p>Owners and supervisors open the <b>Advisor view</b> tab to see any advisor's dashboard — their customers, diary and workload. Exit advisor view to return.</p>
       <h3>Manage tab</h3>
       <ul>
         <li><b>Advisors</b> — invite, suspend, reinstate and delete advisors.</li>
         <li><b>Introducers</b> — manage introducer companies and access.</li>
-        <li><b>Refer-a-friend limits</b> — configure RAF bonus rules.</li>
-        <li><b>Test accounts</b> — provision or revoke test customer/advisor accounts for training.</li>
+        <li><b>Refer-a-friend limits</b> — configure RAF bonus rules (compact, scrollable list).</li>
+        <li><b>Test accounts</b> — provision or revoke test accounts for training.</li>
       </ul>
-      <h3>Customers tab (owner)</h3>
-      <p>Firm-wide customer list with export to Excel/PDF. Search and review all cases across advisors.</p>
-      <h3>Introducer percentages</h3>
-      <p>Set introducer commission percentage per advisor on the advisor management table. This percentage applies when fees are submitted on attributed cases.</p>
       <h3>Security</h3>
       <p>Admin and advisor accounts require authenticator-app two-factor authentication. Customer accounts support email, Google or SMS sign-in.</p>`,
-      "8",
-    ),
-    page(
-      "Quick reference",
-      "Reference",
-      `<h2>9. Quick reference</h2>
+  },
+  {
+    tag: "Reference",
+    content: `<h2>10. Quick reference</h2>
       <table class="data">
         <tr><th>Task</th><th>Where to go</th><th>Role</th></tr>
         <tr><td>Start spoken fact-find</td><td>Customer home → Talk to Susan</td><td>Customer</td></tr>
@@ -303,24 +293,73 @@ function buildManualHtml() {
         <tr><td>Confirm attendance only</td><td>Link in booking SMS/email</td><td>Customer</td></tr>
         <tr><td>Book customer for someone</td><td>Book customer card</td><td>Introducer / Advisor</td></tr>
         <tr><td>Send SMS booking link</td><td>Book customer card → Send link</td><td>Introducer / Advisor</td></tr>
+        <tr><td>Call a customer</td><td>Customer profile → Call</td><td>Advisor</td></tr>
+        <tr><td>Read call summary</td><td>Customer profile → Notes &amp; history</td><td>Advisor</td></tr>
+        <tr><td>Mark contact as contacted</td><td>Contacts tab → Mark contacted</td><td>Advisor</td></tr>
+        <tr><td>Amend introducer</td><td>Contacts → Introducer box → Amend</td><td>Advisor (permitted)</td></tr>
         <tr><td>Amend appointment</td><td>Diary → select appointment → Amend</td><td>Advisor</td></tr>
-        <tr><td>View AI fact-find summary</td><td>Customer profile → Fact find tab</td><td>Advisor</td></tr>
         <tr><td>Mark journey milestone</td><td>Customer profile → Customer journey</td><td>Advisor</td></tr>
         <tr><td>Check my commission</td><td>My commission tab</td><td>Advisor / Introducer</td></tr>
+        <tr><td>View commission audit</td><td>Finance → Commission audit history</td><td>Owner</td></tr>
         <tr><td>Export finance report</td><td>Finance tab → Export box (bottom-left)</td><td>Owner</td></tr>
+        <tr><td>Invite an admin</td><td>Manage → Invite admin</td><td>Owner</td></tr>
+        <tr><td>Set admin permissions</td><td>Admin access panel</td><td>Owner / Supervisor</td></tr>
         <tr><td>View as advisor</td><td>Advisor view tab → select advisor</td><td>Owner</td></tr>
         <tr><td>Provision test account</td><td>Manage → Test accounts</td><td>Owner</td></tr>
       </table>
       <h3>Support</h3>
-      <p>For access issues, booking problems or commission queries, contact:</p>
       <ul>
         <li><b>Web:</b> ${CONTACT.web}</li>
         <li><b>Email:</b> ${CONTACT.email}</li>
         <li><b>Phone:</b> ${CONTACT.phone}</li>
-      </ul>
-      <div class="callout"><p><b>Printing tip:</b> Marketing flyers and this manual are generated as high-resolution A4 PDFs from the <code>marketing/</code> folder. Rebuild with <code>npm run build:marketing</code>.</p></div>`,
-      "9",
-    ),
+      </ul>`,
+  },
+];
+
+function contentsSection() {
+  return `<h2>Contents</h2>
+    <div class="toc">
+      <div class="toc-item"><b>1. Overview &amp; roles</b> <span>3</span></div>
+      <div class="toc-item"><b>2. Signing in</b> <span>3</span></div>
+      <div class="toc-item"><b>3. Customer portal</b> <span>4</span></div>
+      <div class="toc-item"><b>4. Introducer portal</b> <span>5</span></div>
+      <div class="toc-item"><b>5. Advisor workspace</b> <span>6</span></div>
+      <div class="toc-item"><b>6. Calls &amp; telephony</b> <span>7</span></div>
+      <div class="toc-item"><b>7. Diary &amp; appointments</b> <span>7</span></div>
+      <div class="toc-item"><b>8. Commission &amp; finance</b> <span>8</span></div>
+      <div class="toc-item"><b>9. Owner &amp; admin tools</b> <span>9</span></div>
+      <div class="toc-item"><b>10. Quick reference</b> <span>10</span></div>
+    </div>`;
+}
+
+function coverPage() {
+  return `<div class="page">
+    <div class="header">
+      <div class="brand"><div class="mark">M</div><div class="name">Mortgage&nbsp;Hub</div></div>
+      <div class="tag">Instruction manual</div>
+    </div>
+    <div class="cover">
+      <div class="mark-lg">M</div>
+      <h1>Instruction Manual</h1>
+      <p class="sub">Complete guide for customers, introducers, advisors, admin staff and firm owners.<br/>Covers sign-in, booking, CRM, telephony, diary, commission, audit and admin tools.</p>
+      <p class="meta">${CONTACT.web} · ${CONTACT.email} · Version 2026</p>
+    </div>
+  </div>`;
+}
+
+// Renders the manual sections as pages. `startNum` sets the first page number
+// (the memorandum appendix continues numbering from the memorandum body).
+export function renderManualSectionPages(startNum = 3) {
+  return manualSections
+    .map((s, i) => manualPage(s.tag, s.content, startNum + i))
+    .join("");
+}
+
+function buildManualHtml() {
+  const pages = [
+    coverPage(),
+    manualPage("Overview", contentsSection() + manualSections[0].content, "2"),
+    ...manualSections.slice(1).map((s, i) => manualPage(s.tag, s.content, `${i + 3}`)),
   ];
 
   return `<!doctype html>
@@ -334,17 +373,21 @@ function buildManualHtml() {
 </html>`;
 }
 
-const htmlPath = resolve(__dirname, "mortgage-hub-instruction-manual.html");
-const html = buildManualHtml();
-await writeFile(htmlPath, html, "utf8");
-console.log(`HTML written: ${htmlPath}`);
+// Only render when run directly (not when imported by the memorandum builder).
+const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
-const browser = await launchBrowser();
+if (isMain) {
+  const htmlPath = resolve(__dirname, "mortgage-hub-instruction-manual.html");
+  const html = buildManualHtml();
+  await writeFile(htmlPath, html, "utf8");
+  console.log(`HTML written: ${htmlPath}`);
 
-try {
-  const pdfPath = resolve(__dirname, "mortgage-hub-instruction-manual.pdf");
-  await renderHtmlToPdf(browser, htmlPath, pdfPath);
-  console.log(`PDF written:  ${pdfPath}`);
-} finally {
-  await browser.close();
+  const browser = await launchBrowser();
+  try {
+    const pdfPath = resolve(__dirname, "mortgage-hub-instruction-manual.pdf");
+    await renderHtmlToPdf(browser, htmlPath, pdfPath);
+    console.log(`PDF written:  ${pdfPath}`);
+  } finally {
+    await browser.close();
+  }
 }
