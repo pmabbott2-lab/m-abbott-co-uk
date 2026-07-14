@@ -21,12 +21,11 @@ type ProfilePhone = { hasPhone: boolean } | null;
 // Loads the current user's profile phone. Returns null (fail-open) on any error
 // so a transient query failure never traps the user out of the whole app.
 async function fetchProfilePhone(): Promise<ProfilePhone> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: sessionData } = await supabase.auth.getSession();
+  const user = sessionData.session?.user;
   if (!user) return null;
 
-  const { data, error } = await supabase
+  const { data: profile, error } = await supabase
     .from("profiles")
     .select("phone")
     .eq("id", user.id)
@@ -37,7 +36,7 @@ async function fetchProfilePhone(): Promise<ProfilePhone> {
     return null;
   }
 
-  return { hasPhone: Boolean(data?.phone && data.phone.trim().length > 0) };
+  return { hasPhone: Boolean(profile?.phone && profile.phone.trim().length > 0) };
 }
 
 // Blocking-but-friendly prompt that asks Google sign-in users (who arrive with
@@ -62,9 +61,8 @@ export function PhoneCaptureGate({ children }: { children: ReactNode }) {
   const save = useMutation({
     mutationFn: async (raw: string) => {
       const normalised = normaliseUkPhone(raw);
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const user = sessionData.session?.user;
       if (!user) throw new Error("Your session has expired — please sign in again.");
 
       const { error: updateError } = await supabase

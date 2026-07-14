@@ -1,7 +1,7 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { AppointmentAmendDialog } from "@/components/AppointmentAmendDialog";
 import { TeamsCalendarLinkCard } from "@/components/TeamsCalendarLinkCard";
@@ -21,17 +21,28 @@ export const Route = createFileRoute("/_authenticated/diary")({
 
 function AdvisorDiary() {
   const search = Route.useSearch();
+  const navigate = useNavigate();
   const roleFn = useServerFn(getMyRole);
   const apptsFn = useServerFn(listAdvisorAppointments);
   const advisorViewId = getAdvisorView()?.advisorId;
   const [amendId, setAmendId] = useState<string | null>(null);
 
   const roleQ = useQuery({ queryKey: ["my-role"], queryFn: () => roleFn() });
+  const canAccess =
+    roleQ.data?.isAdvisor === true || roleQ.data?.isMainAdmin === true;
+
   const apptsQ = useQuery({
     queryKey: ["advisor-appointments", advisorViewId],
     queryFn: () => apptsFn({ data: { viewAsAdvisorId: advisorViewId } }),
-    enabled: roleQ.data?.isAdvisor === true || roleQ.data?.isMainAdmin === true,
+    enabled: canAccess,
   });
+
+  useEffect(() => {
+    if (!roleQ.isSuccess) return;
+    if (!roleQ.data?.isAdvisor && !roleQ.data?.isMainAdmin) {
+      navigate({ to: "/home" });
+    }
+  }, [roleQ.isSuccess, roleQ.data, navigate]);
 
   if (roleQ.isLoading) {
     return (
@@ -41,8 +52,28 @@ function AdvisorDiary() {
     );
   }
 
-  if (!roleQ.data?.isAdvisor && !roleQ.data?.isMainAdmin) {
-    throw redirect({ to: "/home" });
+  if (roleQ.isError) {
+    return (
+      <AppShell title="Diary" backTo="/home" backLabel="Dashboard">
+        <div className="max-w-md mx-auto py-16 text-center space-y-3">
+          <p className="text-sm text-destructive">
+            Could not verify your access. Try refreshing the page.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {roleQ.error instanceof Error ? roleQ.error.message : "Unknown error"}
+          </p>
+          <Button onClick={() => roleQ.refetch()}>Try again</Button>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (!canAccess) {
+    return (
+      <AppShell title="Diary" backTo="/home" backLabel="Dashboard">
+        <div className="py-16 text-center text-muted-foreground">Redirecting…</div>
+      </AppShell>
+    );
   }
 
   const appointments = apptsQ.data ?? [];
@@ -58,8 +89,21 @@ function AdvisorDiary() {
 
       <TeamsCalendarLinkCard search={search} />
 
+      {apptsQ.isError && (
+        <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 mb-4 text-sm text-destructive">
+          Could not load appointments:{" "}
+          {apptsQ.error instanceof Error ? apptsQ.error.message : "Unknown error"}
+          <Button size="sm" variant="outline" className="ml-3" onClick={() => apptsQ.refetch()}>
+            Retry
+          </Button>
+        </div>
+      )}
+
       <div className="rounded-2xl border bg-card divide-y">
-        {appointments.length === 0 && (
+        {apptsQ.isLoading && (
+          <div className="p-6 text-sm text-muted-foreground">Loading appointments…</div>
+        )}
+        {!apptsQ.isLoading && appointments.length === 0 && (
           <div className="p-6 text-sm text-muted-foreground">No upcoming appointments.</div>
         )}
         {appointments.map((appt) => {

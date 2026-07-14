@@ -1,10 +1,21 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { shouldBlockAuthenticatedApp } from "@/lib/auth-recovery";
 import { isLoginMfaSuspended } from "@/lib/auth-mfa-config";
 import { requiresAuthenticatorMfa, requiresSmsLoginVerification } from "@/lib/auth-roles";
 import { isLoginSmsVerified } from "@/lib/auth-sms-session";
 import { PhoneCaptureGate } from "@/components/PhoneCaptureGate";
+
+/** Prefer getSession — getUser() can hang indefinitely with new Supabase API keys. */
+async function readSession(retries = 20): Promise<Session | null> {
+  for (let i = 0; i < retries; i++) {
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.user) return data.session;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return null;
+}
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -13,25 +24,23 @@ export const Route = createFileRoute("/_authenticated")({
       throw redirect({ to: "/auth/reset" });
     }
 
-    const { data: sessionData } = await supabase.auth.getSession();
-    const user = sessionData.session?.user;
-    if (!user) {
-      const { data, error } = await supabase.auth.getUser();
-      if (error || !data.user) throw redirect({ to: "/auth" });
+    const session = await readSession();
+    if (!session?.user) {
+      throw redirect({ to: "/auth" });
     }
 
-    const activeUser = user ?? (await supabase.auth.getUser()).data.user;
-    if (!activeUser) throw redirect({ to: "/auth" });
+    // MFA currently suspended via .env — skip role/MFA network calls that can hang the route.
+    if (isLoginMfaSuspended()) {
+      return { user: session.user };
+    }
 
     const { data: roles } = await supabase
       .from("user_roles")
       .select("role")
-      .eq("user_id", activeUser.id);
+      .eq("user_id", session.user.id);
     const roleList = (roles ?? []).map((r) => r.role);
-    const session = sessionData.session ?? (await supabase.auth.getSession()).data.session;
-    if (!session) throw redirect({ to: "/auth" });
 
-    if (!isLoginMfaSuspended() && requiresAuthenticatorMfa(roleList)) {
+    if (requiresAuthenticatorMfa(roleList)) {
       const { data: factors } = await supabase.auth.mfa.listFactors();
       const hasVerifiedMfa = (factors?.totp ?? []).some((f) => f.status === "verified");
       if (!hasVerifiedMfa) {
@@ -41,11 +50,11 @@ export const Route = createFileRoute("/_authenticated")({
       if (aal?.currentLevel !== "aal2") {
         throw redirect({ to: "/auth" });
       }
-    } else if (!isLoginMfaSuspended() && requiresSmsLoginVerification(roleList) && !isLoginSmsVerified(session)) {
+    } else if (requiresSmsLoginVerification(roleList) && !isLoginSmsVerified(session)) {
       throw redirect({ to: "/auth" });
     }
 
-    return { user: activeUser };
+    return { user: session.user };
   },
   component: () => (
     <PhoneCaptureGate>

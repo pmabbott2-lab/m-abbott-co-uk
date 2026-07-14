@@ -61,7 +61,7 @@ start_app() {
   fi
 
   echo "$(date '+%F %T') starting production server" >>"$LOG/stable.log"
-  nohup npx vite preview --port "$APP_PORT" --host 0.0.0.0 >>"$LOG/prod.log" 2>&1 &
+  nohup npx vite preview --port "$APP_PORT" --host 0.0.0.0 --strictPort >>"$LOG/prod.log" 2>&1 &
   echo $! >"$LOG/prod.pid"
   disown -h "$!" 2>/dev/null || true
   wait_for_port
@@ -94,8 +94,10 @@ case "${1:-start}" in
     [[ -f "$LOG/prod.pid" ]] && kill "$(cat "$LOG/prod.pid")" 2>/dev/null || true
     [[ -f "$LOG/ngrok.pid" ]] && kill "$(cat "$LOG/ngrok.pid")" 2>/dev/null || true
     pkill -f "vite preview --port ${APP_PORT}" 2>/dev/null || true
+    pkill -f "vite preview" 2>/dev/null || true
     pkill -f "another-selector-ranged.ngrok-free.dev" 2>/dev/null || true
     lsof -iTCP:"$APP_PORT" -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null || true
+    lsof -iTCP:8081 -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null || true
     rm -f "$LOG/prod.pid" "$LOG/ngrok.pid"
     ;;
   rebuild)

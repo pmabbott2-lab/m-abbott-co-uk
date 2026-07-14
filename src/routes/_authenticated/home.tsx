@@ -3615,11 +3615,29 @@ function Home() {
     };
   }, [claimReferralFn]);
 
-  if (roleQ.isLoading || sessionsQ.isLoading) {
+  if (roleQ.isLoading) {
     return <AppShell title="Home"><div className="py-16 text-center text-muted-foreground">Loading…</div></AppShell>;
   }
 
-  if (sessionsQ.isError) {
+  if (roleQ.isError) {
+    return (
+      <AppShell title="Home">
+        <div className="py-16 text-center space-y-3 max-w-md mx-auto">
+          <p className="text-muted-foreground">We couldn&apos;t load your account. Please sign in again.</p>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button onClick={() => roleQ.refetch()}>Try again</Button>
+            <Button variant="outline" onClick={() => navigate({ to: "/auth", replace: true })}>Sign in</Button>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (!isAdvisor && sessionsQ.isLoading) {
+    return <AppShell title="Home"><div className="py-16 text-center text-muted-foreground">Loading…</div></AppShell>;
+  }
+
+  if (!isAdvisor && sessionsQ.isError) {
     return (
       <AppShell title="Home">
         <div className="py-16 text-center space-y-3 max-w-md mx-auto">

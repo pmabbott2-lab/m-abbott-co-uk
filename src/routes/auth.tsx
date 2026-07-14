@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate, useMatches, Outlet, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -89,6 +89,7 @@ function AuthPage() {
 
   const sendLoginSmsFn = useServerFn(sendLoginSmsCode);
   const verifyLoginSmsFn = useServerFn(verifyLoginSmsCodeFn);
+  const signInInFlight = useRef(false);
 
   useEffect(() => {
     if (isChildRoute) return;
@@ -106,6 +107,8 @@ function AuthPage() {
         clearLoginSmsVerified();
         return;
       }
+      // Password sign-in uses finishSignIn (full reload) — skip soft navigate races.
+      if (signInInFlight.current) return;
       if (session && !isPasswordRecoveryPending() && !mfaBlocking && !smsBlocking) {
         if (await resumeLoginStepIfNeeded(session)) return;
         navigate({ to: "/home" });
@@ -154,13 +157,35 @@ function AuthPage() {
     }
   };
 
-  const finishSignIn = (session?: Session | null) => {
-    setMfaBlocking(false);
-    setMfaStaffRequired(false);
-    setSmsBlocking(false);
-    clearPasswordRecoveryPending();
-    if (session) markLoginSmsVerified(session);
-    navigate({ to: "/home" });
+  const finishSignIn = async (session?: Session | null) => {
+    signInInFlight.current = true;
+    try {
+      setMfaBlocking(false);
+      setMfaStaffRequired(false);
+      setSmsBlocking(false);
+      clearPasswordRecoveryPending();
+      if (session?.access_token && session.refresh_token) {
+        // Force-persist the session before leaving /auth — soft navigates can race
+        // the ssr:false auth guard and bounce back to login with an empty screen.
+        const { error } = await supabase.auth.setSession({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+        });
+        if (error) throw error;
+        markLoginSmsVerified(session);
+      } else if (session) {
+        markLoginSmsVerified(session);
+      }
+      for (let i = 0; i < 20; i++) {
+        const { data } = await supabase.auth.getSession();
+        if (data.session?.user) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      // Full reload so /_authenticated beforeLoad always sees a stored session.
+      window.location.assign("/home");
+    } finally {
+      // Keep in-flight true through navigation; unload clears it.
+    }
   };
 
   const dispatchLoginSms = async (phone?: string): Promise<boolean> => {
@@ -348,7 +373,7 @@ function AuthPage() {
       });
       if (error) throw error;
       const { data: sessionData } = await supabase.auth.getSession();
-      finishSignIn(sessionData.session);
+      await finishSignIn(sessionData.session);
     } catch (err) {
       showStatus("error", err instanceof Error ? err.message : "Invalid code — try again.");
     } finally {
@@ -378,7 +403,7 @@ function AuthPage() {
       if (error) throw error;
       toast.success("Authenticator app linked");
       const { data: sessionData } = await supabase.auth.getSession();
-      finishSignIn(sessionData.session);
+      await finishSignIn(sessionData.session);
     } catch (err) {
       showStatus("error", err instanceof Error ? err.message : "Could not verify — check the code.");
     } finally {
@@ -449,7 +474,7 @@ function AuthPage() {
         if (data.session) {
           clearPasswordRecoveryPending();
           if (await resolveLoginStepAfterSignIn(data.session)) return;
-          finishSignIn(data.session);
+          await finishSignIn(data.session);
           return;
         }
 
@@ -461,9 +486,18 @@ function AuthPage() {
         return;
       }
 
+      const form = e.currentTarget;
+      const fd = new FormData(form);
+      const emailValue = (String(fd.get("email") ?? "") || email).trim();
+      const passwordValue = String(fd.get("password") ?? "") || password;
+      if (!emailValue || !passwordValue) {
+        showStatus("error", "Enter your email and password to sign in.");
+        return;
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
+        email: emailValue,
+        password: passwordValue,
       });
       if (error) throw error;
       if (!data.session) {
@@ -473,7 +507,7 @@ function AuthPage() {
       clearPasswordRecoveryPending();
 
       if (await resolveLoginStepAfterSignIn(data.session)) return;
-      finishSignIn(data.session);
+      await finishSignIn(data.session);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong";
       if (/email not confirmed/i.test(msg)) {
@@ -564,7 +598,7 @@ function AuthPage() {
       clearPasswordRecoveryPending();
       markLoginSmsVerified(data.session);
       if (await resolveLoginStepAfterSignIn(data.session)) return;
-      finishSignIn(data.session);
+      await finishSignIn(data.session);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong";
       if (/expired|invalid|incorrect|token/i.test(msg)) {
@@ -588,7 +622,7 @@ function AuthPage() {
     try {
       await verifyLoginSmsFn({ data: { code } });
       const { data: sessionData } = await supabase.auth.getSession();
-      finishSignIn(sessionData.session);
+      await finishSignIn(sessionData.session);
     } catch (err) {
       showStatus("error", err instanceof Error ? err.message : "Invalid code — try again.");
     } finally {
@@ -869,7 +903,7 @@ function AuthPage() {
                   type="button"
                   variant="ghost"
                   className="w-full"
-                  onClick={() => finishSignIn()}
+                  onClick={() => void finishSignIn()}
                 >
                   Skip for now
                 </Button>
@@ -878,7 +912,7 @@ function AuthPage() {
           )}
 
           {mode !== "phone" && mode !== "mfa-challenge" && mode !== "mfa-enroll" && mode !== "mfa-setup-required" && mode !== "sms-login-challenge" && (
-          <form onSubmit={onSubmit} className="space-y-3">
+          <form method="post" onSubmit={onSubmit} className="space-y-3">
             {mode === "signup" && (
               <div className="space-y-1.5">
                 <Label htmlFor="name">Full name</Label>
@@ -907,6 +941,7 @@ function AuthPage() {
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
+                name="email"
                 type="email"
                 autoComplete="email"
                 value={email}
@@ -919,6 +954,7 @@ function AuthPage() {
                 <Label htmlFor="password">Password</Label>
                 <Input
                   id="password"
+                  name="password"
                   type="password"
                   autoComplete="current-password"
                   value={password}
