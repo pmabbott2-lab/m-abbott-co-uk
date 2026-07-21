@@ -18,6 +18,9 @@ dist-ssr
 *.local
 .env
 
+# Local backup archives (keep out of git)
+Backups/
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
