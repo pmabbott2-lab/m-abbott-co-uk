@@ -15,7 +15,11 @@ import {
   updateIntroducerProfile,
 } from "@/lib/introducer.functions";
 import { sendLeadBookingSms } from "@/lib/booking.functions";
-import { referralLinkForSlug } from "@/lib/referral";
+import {
+  marketingCalculatorLinkForSlug,
+  marketingJourneyLinkForSlug,
+  referralLinkForSlug,
+} from "@/lib/referral";
 import { format } from "date-fns";
 import { Calendar, Check, Copy, Hash, Link2, MessageSquare, PoundSterling } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -105,6 +109,8 @@ function IntroducerPortal() {
 
   const profile = profileQ.data;
   const referralUrl = referralLinkForSlug(profile.slug);
+  const journeyWebUrl = marketingJourneyLinkForSlug(profile.slug);
+  const calculatorWebUrl = marketingCalculatorLinkForSlug(profile.slug);
   const companyCode = (profile as { company_code?: string | null }).company_code ?? null;
   const referrals = referralsQ.data?.referrals ?? [];
 
@@ -153,9 +159,42 @@ function IntroducerPortal() {
             <Link2 className="w-4 h-4" />
             Your shareable link
           </div>
+          <p className="text-sm text-muted-foreground">
+            Direct customers to Mortgage Hub to self-serve (voice, chat, or book). Attribution is recorded via
+            your referral cookie.
+          </p>
           <div className="flex flex-col sm:flex-row gap-2">
             <Input readOnly value={referralUrl} className="font-mono text-sm" />
             <CopyLinkButton url={referralUrl} label="Copy link" />
+          </div>
+        </section>
+
+        <section className="rounded-2xl border bg-card p-6 space-y-4">
+          <div className="flex items-center gap-2 font-medium">
+            <Link2 className="w-4 h-4" />
+            MortgageEasy website links
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Share these on your website, email, or socials. The <code className="text-xs">ref</code> parameter
+            attributes calculator callbacks and customer journeys to you on the marketing site.
+          </p>
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-1.5">
+                Three ways to start a mortgage journey
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Input readOnly value={journeyWebUrl} className="font-mono text-xs sm:text-sm" />
+                <CopyLinkButton url={journeyWebUrl} label="Copy journey link" />
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-1.5">Mortgage calculator</p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Input readOnly value={calculatorWebUrl} className="font-mono text-xs sm:text-sm" />
+                <CopyLinkButton url={calculatorWebUrl} label="Copy calculator link" />
+              </div>
+            </div>
           </div>
         </section>
 

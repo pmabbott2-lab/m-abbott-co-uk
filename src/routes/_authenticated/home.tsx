@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { listMySessions, createSession, getMyRole, listAllSessionsForAdvisor, deleteSession, restoreSession, listUsersWithRoles, setAdvisorRole, setIntroducerRole, listAdvisors, listAdvisorCustomers, allocateSession, unallocateSession, bulkAllocateSessions, softDeleteAdvisor, restoreAdvisor, softDeleteIntroducer, restoreIntroducer, listBinnedStaff, createStaffInvite, listStaffInvites, revokeStaffInvite, listMyCases } from "@/lib/sessions.functions";
 import { listAdmins, setAdminLevel, setAdminPermissions, listUsersForAdminGrant } from "@/lib/admin.functions";
 import { listFinanceLedger, setCommissionRate, getCommissionRate, getRafBonusAmount, listCommissionStaff, listCommissionRateHistory, listCommissionPayouts, listFinanceAuditLog, listCurrentCommissionArrangements, FEE_TYPE_LABELS, RAF_BONUS_POUNDS, type EnrichedLedgerRow } from "@/lib/finance.functions";
@@ -29,6 +29,10 @@ import { PhoneCallDetailDialog } from "@/components/PhoneCallDetailDialog";
 import { checkIsIntroducer } from "@/lib/introducer.functions";
 import { claimReferral, createReferralLink, textReferralLink, textRafInviteToFriend, getPublicShareBaseUrl, listReferralLinks, listAllReferrals, updateReferralBonusStatus, searchCustomers, listMyReferralActivity, ensureMyReferralLink } from "@/lib/referrals.functions";
 import { getRafCode, clearRafCookie, rafLinkForCode, rafShareMessage } from "@/lib/referral";
+import {
+  clearPostAuthStart,
+  resolvePostAuthStart,
+} from "@/lib/post-auth-journey";
 import { CommissionPayoutsPanel } from "@/components/CommissionPayoutsPanel";
 import { MyCommissionStatementPanel } from "@/components/MyCommissionStatementPanel";
 import { StaffCustomerBookingCard } from "@/components/StaffCustomerBookingCard";
@@ -3592,6 +3596,8 @@ function Home() {
     },
   });
 
+  const brokerJourneyStarted = useRef(false);
+
   // RAF attribution: if a friend arrived via /raf/<code> a 'raf_ref' cookie is
   // set. On their first authenticated load we record the referral crediting the
   // referrer, then clear the cookie so it only fires once. Self-referral and
@@ -3614,6 +3620,47 @@ function Home() {
       cancelled = true;
     };
   }, [claimReferralFn]);
+
+  // Brokerage site (MortgageEasy) → create account → open the journey they picked.
+  useEffect(() => {
+    if (roleQ.isLoading || isAdvisor || sessionsQ.isLoading || brokerJourneyStarted.current) return;
+
+    const start = resolvePostAuthStart();
+    if (!start) return;
+
+    brokerJourneyStarted.current = true;
+    clearPostAuthStart();
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("start")) {
+      params.delete("start");
+      const qs = params.toString();
+      window.history.replaceState({}, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+    }
+
+    const sessions = sessionsQ.data ?? [];
+    const inProgress = sessions.find((s) => s.status === "in_progress");
+
+    if (start === "book") {
+      void navigate({ to: "/booking" });
+      return;
+    }
+    if (start === "chat") {
+      if (inProgress) {
+        void navigate({ to: "/chat/$sessionId", params: { sessionId: inProgress.id } });
+      } else {
+        create.mutate("chat");
+      }
+      return;
+    }
+    if (start === "voice") {
+      if (inProgress) {
+        void navigate({ to: "/interview/$sessionId", params: { sessionId: inProgress.id } });
+      } else {
+        create.mutate("voice");
+      }
+    }
+  }, [roleQ.isLoading, isAdvisor, sessionsQ.isLoading, sessionsQ.data, navigate]);
 
   if (roleQ.isLoading) {
     return <AppShell title="Home"><div className="py-16 text-center text-muted-foreground">Loading…</div></AppShell>;

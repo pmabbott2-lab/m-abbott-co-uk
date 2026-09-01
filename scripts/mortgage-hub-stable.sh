@@ -5,6 +5,8 @@
 set -uo pipefail
 
 APP_PORT=8080
+MOCKUP_PORT=8081
+MOCKUP_DIR="marketing/mortgage-hub-website"
 PUBLIC_URL="https://another-selector-ranged.ngrok-free.dev"
 NGROK="$HOME/bin/ngrok"
 POLICY="$HOME/ngrok-policy.yml"
@@ -43,10 +45,44 @@ ngrok_running() {
   pgrep -f "another-selector-ranged.ngrok-free.dev" >/dev/null 2>&1
 }
 
-start_app() {
-  if app_running; then
+mockup_running() {
+  lsof -iTCP:"$MOCKUP_PORT" -sTCP:LISTEN -t >/dev/null 2>&1
+}
+
+needs_production_build() {
+  [[ ! -f dist/server/server.js ]] && return 0
+  find src -type f \( -name '*.ts' -o -name '*.tsx' \) -newer dist/server/server.js -print -quit 2>/dev/null | grep -q .
+}
+
+stop_app_preview() {
+  [[ -f "$LOG/prod.pid" ]] && kill "$(cat "$LOG/prod.pid")" 2>/dev/null || true
+  pkill -f "vite preview --port ${APP_PORT}" 2>/dev/null || true
+  lsof -iTCP:"$APP_PORT" -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null || true
+  rm -f "$LOG/prod.pid"
+}
+
+start_mockup() {
+  if mockup_running; then
     return 0
   fi
+  if [[ ! -d "$PROJECT/$MOCKUP_DIR" ]]; then
+    echo "Mockup dir not found at $PROJECT/$MOCKUP_DIR" >>"$LOG/stable.err"
+    return 1
+  fi
+  load_node
+  cd "$PROJECT"
+  echo "$(date '+%F %T') starting mockup site on :$MOCKUP_PORT" >>"$LOG/stable.log"
+  nohup npx --yes serve "$MOCKUP_DIR" -l "$MOCKUP_PORT" --no-clipboard >>"$LOG/mockup.log" 2>&1 &
+  echo $! >"$LOG/mockup.pid"
+  disown -h "$!" 2>/dev/null || true
+  for _ in $(seq 1 30); do
+    curl -sf "http://127.0.0.1:${MOCKUP_PORT}/" >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+  return 1
+}
+
+start_app() {
   if [[ ! -d "$PROJECT" ]]; then
     echo "Project not found at $PROJECT" >>"$LOG/stable.err"
     return 1
@@ -55,9 +91,20 @@ start_app() {
   load_env
   cd "$PROJECT"
 
-  if [[ ! -f dist/server/server.js ]]; then
-    echo "Building production app…" >>"$LOG/stable.log"
+  local rebuilt=0
+  if needs_production_build; then
+    echo "$(date '+%F %T') building production app (missing or stale dist)" >>"$LOG/stable.log"
     npm run build >>"$LOG/build.log" 2>&1 || return 1
+    rebuilt=1
+  fi
+
+  if app_running; then
+    if [[ "$rebuilt" -eq 1 ]]; then
+      echo "$(date '+%F %T') restarting app after rebuild" >>"$LOG/stable.log"
+      stop_app_preview
+    else
+      return 0
+    fi
   fi
 
   echo "$(date '+%F %T') starting production server" >>"$LOG/stable.log"
@@ -84,21 +131,21 @@ start_ngrok() {
 
 case "${1:-start}" in
   start)
-    start_app && start_ngrok
+    start_app && start_mockup && start_ngrok
     ;;
   ensure)
     start_app || true
+    start_mockup || true
     start_ngrok || true
     ;;
   stop)
-    [[ -f "$LOG/prod.pid" ]] && kill "$(cat "$LOG/prod.pid")" 2>/dev/null || true
+    stop_app_preview
+    [[ -f "$LOG/mockup.pid" ]] && kill "$(cat "$LOG/mockup.pid")" 2>/dev/null || true
     [[ -f "$LOG/ngrok.pid" ]] && kill "$(cat "$LOG/ngrok.pid")" 2>/dev/null || true
-    pkill -f "vite preview --port ${APP_PORT}" 2>/dev/null || true
-    pkill -f "vite preview" 2>/dev/null || true
     pkill -f "another-selector-ranged.ngrok-free.dev" 2>/dev/null || true
-    lsof -iTCP:"$APP_PORT" -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null || true
-    lsof -iTCP:8081 -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null || true
-    rm -f "$LOG/prod.pid" "$LOG/ngrok.pid"
+    lsof -iTCP:"$MOCKUP_PORT" -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null || true
+    pkill -f "serve $MOCKUP_DIR" 2>/dev/null || true
+    rm -f "$LOG/prod.pid" "$LOG/mockup.pid" "$LOG/ngrok.pid"
     ;;
   rebuild)
     "$0" stop
@@ -109,8 +156,10 @@ case "${1:-start}" in
     ;;
   status)
     echo -n "app: "; app_running && echo "up" || echo "down"
+    echo -n "mockup: "; mockup_running && echo "up" || echo "down"
     echo -n "ngrok: "; ngrok_running && echo "up" || echo "down"
     curl -sf -o /dev/null -w "http:%{http_code}\n" "http://127.0.0.1:${APP_PORT}/" 2>/dev/null || echo "http:fail"
+    curl -sf -o /dev/null -w "mockup:%{http_code}\n" "http://127.0.0.1:${MOCKUP_PORT}/" 2>/dev/null || echo "mockup:fail"
     ;;
   *)
     echo "Usage: $0 {start|ensure|stop|rebuild|status}"

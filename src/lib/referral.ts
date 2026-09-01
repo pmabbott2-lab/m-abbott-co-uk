@@ -30,6 +30,32 @@ export function referralLinkForSlug(slug: string, origin?: string) {
   return `${base}/go/${slug}`;
 }
 
+/** Marketing site base (MortgageEasy mockup on 8081 locally). */
+export function getMarketingSiteUrl(): string {
+  const configured = import.meta.env.VITE_MOCKUP_SITE_URL?.trim().replace(/\/$/, "");
+  if (configured) return configured;
+  if (typeof window !== "undefined") {
+    const { hostname, origin } = window.location;
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://127.0.0.1:8081";
+    }
+    return origin;
+  }
+  return "http://127.0.0.1:8081";
+}
+
+/** Partner link to MortgageEasy home — three ways to start (voice, chat, book). */
+export function marketingJourneyLinkForSlug(slug: string, origin?: string) {
+  const base = (origin ?? getMarketingSiteUrl()).replace(/\/$/, "");
+  return `${base}/?ref=${encodeURIComponent(slug)}#your-journey`;
+}
+
+/** Partner link to MortgageEasy mortgage calculator with attribution. */
+export function marketingCalculatorLinkForSlug(slug: string, origin?: string) {
+  const base = (origin ?? getMarketingSiteUrl()).replace(/\/$/, "");
+  return `${base}/calculator.html?ref=${encodeURIComponent(slug)}`;
+}
+
 export function bookingLinkForSlug(slug: string, origin?: string, leadId?: string) {
   const base = origin ?? (typeof window !== "undefined" ? window.location.origin : "");
   const url = `${base}/book/${slug}`;

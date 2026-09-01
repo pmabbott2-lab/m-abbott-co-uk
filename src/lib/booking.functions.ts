@@ -16,6 +16,14 @@ import { clearSessionAttention, assertStaffCanAccessCustomer } from "@/lib/sessi
 const SLOT_MINUTES = 30;
 const BOOKING_HORIZON_DAYS = 28;
 
+/** Auth email for customers without an address — phone-only bookings. */
+export function emailForCustomerAccount(email: string, phone: string): string {
+  const trimmed = email.trim().toLowerCase();
+  if (trimmed) return trimmed;
+  const digits = phone.replace(/\D/g, "");
+  return `phone+${digits}@customers.mortgagehub.local`;
+}
+
 function parseTimeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
   return h * 60 + m;
@@ -296,6 +304,7 @@ async function resolveOrCreateCustomerProfile(data: {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const phone = normaliseUkPhone(data.customerPhone);
   const email = data.customerEmail.trim().toLowerCase();
+  const authEmail = emailForCustomerAccount(email, phone);
 
   if (email) {
     const { data: byEmail } = await supabaseAdmin
@@ -328,7 +337,7 @@ async function resolveOrCreateCustomerProfile(data: {
   }
 
   const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
-    email,
+    email: authEmail,
     email_confirm: true,
     user_metadata: { full_name: data.customerName, phone },
   });
@@ -338,7 +347,7 @@ async function resolveOrCreateCustomerProfile(data: {
   await supabaseAdmin.from("profiles").upsert({
     id: userId,
     full_name: data.customerName,
-    email,
+    email: email || null,
     phone,
   });
   await supabaseAdmin
@@ -578,6 +587,89 @@ async function bookAppointment(
 export const createAppointment = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => appointmentInput.parse(d))
   .handler(async ({ data }) => bookAppointment(data));
+
+const customerAppointmentSignupInput = z.object({
+  customerName: z.string().min(2),
+  customerPhone: z.string().min(7),
+  customerEmail: z.string().email().optional().or(z.literal("")),
+  startsAt: z.string().datetime(),
+  password: z.string().min(6).optional(),
+  journey: z.enum(["voice", "chat", "book"]).optional(),
+  slug: z.string().min(1).optional(),
+});
+
+export const customerAppointmentSignup = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => customerAppointmentSignupInput.parse(d))
+  .handler(async ({ data }) => {
+    const phone = normaliseUkPhone(data.customerPhone);
+    const emailRaw = data.customerEmail?.trim().toLowerCase() || "";
+    const password = data.password?.trim() || "";
+    const authEmail = emailForCustomerAccount(emailRaw, phone);
+
+    const userId = await resolveOrCreateCustomerProfile({
+      customerName: data.customerName,
+      customerPhone: data.customerPhone,
+      customerEmail: emailRaw,
+    });
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    if (password.length >= 6) {
+      const { error: pwErr } = await supabaseAdmin.auth.admin.updateUserById(userId, { password });
+      if (pwErr) throw new Error(pwErr.message);
+    }
+
+    const channel =
+      data.journey === "voice"
+        ? "voice"
+        : data.journey === "chat"
+          ? "text"
+          : "direct_booking";
+
+    await bookAppointment(
+      {
+        customerId: userId,
+        customerName: data.customerName,
+        customerPhone: data.customerPhone,
+        customerEmail: emailRaw,
+        startsAt: data.startsAt,
+        channel,
+        slug: data.slug,
+      },
+      userId,
+    );
+
+    let needsSmsCode = false;
+    if (password.length < 6) {
+      if (!isTwilioConfigured()) {
+        throw new Error(
+          "Appointment saved but SMS sign-in is not configured. Set a password or contact support.",
+        );
+      }
+      const { storeLoginSmsCode } = await import("@/lib/auth-sms.store.server");
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      storeLoginSmsCode(userId, code);
+      const when = new Date(data.startsAt);
+      const whenLabel = when.toLocaleString("en-GB", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      await sendSms({
+        to: phone,
+        body: `Hi ${data.customerName}, your mortgage appointment is confirmed for ${whenLabel}. Sign-in code: ${code} (10 min).`,
+      });
+      needsSmsCode = true;
+    }
+
+    return {
+      signInEmail: password.length >= 6 ? authEmail : undefined,
+      needsSmsCode,
+      bookedAt: data.startsAt,
+    };
+  });
 
 export const createAppointmentAuth = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

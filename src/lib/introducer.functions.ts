@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { calculatorLeadInput } from "@/lib/introducer-calculator-lead.server";
 import { z } from "zod";
 
 function slugify(value: string): string {
@@ -405,4 +406,14 @@ export const listIntroducerReferrals = createServerFn({ method: "GET" })
     rows.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     return { referrals: rows };
+  });
+
+/** Public lead capture from MortgageEasy calculator embeds (no auth account created). */
+export const captureIntroducerCalculatorLead = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => calculatorLeadInput.parse(d))
+  .handler(async ({ data }) => {
+    const { captureIntroducerCalculatorLead: capture } = await import(
+      "@/lib/introducer-calculator-lead.server"
+    );
+    return capture(data);
   });

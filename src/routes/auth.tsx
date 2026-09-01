@@ -1,6 +1,6 @@
-import { createFileRoute, useNavigate, useMatches, Outlet, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useMatches, Outlet } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -15,9 +15,22 @@ import {
   isLoginSmsVerified,
   markLoginSmsVerified,
 } from "@/lib/auth-sms-session";
+import { setReferralCookie } from "@/lib/referral";
 import { getAuthCallbackUrl, getPasswordResetUrl, isLocalDev } from "@/lib/app-url";
 import { isLoginMfaSuspended } from "@/lib/auth-mfa-config";
 import { fetchUserRoles, requiresAuthenticatorMfa, requiresSmsLoginVerification } from "@/lib/auth-roles";
+import {
+  buildHomePathAfterAuth,
+  clearPostAuthStart,
+  parsePostAuthStart,
+  readPostAuthStart,
+  readPostAuthStartFromUrl,
+  readAuthEntryFromLocation,
+  resolvePostAuthStart,
+  savePostAuthStart,
+  syncPostAuthStart,
+  usesAppointmentSignupFlow,
+} from "@/lib/post-auth-journey";
 
 function hasTestLoginBypass(session: Session): boolean {
   const meta = session.user.app_metadata as { test_email_bypass?: boolean } | undefined;
@@ -29,6 +42,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import avatarImg from "@/assets/susan.png";
+import { CustomerAppointmentSignup } from "@/components/CustomerAppointmentSignup";
 
 type AuthMode = "signin" | "signup" | "forgot" | "phone" | "mfa-challenge" | "mfa-enroll" | "mfa-setup-required" | "sms-login-challenge";
 
@@ -37,9 +51,30 @@ function isSupabaseMfaDisabledMessage(msg: string): boolean {
 }
 
 export const Route = createFileRoute("/auth")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    recovery: search.recovery === "1" || search.recovery === 1,
-  }),
+  ssr: false,
+  validateSearch: (search: Record<string, unknown>) => {
+    const fromBroker =
+      search.from === "broker" ||
+      search.from === "mortgageeasy";
+    const start =
+      parsePostAuthStart(typeof search.start === "string" ? search.start : null) ?? undefined;
+    const joinRaw = search.join;
+    const join =
+      joinRaw === "1" ||
+      joinRaw === 1 ||
+      joinRaw === true ||
+      joinRaw === "true" ||
+      joinRaw === "signup" ||
+      search.mode === "signup" ||
+      search.mode === "join" ||
+      start !== undefined;
+    return {
+      recovery: search.recovery === "1" || search.recovery === 1 || search.recovery === true,
+      join,
+      fromBroker,
+      start,
+    };
+  },
   head: () => ({
     meta: [
       { title: "Sign in — Mortgage Hub" },
@@ -58,8 +93,14 @@ function AuthPage() {
   // mismatches that a window-location check would cause.
   const matches = useMatches();
   const isChildRoute = matches.some((m) => m.routeId === "/auth/reset");
-  const { recovery } = Route.useSearch();
-  const [mode, setMode] = useState<AuthMode>("signin");
+  const { recovery, fromBroker } = Route.useSearch();
+  const urlIntent = readAuthEntryFromLocation();
+  const journeyStart = urlIntent.start;
+  const effectiveJoin = urlIntent.join;
+  const [mode, setMode] = useState<AuthMode>(() => {
+    if (typeof window === "undefined") return "signin";
+    return readAuthEntryFromLocation().join ? "signup" : "signin";
+  });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -91,6 +132,41 @@ function AuthPage() {
   const verifyLoginSmsFn = useServerFn(verifyLoginSmsCodeFn);
   const signInInFlight = useRef(false);
 
+  const goHomeAfterAuth = (routeStart?: typeof journeyStart) => {
+    const pendingStart =
+      mode === "signin" ? null : resolvePostAuthStart(routeStart ?? journeyStart);
+    if (pendingStart) {
+      window.location.assign(buildHomePathAfterAuth(pendingStart));
+      return;
+    }
+    navigate({ to: "/home" });
+  };
+
+  useLayoutEffect(() => {
+    if (isChildRoute) return;
+    const intent = readAuthEntryFromLocation();
+    const urlStart = intent.start;
+    if (urlStart) {
+      savePostAuthStart(urlStart);
+    }
+    const refSlug = new URLSearchParams(window.location.search).get("ref")?.trim().toLowerCase()
+      || new URLSearchParams(window.location.search).get("introducer")?.trim().toLowerCase();
+    if (refSlug) {
+      setReferralCookie(refSlug);
+    }
+    const isOAuthReturn =
+      typeof window !== "undefined" &&
+      (window.location.hash.includes("access_token") || window.location.hash.includes("error"));
+    if (intent.join) {
+      setMode("signup");
+      return;
+    }
+    setMode("signin");
+    if (!isOAuthReturn) {
+      clearPostAuthStart();
+    }
+  }, [isChildRoute, effectiveJoin, journeyStart, fromBroker]);
+
   useEffect(() => {
     if (isChildRoute) return;
     if (recovery || isPasswordRecoveryUrl() || isPasswordRecoveryPending()) {
@@ -111,7 +187,7 @@ function AuthPage() {
       if (signInInFlight.current) return;
       if (session && !isPasswordRecoveryPending() && !mfaBlocking && !smsBlocking) {
         if (await resumeLoginStepIfNeeded(session)) return;
-        navigate({ to: "/home" });
+        goHomeAfterAuth();
       }
     });
 
@@ -119,11 +195,11 @@ function AuthPage() {
       const { data } = await supabase.auth.getSession();
       if (!data.session || isPasswordRecoveryPending() || mfaBlocking || smsBlocking) return;
       if (await resumeLoginStepIfNeeded(data.session)) return;
-      navigate({ to: "/home" });
+      goHomeAfterAuth();
     })();
 
     return () => subscription.unsubscribe();
-  }, [recovery, navigate, isChildRoute, mfaBlocking, smsBlocking]);
+  }, [recovery, navigate, isChildRoute, mfaBlocking, smsBlocking, journeyStart]);
 
   const showStatus = (type: "error" | "success", text: string) => {
     setStatus({ type, text });
@@ -136,7 +212,7 @@ function AuthPage() {
     setStatus(null);
     setDevResetLink(null);
     setPassword("");
-    setPhone("");
+    if (next !== "signup") setPhone("");
     setOtpSentTo(null);
     setOtpCode("");
     setMfaFactorId(null);
@@ -153,7 +229,28 @@ function AuthPage() {
     setSmsNeedsPhone(false);
     setSmsChallengePhone("");
     if (typeof window !== "undefined") {
-      window.history.replaceState({}, "", "/auth");
+      const broker = fromBroker || urlIntent.fromBroker;
+      if (next === "signup") {
+        const preservedStart =
+          readPostAuthStartFromUrl() ?? journeyStart ?? readPostAuthStart() ?? undefined;
+        if (preservedStart) savePostAuthStart(preservedStart);
+        void navigate({
+          to: "/auth",
+          search: {
+            ...(broker ? { from: "broker" as const } : {}),
+            join: "1",
+            ...(preservedStart ? { start: preservedStart } : {}),
+          },
+          replace: true,
+        });
+      } else if (next === "signin") {
+        clearPostAuthStart();
+        void navigate({
+          to: "/auth",
+          search: broker ? { from: "broker" as const } : {},
+          replace: true,
+        });
+      }
     }
   };
 
@@ -182,7 +279,8 @@ function AuthPage() {
         await new Promise((r) => setTimeout(r, 50));
       }
       // Full reload so /_authenticated beforeLoad always sees a stored session.
-      window.location.assign("/home");
+      const pendingStart = mode === "signin" ? null : resolvePostAuthStart(journeyStart);
+      window.location.assign(buildHomePathAfterAuth(pendingStart));
     } finally {
       // Keep in-flight true through navigation; unload clears it.
     }
@@ -455,12 +553,37 @@ function AuthPage() {
       }
 
       if (mode === "signup") {
+        const form = e.currentTarget;
+        const fd = new FormData(form);
+        const emailValue = (String(fd.get("email") ?? "") || email).trim();
+        const passwordValue = String(fd.get("password") ?? "") || password;
+        const nameValue = (String(fd.get("name") ?? "") || fullName).trim();
+        const phoneRaw = (String(fd.get("phone") ?? "") || phone).trim();
+
+        if (!nameValue || nameValue.length < 2) {
+          showStatus("error", "Enter your full name.");
+          return;
+        }
+        if (!emailValue) {
+          showStatus("error", "Enter your email address.");
+          return;
+        }
+        if (!passwordValue || passwordValue.length < 6) {
+          showStatus("error", "Password must be at least 6 characters.");
+          return;
+        }
+        if (!isValidUkMobile(phoneRaw)) {
+          showStatus("error", "Enter a valid UK mobile number (e.g. 07123 456789).");
+          return;
+        }
+        const phoneValue = normaliseUkPhone(phoneRaw);
+
         const { data, error } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
+          email: emailValue,
+          password: passwordValue,
           options: {
             emailRedirectTo: getAuthCallbackUrl(),
-            data: { full_name: fullName.trim(), phone: phone.trim() },
+            data: { full_name: nameValue, phone: phoneValue },
           },
         });
         if (error) throw error;
@@ -528,6 +651,7 @@ function AuthPage() {
   };
 
   const onGoogle = async () => {
+    syncPostAuthStart(journeyStart);
     setLoading(true);
     try {
       const { error } = await supabase.auth.signInWithOAuth({
@@ -657,7 +781,15 @@ function AuthPage() {
       ? "Reset your password"
       : mode === "phone"
         ? "Sign in with your phone"
-        : "Get started with Mortgage Hub";
+        : mode === "signup"
+          ? journeyStart === "voice"
+            ? "Create your account — then talk to Susan"
+            : journeyStart === "chat"
+              ? "Create your account — then chat with Susan"
+              : journeyStart === "book"
+                ? "Book your appointment"
+                : "Create your Mortgage Hub account"
+          : "Get started with Mortgage Hub";
 
   const subtitle =
     mode === "sms-login-challenge"
@@ -676,11 +808,19 @@ function AuthPage() {
       ? isLocalDev()
         ? "We'll create a direct reset link for localhost (no email required)."
         : "Enter your email and we'll send you a reset link."
-      : mode === "phone"
+        : mode === "phone"
         ? otpSentTo
           ? "Enter the 6-digit code we just texted you."
           : "Customers and introducers: we'll text you a one-time code to sign in — no authenticator app needed."
-        : "A friendly voice interview that helps your advisor know you faster.";
+        : mode === "signup" && journeyStart === "voice"
+          ? "A short spoken fact-find with Susan — create your account to begin."
+          : mode === "signup" && journeyStart === "chat"
+            ? "A quiet typed fact-find with Susan — create your account to begin."
+            : mode === "signup" && journeyStart === "book"
+              ? "Pick a time with your advisor — we'll confirm by text."
+              : mode === "signin"
+                ? "Sign in to your Mortgage Hub account."
+                : "Create your account to get started with Mortgage Hub.";
 
   const submitLabel =
     mode === "forgot"
@@ -691,8 +831,29 @@ function AuthPage() {
         ? "Create account"
         : "Sign in";
 
+  const signupTabLabel = usesAppointmentSignupFlow(journeyStart) ? "Book appointment" : "Create account";
+  const appointmentSignup =
+    mode === "signup" && effectiveJoin && journeyStart === "book";
+
   // Child routes (e.g. /auth/reset) render here via the parent's outlet.
   if (isChildRoute) return <Outlet />;
+
+  if (appointmentSignup) {
+    return (
+      <div className="min-h-screen bg-background px-4 sm:px-6 py-8 sm:py-12">
+        <div className="max-w-4xl mx-auto">
+          <CustomerAppointmentSignup
+            journey="book"
+            onComplete={() => void finishSignIn()}
+            onSwitchSignIn={() => switchMode("signin")}
+          />
+        </div>
+        <p className="text-xs text-center text-muted-foreground mt-8 space-x-3">
+          <a href="/" className="hover:underline">← Back home</a>
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-12 bg-background">
@@ -717,7 +878,7 @@ function AuthPage() {
                 onClick={() => switchMode("signup")}
                 className={`flex-1 text-sm py-2 rounded-md transition ${mode === "signup" ? "bg-card shadow-sm font-medium" : "text-muted-foreground"}`}
               >
-                Create account
+                {signupTabLabel}
               </button>
             </div>
           ) : mode === "mfa-setup-required" ? (
@@ -916,7 +1077,7 @@ function AuthPage() {
             {mode === "signup" && (
               <div className="space-y-1.5">
                 <Label htmlFor="name">Full name</Label>
-                <Input id="name" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+                <Input id="name" name="name" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
               </div>
             )}
             {mode === "signup" && (
@@ -924,6 +1085,7 @@ function AuthPage() {
                 <Label htmlFor="phone">Mobile number</Label>
                 <Input
                   id="phone"
+                  name="phone"
                   type="tel"
                   autoComplete="tel"
                   inputMode="tel"
@@ -956,7 +1118,7 @@ function AuthPage() {
                   id="password"
                   name="password"
                   type="password"
-                  autoComplete="current-password"
+                  autoComplete={mode === "signup" ? "new-password" : "current-password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
@@ -1082,7 +1244,7 @@ function AuthPage() {
           )}
         </div>
         <p className="text-xs text-center text-muted-foreground space-x-3">
-          <Link to="/" className="hover:underline">← Back home</Link>
+          <a href="/" className="hover:underline">← Back home</a>
           {(mode === "signin" || mode === "signup") && (
             <>
               <span>·</span>

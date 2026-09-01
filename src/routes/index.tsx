@@ -1,5 +1,5 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   goToPasswordRecoveryPage,
@@ -14,8 +14,12 @@ import avatarImg from "@/assets/susan.png";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Mortgage Hub — Voice Interview & Booking" },
-      { name: "description", content: "A friendly avatar-guided voice or text interview that captures everything your mortgage advisor needs — or book an appointment straight away." },
+      { title: "Mortgage Hub — Voice, Chat & Appointments" },
+      {
+        name: "description",
+        content:
+          "Create your account and complete a spoken or typed fact-find with Susan — or book an appointment first with our diary.",
+      },
     ],
   }),
   component: Landing,
@@ -23,8 +27,6 @@ export const Route = createFileRoute("/")({
 
 function Landing() {
   const navigate = useNavigate();
-  const [checking, setChecking] = useState(true);
-  const [slowLoad, setSlowLoad] = useState(false);
 
   useEffect(() => {
     if (isPasswordRecoveryUrl()) {
@@ -40,76 +42,25 @@ function Landing() {
       return;
     }
 
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      setChecking(false);
-    };
-
-    const timeout = window.setTimeout(() => {
-      finish();
-      setSlowLoad(true);
-    }, 4000);
-
-    // Hard fallback if client routing or Supabase hangs after login.
-    const hardRedirect = window.setTimeout(() => {
-      void supabase.auth.getSession().then(({ data }) => {
-        if (data.session) window.location.assign("/home");
-      });
-    }, 8000);
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        navigate({ to: "/home" });
-        finish();
-      }
+      if (session) navigate({ to: "/home" });
     });
 
-    supabase.auth
-      .getSession()
-      .then(({ data }) => {
-        if (data.session) {
-          navigate({ to: "/home" });
-          finish();
-        } else {
-          finish();
-        }
-      })
-      .catch(() => finish());
+    void supabase.auth.getSession().then(({ data }) => {
+      if (data.session) navigate({ to: "/home" });
+    });
 
-    return () => {
-      window.clearTimeout(timeout);
-      window.clearTimeout(hardRedirect);
-      subscription.unsubscribe();
-    };
+    return () => subscription.unsubscribe();
   }, [navigate]);
-
-  if (checking) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-4 px-6 text-center">
-        <p className="text-sm text-muted-foreground">Loading Mortgage Hub…</p>
-        {slowLoad && (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">This is taking longer than usual.</p>
-            <div className="flex flex-wrap justify-center gap-2">
-              <Link to="/auth"><Button size="sm" variant="outline">Sign in</Button></Link>
-              <Button size="sm" onClick={() => window.location.assign("/home")}>Go to dashboard</Button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-background">
       <header className="px-6 py-5 flex items-center justify-between max-w-6xl mx-auto">
-        <div className="flex items-center gap-2 font-semibold">
+        <a href="/" className="flex items-center gap-2 font-semibold text-foreground no-underline">
           <span className="inline-block w-7 h-7 rounded-full bg-accent" />
           Mortgage Hub
-        </div>
-        <Link to="/auth"><Button variant="ghost">Sign in</Button></Link>
+        </a>
+        <a href="/auth"><Button variant="ghost">Sign in</Button></a>
       </header>
       <main className="max-w-6xl mx-auto px-6 pt-12 pb-24 space-y-16">
         <section className="grid md:grid-cols-2 gap-12 items-center">
@@ -118,17 +69,19 @@ function Landing() {
               Get your mortgage advisor up to speed — before you even meet.
             </h1>
             <p className="text-lg text-muted-foreground">
-              Answer simple questions about you, your job, and the property you want — your way.
-              Talk to a friendly spoken assistant, or type to a chat assistant if you'd rather
-              keep it quiet. We'll hand a clean summary to your advisor.
+              Create your account, then answer simple questions about you, your job, and the property
+              you want. Talk to Susan in a spoken fact-find, or type quietly in chat — we'll hand a
+              clean summary to your advisor.
             </p>
             <div className="flex flex-wrap gap-3">
-              <Link to="/auth"><Button size="lg">Get started</Button></Link>
+              <a href="/auth?join=1&start=voice"><Button size="lg">Get started</Button></a>
             </div>
             <p className="text-sm text-muted-foreground">
-              Choose <span className="font-medium text-foreground">spoken</span>,{" "}
-              <span className="font-medium text-foreground">typed</span>, or{" "}
-              <span className="font-medium text-foreground">book a call</span> after you sign in.
+              <span className="font-medium text-foreground">Voice</span> and{" "}
+              <span className="font-medium text-foreground">chat</span> use create account, then your
+              fact-find — not appointment booking.{" "}
+              <span className="font-medium text-foreground">Book appointment</span> picks your time
+              first.
             </p>
           </div>
           <div className="flex items-center justify-center">
@@ -141,29 +94,35 @@ function Landing() {
 
         <section>
           <h2 className="text-xl font-semibold mb-1">Choose how you'd like to get started</h2>
-          <p className="text-sm text-muted-foreground mb-4">Pick any of the three routes — sign in to continue.</p>
+          <p className="text-sm text-muted-foreground mb-4">
+            Voice and chat start with create account, then your fact-find. Booking starts by choosing
+            an appointment.
+          </p>
           <div className="grid sm:grid-cols-3 gap-4">
-            <Link to="/auth" className="rounded-2xl border bg-card p-5 transition hover:border-accent hover:shadow-sm">
+            <a href="/auth?join=1&start=voice" className="rounded-2xl border bg-card p-5 transition hover:border-accent hover:shadow-sm no-underline text-foreground">
               <Mic className="w-7 h-7 mb-3 text-accent" />
               <h3 className="font-semibold">Verbal interview</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                Talk through your details with Susan, our avatar-led spoken assistant.
+                Create your account, then talk through your details with Susan in a spoken fact-find.
               </p>
-            </Link>
-            <Link to="/auth" className="rounded-2xl border bg-card p-5 transition hover:border-accent hover:shadow-sm">
+              <p className="text-sm font-medium text-accent mt-3">Get started →</p>
+            </a>
+            <a href="/auth?join=1&start=chat" className="rounded-2xl border bg-card p-5 transition hover:border-accent hover:shadow-sm no-underline text-foreground">
               <MessageSquare className="w-7 h-7 mb-3 text-accent" />
               <h3 className="font-semibold">Text interview</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                Prefer to type? Answer the same questions in a quiet, typed chat.
+                Create your account, then answer the same questions in a quiet typed chat.
               </p>
-            </Link>
-            <Link to="/auth" className="rounded-2xl border bg-card p-5 transition hover:border-accent hover:shadow-sm">
+              <p className="text-sm font-medium text-accent mt-3">Create account →</p>
+            </a>
+            <a href="/auth?join=1&start=book" className="rounded-2xl border bg-card p-5 transition hover:border-accent hover:shadow-sm no-underline text-foreground">
               <CalendarCheck className="w-7 h-7 mb-3 text-accent" />
               <h3 className="font-semibold">Book an appointment</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                Skip ahead for now and pick a time to speak with your advisor.
+                Pick a time with your advisor first — appointment-first signup with our diary.
               </p>
-            </Link>
+              <p className="text-sm font-medium text-accent mt-3">Book appointment →</p>
+            </a>
           </div>
         </section>
       </main>

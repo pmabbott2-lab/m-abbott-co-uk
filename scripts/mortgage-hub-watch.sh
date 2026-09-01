@@ -16,6 +16,7 @@ fi
 
 while true; do
   if ! curl -sf "http://127.0.0.1:8080/" >/dev/null 2>&1 || \
+     ! curl -sf "http://127.0.0.1:8081/" >/dev/null 2>&1 || \
      ! pgrep -f "another-selector-ranged.ngrok-free.dev" >/dev/null 2>&1; then
     echo "$(date '+%F %T') restart triggered" >>"$LOG/watch.log"
     "$HOME/bin/mortgage-hub-stable.sh" ensure >>"$LOG/watch.log" 2>&1 || true

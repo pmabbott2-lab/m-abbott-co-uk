@@ -28,6 +28,9 @@ import { Route as AuthenticatedCasesRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedBookingRouteImport } from './routes/_authenticated/booking'
 import { Route as ApiTeamsCallbackRouteImport } from './routes/api/teams/callback'
 import { Route as ApiSmsInboundRouteImport } from './routes/api/sms/inbound'
+import { Route as ApiIntroducerCalculatorLeadRouteImport } from './routes/api/introducer/calculator-lead'
+import { Route as ApiCalculatorMarketRatesRouteImport } from './routes/api/calculator/market-rates'
+import { Route as ApiCalculatorEstimateRateRouteImport } from './routes/api/calculator/estimate-rate'
 import { Route as ApiAuthRequestPasswordResetRouteImport } from './routes/api/auth/request-password-reset'
 import { Route as AuthenticatedTextSessionIdRouteImport } from './routes/_authenticated/text.$sessionId'
 import { Route as AuthenticatedSessionsSessionIdRouteImport } from './routes/_authenticated/sessions.$sessionId'
@@ -134,6 +137,24 @@ const ApiSmsInboundRoute = ApiSmsInboundRouteImport.update({
   path: '/api/sms/inbound',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiIntroducerCalculatorLeadRoute =
+  ApiIntroducerCalculatorLeadRouteImport.update({
+    id: '/api/introducer/calculator-lead',
+    path: '/api/introducer/calculator-lead',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiCalculatorMarketRatesRoute =
+  ApiCalculatorMarketRatesRouteImport.update({
+    id: '/api/calculator/market-rates',
+    path: '/api/calculator/market-rates',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiCalculatorEstimateRateRoute =
+  ApiCalculatorEstimateRateRouteImport.update({
+    id: '/api/calculator/estimate-rate',
+    path: '/api/calculator/estimate-rate',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiAuthRequestPasswordResetRoute =
   ApiAuthRequestPasswordResetRouteImport.update({
     id: '/api/auth/request-password-reset',
@@ -221,6 +242,9 @@ export interface FileRoutesByFullPath {
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
   '/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
+  '/api/calculator/estimate-rate': typeof ApiCalculatorEstimateRateRoute
+  '/api/calculator/market-rates': typeof ApiCalculatorMarketRatesRoute
+  '/api/introducer/calculator-lead': typeof ApiIntroducerCalculatorLeadRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
   '/api/teams/callback': typeof ApiTeamsCallbackRoute
   '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
@@ -252,6 +276,9 @@ export interface FileRoutesByTo {
   '/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
   '/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
+  '/api/calculator/estimate-rate': typeof ApiCalculatorEstimateRateRoute
+  '/api/calculator/market-rates': typeof ApiCalculatorMarketRatesRoute
+  '/api/introducer/calculator-lead': typeof ApiIntroducerCalculatorLeadRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
   '/api/teams/callback': typeof ApiTeamsCallbackRoute
   '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
@@ -285,6 +312,9 @@ export interface FileRoutesById {
   '/_authenticated/sessions/$sessionId': typeof AuthenticatedSessionsSessionIdRoute
   '/_authenticated/text/$sessionId': typeof AuthenticatedTextSessionIdRoute
   '/api/auth/request-password-reset': typeof ApiAuthRequestPasswordResetRoute
+  '/api/calculator/estimate-rate': typeof ApiCalculatorEstimateRateRoute
+  '/api/calculator/market-rates': typeof ApiCalculatorMarketRatesRoute
+  '/api/introducer/calculator-lead': typeof ApiIntroducerCalculatorLeadRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
   '/api/teams/callback': typeof ApiTeamsCallbackRoute
   '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
@@ -318,6 +348,9 @@ export interface FileRouteTypes {
     | '/sessions/$sessionId'
     | '/text/$sessionId'
     | '/api/auth/request-password-reset'
+    | '/api/calculator/estimate-rate'
+    | '/api/calculator/market-rates'
+    | '/api/introducer/calculator-lead'
     | '/api/sms/inbound'
     | '/api/teams/callback'
     | '/api/twilio/voice/client-outbound'
@@ -349,6 +382,9 @@ export interface FileRouteTypes {
     | '/sessions/$sessionId'
     | '/text/$sessionId'
     | '/api/auth/request-password-reset'
+    | '/api/calculator/estimate-rate'
+    | '/api/calculator/market-rates'
+    | '/api/introducer/calculator-lead'
     | '/api/sms/inbound'
     | '/api/teams/callback'
     | '/api/twilio/voice/client-outbound'
@@ -381,6 +417,9 @@ export interface FileRouteTypes {
     | '/_authenticated/sessions/$sessionId'
     | '/_authenticated/text/$sessionId'
     | '/api/auth/request-password-reset'
+    | '/api/calculator/estimate-rate'
+    | '/api/calculator/market-rates'
+    | '/api/introducer/calculator-lead'
     | '/api/sms/inbound'
     | '/api/teams/callback'
     | '/api/twilio/voice/client-outbound'
@@ -403,6 +442,9 @@ export interface RootRouteChildren {
   GoSlugRoute: typeof GoSlugRoute
   RafCodeRoute: typeof RafCodeRoute
   ApiAuthRequestPasswordResetRoute: typeof ApiAuthRequestPasswordResetRoute
+  ApiCalculatorEstimateRateRoute: typeof ApiCalculatorEstimateRateRoute
+  ApiCalculatorMarketRatesRoute: typeof ApiCalculatorMarketRatesRoute
+  ApiIntroducerCalculatorLeadRoute: typeof ApiIntroducerCalculatorLeadRoute
   ApiSmsInboundRoute: typeof ApiSmsInboundRoute
   ApiTeamsCallbackRoute: typeof ApiTeamsCallbackRoute
   ApiTwilioVoiceClientOutboundRoute: typeof ApiTwilioVoiceClientOutboundRoute
@@ -547,6 +589,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSmsInboundRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/introducer/calculator-lead': {
+      id: '/api/introducer/calculator-lead'
+      path: '/api/introducer/calculator-lead'
+      fullPath: '/api/introducer/calculator-lead'
+      preLoaderRoute: typeof ApiIntroducerCalculatorLeadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/calculator/market-rates': {
+      id: '/api/calculator/market-rates'
+      path: '/api/calculator/market-rates'
+      fullPath: '/api/calculator/market-rates'
+      preLoaderRoute: typeof ApiCalculatorMarketRatesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/calculator/estimate-rate': {
+      id: '/api/calculator/estimate-rate'
+      path: '/api/calculator/estimate-rate'
+      fullPath: '/api/calculator/estimate-rate'
+      preLoaderRoute: typeof ApiCalculatorEstimateRateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/request-password-reset': {
       id: '/api/auth/request-password-reset'
       path: '/api/auth/request-password-reset'
@@ -679,6 +742,9 @@ const rootRouteChildren: RootRouteChildren = {
   GoSlugRoute: GoSlugRoute,
   RafCodeRoute: RafCodeRoute,
   ApiAuthRequestPasswordResetRoute: ApiAuthRequestPasswordResetRoute,
+  ApiCalculatorEstimateRateRoute: ApiCalculatorEstimateRateRoute,
+  ApiCalculatorMarketRatesRoute: ApiCalculatorMarketRatesRoute,
+  ApiIntroducerCalculatorLeadRoute: ApiIntroducerCalculatorLeadRoute,
   ApiSmsInboundRoute: ApiSmsInboundRoute,
   ApiTeamsCallbackRoute: ApiTeamsCallbackRoute,
   ApiTwilioVoiceClientOutboundRoute: ApiTwilioVoiceClientOutboundRoute,

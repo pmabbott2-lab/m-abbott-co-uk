@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mortgage calculator — MortgageEasy</title>
+  <meta name="description" content="Estimate your monthly mortgage payment and illustrative market rate by LTV, then request a callback or continue your advisor-led journey." />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="site-config.js"></script>
+</head>
+<body>
+  <div class="reg-strip">
+    <div class="container">
+      <span><strong>MortgageEasy</strong> is a trading name of [Legal entity name Ltd].</span>
+      <span>Authorised &amp; regulated by the <strong>Financial Conduct Authority</strong> (FRN: [000000]).</span>
+    </div>
+  </div>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="logo-link" href="index.html" data-ref-link>
+        <img class="logo-img" src="assets/logo.svg" width="200" height="48" alt="MortgageEasy" />
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a href="index.html" data-ref-link>Home</a>
+        <a href="about.html" data-ref-link>About us</a>
+        <a href="calculator.html" class="active" data-ref-link>Calculator</a>
+        <a href="index.html#your-journey" data-ref-link>Your journey</a>
+        <a href="index.html#rates" data-ref-link>Rates</a>
+        <a href="disclosures.html" data-ref-link>Disclosures</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-outline" href="http://127.0.0.1:8080/auth" data-hub-auth data-hub-path="/auth">Sign in</a>
+        <a class="btn btn-primary" href="http://127.0.0.1:8080/auth?from=broker&amp;join=1&amp;start=voice" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=voice">Get started</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="page-hero">
+      <div class="container">
+        <span class="eyebrow">Illustrative only · not a quote</span>
+        <h1>See what your mortgage might cost — then choose your next step.</h1>
+        <p>Enter property value and deposit — we calculate your loan amount, LTV, and illustrative repayment.</p>
+        <p id="introducer-banner" class="introducer-banner" hidden></p>
+        <p id="slug-missing" class="slug-warning" hidden>
+          Add your partner code to attribute a callback (e.g. <code>?ref=your-partner-slug</code>).
+          You can still use the calculator and journey links below.
+        </p>
+      </div>
+    </section>
+
+    <section id="rates" class="rates-strip rates-strip-compact" aria-labelledby="rates-heading">
+      <div class="container">
+        <div class="rates-head">
+          <div>
+            <h2 id="rates-heading">Bank of England Bank Rate</h2>
+            <p class="rates-sub" id="rates-as-of">Reference rate — updated when you load this page.</p>
+          </div>
+          <p class="rates-status" id="rates-status"></p>
+        </div>
+        <div class="rates-grid rates-grid-single">
+          <article class="rate-card rate-card-base">
+            <span class="rate-card-tag">Reference</span>
+            <p class="rate-card-label" id="rate-base-label">Bank of England Bank Rate</p>
+            <p class="rate-card-value" id="rate-base-value">—</p>
+            <p class="rate-source-micro" id="rate-base-source"></p>
+            <a class="rate-source-link" id="rate-base-source-link" href="#" target="_blank" rel="noopener noreferrer" hidden>View source</a>
+          </article>
+        </div>
+        <p class="rates-disclaimer" id="rates-disclaimer">
+          Bank of England Bank Rate for reference only — not a mortgage quote or recommendation.
+        </p>
+      </div>
+    </section>
+
+    <section class="calculator-section">
+      <div class="container">
+        <div class="calculator-card calculator-card-wide">
+          <h2>Mortgage calculator</h2>
+          <p class="calc-disclaimer">For illustration only — not a mortgage quote or recommendation.</p>
+
+          <div class="calc-row calc-row-4">
+            <div class="calc-field">
+              <label for="calc-price">Property value</label>
+              <div class="calc-input-wrap">
+                <span class="calc-prefix">£</span>
+                <input type="text" id="calc-price" inputmode="numeric" value="250000" autocomplete="off" />
+              </div>
+            </div>
+            <div class="calc-field">
+              <label for="calc-deposit">Deposit</label>
+              <div class="calc-input-wrap">
+                <span class="calc-prefix">£</span>
+                <input type="text" id="calc-deposit" inputmode="numeric" value="50000" autocomplete="off" />
+              </div>
+            </div>
+            <div class="calc-field">
+              <label for="calc-loan">Loan amount <span class="calc-label-note">(calculated)</span></label>
+              <div class="calc-input-wrap calc-readonly-wrap">
+                <span class="calc-prefix">£</span>
+                <input type="text" id="calc-loan" readonly tabindex="-1" value="200000" aria-readonly="true" />
+              </div>
+            </div>
+            <div class="calc-field">
+              <label for="calc-term">Term (years)</label>
+              <input type="number" id="calc-term" min="1" max="40" value="25" />
+            </div>
+          </div>
+
+          <div class="calc-results">
+            <div class="calc-result">
+              <span class="calc-result-label">LTV</span>
+              <strong id="calc-ltv">80.0%</strong>
+            </div>
+            <div class="calc-result">
+              <span class="calc-result-label">Est. market rate</span>
+              <strong id="calc-rate-display">—</strong>
+            </div>
+            <div class="calc-result highlight">
+              <span class="calc-result-label">Estimated monthly payment</span>
+              <strong id="calc-monthly">—</strong>
+            </div>
+          </div>
+
+          <p id="rate-status" class="rate-status" aria-live="polite"></p>
+          <p id="rate-disclaimer" class="calc-footnote rate-disclaimer">
+            Rates shown are illustrative average market rates — not advice, not a quote.
+          </p>
+          <p class="calc-footnote">
+            Repayment mortgage illustration using the standard amortisation formula.
+            Your actual rate and payment will depend on your circumstances and lender criteria.
+          </p>
+        </div>
+
+        <div class="calculator-grid calculator-grid-below">
+          <div id="callback-section" class="callback-card">
+            <h2>Request a callback</h2>
+            <p>Leave your details and a qualified MortgageEasy advisor will call you to discuss your options.</p>
+
+            <form id="callback-form" class="callback-form" novalidate>
+              <div class="calc-field">
+                <label for="customer-name">Full name <span class="req">*</span></label>
+                <input type="text" id="customer-name" name="name" required autocomplete="name" minlength="2" />
+              </div>
+              <div class="calc-field">
+                <label for="customer-email">Email <span class="req">*</span></label>
+                <input type="email" id="customer-email" name="email" required autocomplete="email" />
+              </div>
+              <div class="calc-field">
+                <label for="customer-phone">Telephone <span class="req">*</span></label>
+                <input type="tel" id="customer-phone" name="phone" required autocomplete="tel" placeholder="07…" />
+              </div>
+
+              <label class="consent-label">
+                <input type="checkbox" id="gdpr-consent" name="consent" required />
+                <span>
+                  I agree that MortgageEasy may contact me about mortgage advice using the details above.
+                  My information will be stored and processed in line with the
+                  <a href="disclosures.html">privacy policy</a> (GDPR).
+                  I understand this is not mortgage advice and I can withdraw consent at any time.
+                </span>
+              </label>
+
+              <p id="form-message" class="form-message" hidden></p>
+
+              <button type="submit" class="btn btn-primary btn-full" id="submit-btn">
+                Request a callback
+              </button>
+            </form>
+
+            <p class="calc-footnote">
+              Partner attribution requires a valid <code>?ref=</code> link. No online account is created unless you choose a journey below.
+            </p>
+          </div>
+
+          <div class="journey-continue-card">
+            <h2>Or continue your journey</h2>
+            <p>Create your account on Mortgage Hub and start voice, chat, or book an appointment with your advisor.</p>
+            <div class="journey-grid journey-grid-compact">
+              <a class="journey-card" href="http://127.0.0.1:8080/auth?from=broker&amp;join=1&amp;start=voice" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=voice">
+                <span class="journey-num">01</span>
+                <h3>Verbal interview</h3>
+                <p>Spoken fact-find with Susan after you create your account.</p>
+                <span class="journey-cta">Get started →</span>
+              </a>
+              <a class="journey-card" href="http://127.0.0.1:8080/auth?from=broker&amp;join=1&amp;start=chat" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=chat">
+                <span class="journey-num">02</span>
+                <h3>Text interview</h3>
+                <p>Quiet typed chat — same questions, your pace.</p>
+                <span class="journey-cta">Create account →</span>
+              </a>
+              <a class="journey-card" href="http://127.0.0.1:8080/auth?from=broker&amp;join=1&amp;start=book" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=book">
+                <span class="journey-num green">03</span>
+                <h3>Book appointment</h3>
+                <p>Pick a time first — appointment-first signup.</p>
+                <span class="journey-cta">Book appointment →</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="alt">
+      <div class="container">
+        <div class="disclosure-inline" role="note">
+          <h3>Important — illustrative figures only</h3>
+          <p>
+            This calculator provides an estimate based on the inputs you enter. Estimated rates may be
+            generated using AI or static LTV bands — they are not mortgage offers, quotations, or
+            recommendations. MortgageEasy offers regulated mortgage advice — your home may be
+            repossessed if you do not keep up repayments on your mortgage.
+            See our <a href="disclosures.html">initial disclosures</a> for more information.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <img class="logo-img footer-logo" src="assets/logo.svg" width="180" height="44" alt="MortgageEasy" />
+          <p>Advisor-led mortgage advice with modern technology behind the scenes.</p>
+        </div>
+        <div>
+          <h4>Tools</h4>
+          <ul>
+            <li><a href="calculator.html">Mortgage calculator</a></li>
+            <li><a href="index.html#your-journey">Your journey</a></li>
+            <li><a href="disclosures.html">Initial disclosures</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Partners</h4>
+          <ul>
+            <li><a href="partnerships.html">Introducer partnerships</a></li>
+            <li><a href="disclosures.html">Privacy &amp; complaints</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="reg-block">
+        <p><strong>Regulatory warning:</strong> Your home may be repossessed if you do not keep up repayments on your mortgage or other loans secured on it.</p>
+        <p>© <span id="y"></span> MortgageEasy. Design mockup — not financial advice.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script>document.getElementById("y").textContent = new Date().getFullYear();</script>
+  <script src="market-rates-strip.js"></script>
+  <script src="calculator.js"></script>
+</body>
+</html>

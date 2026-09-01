@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { type ReactNode } from "react";
 
+import "../styles.css";
 import appCss from "../styles.css?url";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -101,6 +102,7 @@ function RootShell({ children }: { children: ReactNode }) {
     <html lang="en">
       <head>
         <HeadContent />
+        <link rel="stylesheet" href={appCss} />
       </head>
       <body>
         {children}
