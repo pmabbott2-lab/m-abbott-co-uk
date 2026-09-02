@@ -15,9 +15,14 @@ fi
 "$HOME/bin/mortgage-hub-stable.sh" start >>"$LOG/watch.log" 2>&1 || true
 
 while true; do
-  if ! curl -sf "http://127.0.0.1:8080/" >/dev/null 2>&1 || \
-     ! curl -sf "http://127.0.0.1:8081/" >/dev/null 2>&1 || \
-     ! pgrep -f "another-selector-ranged.ngrok-free.dev" >/dev/null 2>&1; then
+  need_restart=0
+  if ! curl -sf "http://127.0.0.1:8080/" >/dev/null 2>&1; then need_restart=1; fi
+  if ! curl -sf "http://127.0.0.1:8081/" >/dev/null 2>&1; then need_restart=1; fi
+  if [[ "${MORTGAGE_USE_DEMO_PROXY:-1}" == "1" ]]; then
+    if ! curl -sf "http://127.0.0.1:8090/" >/dev/null 2>&1; then need_restart=1; fi
+  fi
+  if ! pgrep -f "another-selector-ranged.ngrok-free.dev" >/dev/null 2>&1; then need_restart=1; fi
+  if [[ "$need_restart" -eq 1 ]]; then
     echo "$(date '+%F %T') restart triggered" >>"$LOG/watch.log"
     "$HOME/bin/mortgage-hub-stable.sh" ensure >>"$LOG/watch.log" 2>&1 || true
   fi

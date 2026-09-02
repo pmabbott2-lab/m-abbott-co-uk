@@ -52,6 +52,9 @@ function isSupabaseMfaDisabledMessage(msg: string): boolean {
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
+  pendingMs: 0,
+  pendingMinMs: 0,
+  pendingComponent: () => null,
   validateSearch: (search: Record<string, unknown>) => {
     const fromBroker =
       search.from === "broker" ||
@@ -135,11 +138,39 @@ function AuthPage() {
   const goHomeAfterAuth = (routeStart?: typeof journeyStart) => {
     const pendingStart =
       mode === "signin" ? null : resolvePostAuthStart(routeStart ?? journeyStart);
-    if (pendingStart) {
-      window.location.assign(buildHomePathAfterAuth(pendingStart));
-      return;
+    window.location.assign(buildHomePathAfterAuth(pendingStart));
+  };
+
+  const withTimeout = async <T>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out — please try again.`)), ms);
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
-    navigate({ to: "/home" });
+  };
+
+  const maybeEnterAppWithSession = async (session: Session): Promise<void> => {
+    if (isPasswordRecoveryPending() || mfaBlocking || smsBlocking) return;
+    try {
+      if (
+        await withTimeout(
+          resumeLoginStepIfNeeded(session),
+          8000,
+          "Sign-in check",
+        )
+      ) {
+        return;
+      }
+      goHomeAfterAuth();
+    } catch (err) {
+      console.error("[auth] session resume failed:", err);
+      await supabase.auth.signOut({ scope: "local" });
+      showStatus("error", err instanceof Error ? err.message : "Please sign in again.");
+    }
   };
 
   useLayoutEffect(() => {
@@ -183,19 +214,18 @@ function AuthPage() {
         clearLoginSmsVerified();
         return;
       }
-      // Password sign-in uses finishSignIn (full reload) — skip soft navigate races.
+      // Initial session is handled below — avoids double redirect before the form renders.
+      if (event === "INITIAL_SESSION") return;
       if (signInInFlight.current) return;
       if (session && !isPasswordRecoveryPending() && !mfaBlocking && !smsBlocking) {
-        if (await resumeLoginStepIfNeeded(session)) return;
-        goHomeAfterAuth();
+        await maybeEnterAppWithSession(session);
       }
     });
 
     void (async () => {
       const { data } = await supabase.auth.getSession();
-      if (!data.session || isPasswordRecoveryPending() || mfaBlocking || smsBlocking) return;
-      if (await resumeLoginStepIfNeeded(data.session)) return;
-      goHomeAfterAuth();
+      if (!data.session || signInInFlight.current) return;
+      await maybeEnterAppWithSession(data.session);
     })();
 
     return () => subscription.unsubscribe();
@@ -396,7 +426,9 @@ function AuthPage() {
         showStaffMfaSetupRequired();
         return true;
       }
-      throw listErr;
+      console.error("mfa listFactors", listErr);
+      showStatus("error", "Could not load MFA — try signing in again.");
+      return true;
     }
     const verifiedTotp = factors?.totp?.find((f) => f.status === "verified");
     if (

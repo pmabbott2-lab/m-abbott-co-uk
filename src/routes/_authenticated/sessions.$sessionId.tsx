@@ -25,7 +25,13 @@ import {
   upsertDraftFee,
   submitSessionFees,
   amendPostedFee,
+  listSessionCommissions,
+  updateSessionCommissionPayoutStatus,
   FEE_TYPE_LABELS,
+  BENEFICIARY_ROLE_LABELS,
+  LOST_COMMISSION_REASONS,
+  type PayoutStatus,
+  type LostCommissionReason,
 } from "@/lib/finance.functions";
 import {
   canAmend,
@@ -61,6 +67,8 @@ import { ReportExportBox } from "@/components/ReportExportBox";
 import { ReportTableScroll } from "@/components/ReportTableScroll";
 import { contactHistoryToSheet } from "@/lib/report-mappers";
 import { PhoneCallDetailDialog } from "@/components/PhoneCallDetailDialog";
+import { CaseDetailsCard } from "@/components/CaseDetailsCard";
+import { PayoutStatusBadge, commissionPipelineTotals } from "@/components/PayoutStatusBadge";
 
 export const Route = createFileRoute("/_authenticated/sessions/$sessionId")({
   component: SessionDetail,
@@ -214,6 +222,7 @@ function SessionDetail() {
                 <TabsTrigger value="notes">Notes &amp; history</TabsTrigger>
                 <TabsTrigger value="factfind">Fact find</TabsTrigger>
                 <TabsTrigger value="journey">Customer journey</TabsTrigger>
+                <TabsTrigger value="case-details">Case details</TabsTrigger>
                 {showFinance && <TabsTrigger value="finance">Finance</TabsTrigger>}
               </>
             ) : isAdvisor ? (
@@ -270,6 +279,15 @@ function SessionDetail() {
                 sessionId={sessionId}
                 isAdvisor={isAdvisor}
                 canReverse={canAmend(adminAccess, "journey")}
+              />
+            </TabsContent>
+          )}
+
+          {isAdvisor && isCase && (
+            <TabsContent value="case-details" className="space-y-6 mt-4">
+              <CaseDetailsCard
+                sessionId={sessionId}
+                canEdit={isAdvisor || canAmend(adminAccess, "customers")}
               />
             </TabsContent>
           )}
@@ -1277,20 +1295,58 @@ function CustomerFinanceCard({
 }) {
   const qc = useQueryClient();
   const listFn = useServerFn(listSessionFees);
+  const commissionsFn = useServerFn(listSessionCommissions);
   const upsertFn = useServerFn(upsertDraftFee);
   const submitFn = useServerFn(submitSessionFees);
   const amendFn = useServerFn(amendPostedFee);
+  const commissionStatusFn = useServerFn(updateSessionCommissionPayoutStatus);
 
   const [feeType, setFeeType] = useState<"fee" | "mortgage_fee" | "insurance_fee" | "other_fee">("fee");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [lostLedgerId, setLostLedgerId] = useState<string | null>(null);
+  const [lostReason, setLostReason] = useState<LostCommissionReason>("customer_not_proceeding");
 
   const feesQ = useQuery({
     queryKey: ["session-fees", sessionId],
     queryFn: () => listFn({ data: { sessionId } }),
   });
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ["session-fees", sessionId] });
+  const commissionsQ = useQuery({
+    queryKey: ["session-commissions", sessionId],
+    queryFn: () => commissionsFn({ data: { sessionId } }),
+  });
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["session-fees", sessionId] });
+    qc.invalidateQueries({ queryKey: ["session-commissions", sessionId] });
+    qc.invalidateQueries({ queryKey: ["commission-payouts"] });
+  };
+
+  const commissionRows = commissionsQ.data?.rows ?? [];
+  const pipeline = commissionPipelineTotals(commissionRows);
+
+  const updateCommission = useMutation({
+    mutationFn: (vars: {
+      ledgerId: string;
+      payoutStatus: PayoutStatus;
+      lostReason?: LostCommissionReason;
+    }) =>
+      commissionStatusFn({
+        data: {
+          sessionId,
+          ledgerId: vars.ledgerId,
+          payoutStatus: vars.payoutStatus,
+          lostReason: vars.lostReason,
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Commission status updated");
+      setLostLedgerId(null);
+      refresh();
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not update"),
+  });
 
   const addDraft = useMutation({
     mutationFn: () =>
@@ -1449,6 +1505,95 @@ function CustomerFinanceCard({
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="space-y-3 border-t pt-5">
+        <h4 className="text-sm font-medium">Commission on this case</h4>
+        {commissionsQ.data?.migrationRequired && (
+          <p className="text-sm text-muted-foreground">Commission tracking migration required.</p>
+        )}
+        {commissionRows.length === 0 && !commissionsQ.isLoading && (
+          <p className="text-sm text-muted-foreground">
+            Commission rows appear when fees are submitted and locked.
+          </p>
+        )}
+        {commissionRows.length > 0 && (
+          <div className="space-y-2">
+            {commissionRows.map((row) => (
+              <div
+                key={row.id}
+                className="flex flex-wrap items-center justify-between gap-2 text-sm border rounded-lg px-3 py-2"
+              >
+                <span>
+                  {BENEFICIARY_ROLE_LABELS[row.beneficiaryRole] ?? row.beneficiaryRole}
+                  {row.beneficiaryName ? ` · ${row.beneficiaryName}` : ""}
+                  {row.commissionPct != null ? ` (${row.commissionPct}%)` : ""}
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">£{(row.amountPence / 100).toFixed(2)}</span>
+                  <PayoutStatusBadge status={row.payoutStatus} />
+                  {canAmendFees && row.payoutStatus !== "lost" && row.payoutStatus !== "rejected" && (
+                    <select
+                      className="h-8 rounded-md border bg-background px-2 text-xs"
+                      value={row.payoutStatus}
+                      disabled={updateCommission.isPending}
+                      onChange={(e) => {
+                        const status = e.target.value as PayoutStatus;
+                        if (status === "lost") {
+                          setLostLedgerId(row.id);
+                          return;
+                        }
+                        updateCommission.mutate({ ledgerId: row.id, payoutStatus: status });
+                      }}
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="received">Received</option>
+                      <option value="paid">Paid</option>
+                      <option value="lost">Mark lost</option>
+                    </select>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div className="flex flex-wrap gap-3 text-xs text-muted-foreground pt-2">
+              <span>Pipeline pending: £{(pipeline.pending / 100).toFixed(2)}</span>
+              <span>Received: £{(pipeline.received / 100).toFixed(2)}</span>
+              <span>Paid: £{(pipeline.paid / 100).toFixed(2)}</span>
+              <span>Lost: £{(pipeline.lost / 100).toFixed(2)}</span>
+            </div>
+          </div>
+        )}
+        {lostLedgerId && canAmendFees && (
+          <div className="flex flex-wrap items-end gap-2 p-3 rounded-lg border bg-muted/30">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Lost commission reason</label>
+              <select
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+                value={lostReason}
+                onChange={(e) => setLostReason(e.target.value as LostCommissionReason)}
+              >
+                {LOST_COMMISSION_REASONS.map((r) => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+            </div>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={updateCommission.isPending}
+              onClick={() =>
+                updateCommission.mutate({
+                  ledgerId: lostLedgerId,
+                  payoutStatus: "lost",
+                  lostReason,
+                })
+              }
+            >
+              Confirm lost
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setLostLedgerId(null)}>Cancel</Button>
+          </div>
+        )}
       </div>
     </div>
   );

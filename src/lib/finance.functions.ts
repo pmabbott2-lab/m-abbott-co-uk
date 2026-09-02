@@ -68,14 +68,30 @@ export const FEE_TYPE_LABELS: Record<(typeof FEE_TYPES)[number], string> = {
   other_fee: "Other fee",
 };
 
-export const PAYOUT_STATUSES = ["pending", "paid", "rejected"] as const;
+export const PAYOUT_STATUSES = ["pending", "received", "paid", "rejected", "lost"] as const;
 export type PayoutStatus = (typeof PAYOUT_STATUSES)[number];
 
 export const PAYOUT_STATUS_LABELS: Record<PayoutStatus, string> = {
   pending: "Pending",
+  received: "Received",
   paid: "Paid",
   rejected: "Rejected",
+  lost: "Lost",
 };
+
+export const LOST_COMMISSION_REASONS = [
+  { value: "customer_not_proceeding", label: "Customer not proceeding" },
+  { value: "application_declined", label: "Application declined / withdrawn" },
+  { value: "remortgaged_elsewhere", label: "Customer remortgaged elsewhere" },
+  { value: "duplicate_or_error", label: "Duplicate / error entry" },
+] as const;
+
+export type LostCommissionReason = (typeof LOST_COMMISSION_REASONS)[number]["value"];
+
+function normalizePayoutStatus(raw: string | null | undefined): PayoutStatus {
+  if (raw && PAYOUT_STATUSES.includes(raw as PayoutStatus)) return raw as PayoutStatus;
+  return "pending";
+}
 
 export const BENEFICIARY_ROLE_LABELS: Record<string, string> = {
   advisor: "Advisor",
@@ -98,6 +114,7 @@ export type CommissionPayoutRow = {
   payoutStatus: PayoutStatus;
   payoutNote: string | null;
   payoutAt: string | null;
+  lostReason: string | null;
   createdAt: string;
 };
 
@@ -121,6 +138,34 @@ export const listSessionFees = createServerFn({ method: "GET" })
       throw new Error(error.message);
     }
     return { lines: lines ?? [], migrationRequired: false };
+  });
+
+export const listSessionCommissions = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const access = await resolveAdminAccess(context.userId, email);
+    if (!canView(access, "finance_customer")) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: rows, error } = await supabaseAdmin
+      .from("finance_ledger")
+      .select(
+        "id, session_id, fee_type, amount_pence, commission_pct, beneficiary_user_id, beneficiary_role, referral_id, payout_status, payout_note, payout_at, lost_reason, created_at, note",
+      )
+      .eq("kind", "commission")
+      .eq("session_id", data.sessionId)
+      .order("created_at", { ascending: true });
+    if (error) {
+      if (isMissingTable(error)) return { rows: [] as CommissionPayoutRow[], migrationRequired: true };
+      throw new Error(error.message);
+    }
+    const enriched = await enrichCommissionLedgerRows(
+      supabaseAdmin,
+      (rows ?? []) as RawCommissionLedgerRow[],
+    );
+    return { rows: enriched, migrationRequired: false };
   });
 
 export const upsertDraftFee = createServerFn({ method: "POST" })
@@ -265,9 +310,7 @@ export const submitSessionFees = createServerFn({ method: "POST" })
           beneficiary_user_id: a.advisor_id,
           beneficiary_role: "advisor",
           commission_pct: pct,
-          payout_status: "paid",
-          payout_at: now,
-          payout_by: context.userId,
+          payout_status: "pending",
           created_by: context.userId,
         });
       }
@@ -869,6 +912,7 @@ type RawCommissionLedgerRow = {
   payout_status: string | null;
   payout_note: string | null;
   payout_at: string | null;
+  lost_reason: string | null;
   created_at: string;
   note?: string | null;
 };
@@ -943,9 +987,10 @@ async function enrichCommissionLedgerRows(
       beneficiaryName,
       referralId: r.referral_id,
       referredFriendLabel: r.referral_id ? referralMap.get(r.referral_id) ?? null : null,
-      payoutStatus: (r.payout_status as PayoutStatus) ?? "pending",
+      payoutStatus: normalizePayoutStatus(r.payout_status),
       payoutNote: r.payout_note ?? null,
       payoutAt: r.payout_at ?? null,
+      lostReason: r.lost_reason ?? null,
       createdAt: r.created_at,
     };
   });
@@ -957,7 +1002,7 @@ export const listMyCommissionStatement = createServerFn({ method: "GET" })
   .inputValidator((d: unknown) =>
     z
       .object({
-        payoutStatus: z.enum(["pending", "paid", "rejected"]).optional(),
+        payoutStatus: z.enum(["pending", "received", "paid", "rejected", "lost"]).optional(),
       })
       .parse(d ?? {}),
   )
@@ -977,12 +1022,12 @@ export const listMyCommissionStatement = createServerFn({ method: "GET" })
     let query = supabaseAdmin
       .from("finance_ledger")
       .select(
-        "id, session_id, fee_type, amount_pence, commission_pct, beneficiary_user_id, beneficiary_role, referral_id, payout_status, payout_note, payout_at, created_at, note",
+        "id, session_id, fee_type, amount_pence, commission_pct, beneficiary_user_id, beneficiary_role, referral_id, payout_status, payout_note, payout_at, lost_reason, created_at, note",
       )
       .eq("kind", "commission")
       .eq("beneficiary_user_id", context.userId)
       .order("created_at", { ascending: false })
-      .limit(200);
+      .limit(2000);
 
     if (data.payoutStatus) query = query.eq("payout_status", data.payoutStatus);
 
@@ -1005,8 +1050,10 @@ export const listCommissionPayouts = createServerFn({ method: "GET" })
     z
       .object({
         beneficiaryRole: z.enum(["advisor", "introducer", "referrer"]).optional(),
-        payoutStatus: z.enum(["pending", "paid", "rejected"]).optional(),
+        payoutStatus: z.enum(["pending", "received", "paid", "rejected", "lost"]).optional(),
         beneficiaryUserId: z.string().uuid().optional(),
+        caseRefQuery: z.string().max(64).optional(),
+        sessionId: z.string().uuid().optional(),
       })
       .parse(d ?? {}),
   )
@@ -1027,17 +1074,35 @@ export const listCommissionPayouts = createServerFn({ method: "GET" })
       await ensureRafCommissionLedgerEntry(r.id, context.userId);
     }
 
+    let sessionFilterIds: string[] | null = null;
+    if (data.sessionId) {
+      sessionFilterIds = [data.sessionId];
+    } else if (data.caseRefQuery?.trim()) {
+      const q = data.caseRefQuery.trim();
+      const { data: sessions, error: sessErr } = await supabaseAdmin
+        .from("interview_sessions")
+        .select("id")
+        .ilike("case_ref", `%${q}%`)
+        .limit(100);
+      if (sessErr) throw new Error(sessErr.message);
+      sessionFilterIds = (sessions ?? []).map((s) => s.id);
+      if (sessionFilterIds.length === 0) {
+        return { rows: [] as CommissionPayoutRow[], migrationRequired: false };
+      }
+    }
+
     let query = supabaseAdmin
       .from("finance_ledger")
       .select(
-        "id, session_id, fee_type, amount_pence, commission_pct, beneficiary_user_id, beneficiary_role, referral_id, payout_status, payout_note, payout_at, created_at, note",
+        "id, session_id, fee_type, amount_pence, commission_pct, beneficiary_user_id, beneficiary_role, referral_id, payout_status, payout_note, payout_at, lost_reason, created_at, note",
       )
       .eq("kind", "commission")
       .order("created_at", { ascending: false })
-      .limit(500);
+      .limit(sessionFilterIds ? 200 : 500);
 
+    if (sessionFilterIds) query = query.in("session_id", sessionFilterIds);
     if (data.beneficiaryRole) query = query.eq("beneficiary_role", data.beneficiaryRole);
-    if (data.payoutStatus) query = query.eq("payout_status", data.payoutStatus);
+    if (data.payoutStatus && !sessionFilterIds) query = query.eq("payout_status", data.payoutStatus);
     if (data.beneficiaryUserId) query = query.eq("beneficiary_user_id", data.beneficiaryUserId);
 
     const { data: rows, error } = await query;
@@ -1060,8 +1125,14 @@ export const updateCommissionPayoutStatus = createServerFn({ method: "POST" })
     z
       .object({
         ledgerId: z.string().uuid(),
-        payoutStatus: z.enum(["pending", "paid", "rejected"]),
+        payoutStatus: z.enum(["pending", "received", "paid", "rejected", "lost"]),
         payoutNote: z.string().max(500).optional(),
+        lostReason: z.enum([
+          "customer_not_proceeding",
+          "application_declined",
+          "remortgaged_elsewhere",
+          "duplicate_or_error",
+        ]).optional(),
       })
       .parse(d),
   )
@@ -1070,6 +1141,55 @@ export const updateCommissionPayoutStatus = createServerFn({ method: "POST" })
     const access = await resolveAdminAccess(context.userId, email);
     if (!canAmendCommissionPayouts(access)) throw new Error("Forbidden");
 
+    return await applyCommissionPayoutStatusPatch(data, context.userId);
+  });
+
+export const updateSessionCommissionPayoutStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        sessionId: z.string().uuid(),
+        ledgerId: z.string().uuid(),
+        payoutStatus: z.enum(["pending", "received", "paid", "rejected", "lost"]),
+        payoutNote: z.string().max(500).optional(),
+        lostReason: z.enum([
+          "customer_not_proceeding",
+          "application_declined",
+          "remortgaged_elsewhere",
+          "duplicate_or_error",
+        ]).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const access = await resolveAdminAccess(context.userId, email);
+    if (!canAmend(access, "finance_customer")) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: row, error } = await supabaseAdmin
+      .from("finance_ledger")
+      .select("id, session_id, kind")
+      .eq("id", data.ledgerId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row || row.kind !== "commission" || row.session_id !== data.sessionId) {
+      throw new Error("Commission row not found for this case");
+    }
+
+    return await applyCommissionPayoutStatusPatch(data, context.userId);
+  });
+
+async function applyCommissionPayoutStatusPatch(
+  data: {
+    ledgerId: string;
+    payoutStatus: PayoutStatus;
+    payoutNote?: string;
+    lostReason?: LostCommissionReason;
+  },
+  userId: string,
+) {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: row, error: readErr } = await supabaseAdmin
       .from("finance_ledger")
@@ -1079,12 +1199,23 @@ export const updateCommissionPayoutStatus = createServerFn({ method: "POST" })
     if (readErr) throw new Error(readErr.message);
     if (!row || row.kind !== "commission") throw new Error("Commission row not found");
 
+    if (data.payoutStatus === "lost" && !data.lostReason) {
+      data.lostReason = "customer_not_proceeding";
+    }
+
     const now = new Date().toISOString();
     const patch: Record<string, unknown> = {
       payout_status: data.payoutStatus,
       payout_note: data.payoutNote ?? null,
-      payout_at: data.payoutStatus === "pending" ? null : now,
-      payout_by: data.payoutStatus === "pending" ? null : context.userId,
+      lost_reason: data.payoutStatus === "lost" ? data.lostReason : null,
+      payout_at:
+        data.payoutStatus === "pending" || data.payoutStatus === "received"
+          ? null
+          : now,
+      payout_by:
+        data.payoutStatus === "pending" || data.payoutStatus === "received"
+          ? null
+          : userId,
     };
 
     const { error } = await supabaseAdmin.from("finance_ledger").update(patch).eq("id", data.ledgerId);
@@ -1098,8 +1229,10 @@ export const updateCommissionPayoutStatus = createServerFn({ method: "POST" })
     if (row.referral_id && row.beneficiary_role === "referrer") {
       const bonusMap: Record<string, string> = {
         pending: "eligible",
+        received: "eligible",
         paid: "paid",
         rejected: "rejected",
+        lost: "rejected",
       };
       await supabaseAdmin
         .from("referrals")
@@ -1108,7 +1241,7 @@ export const updateCommissionPayoutStatus = createServerFn({ method: "POST" })
     }
 
     return { ok: true };
-  });
+}
 
 export type FinanceAuditRow = {
   id: string;

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { format } from "date-fns";
 import {
   listCommissionPayouts,
@@ -11,11 +11,13 @@ import {
   type CommissionPayoutRow,
 } from "@/lib/finance.functions";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ReportExportBox } from "@/components/ReportExportBox";
 import { ReportTableScroll } from "@/components/ReportTableScroll";
-import { commissionRowsToSheet } from "@/lib/report-mappers";
-import { PoundSterling } from "lucide-react";
+import { commissionCaseSearchToSheet, commissionRowsToSheet } from "@/lib/report-mappers";
+import { PoundSterling, Search } from "lucide-react";
 import { toast } from "sonner";
+import { PayoutStatusBadge } from "@/components/PayoutStatusBadge";
 
 type RoleFilter = "all" | "advisor" | "introducer" | "referrer";
 type StatusFilter = "all" | PayoutStatus;
@@ -27,15 +29,20 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
 
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
+  const [caseSearch, setCaseSearch] = useState("");
 
-  const queryKey = ["commission-payouts", roleFilter, statusFilter];
+  const caseQuery = caseSearch.trim();
+  const searchingByCase = caseQuery.length > 0;
+
+  const queryKey = ["commission-payouts", roleFilter, statusFilter, caseQuery];
   const payoutsQ = useQuery({
     queryKey,
     queryFn: () =>
       listFn({
         data: {
           beneficiaryRole: roleFilter === "all" ? undefined : roleFilter,
-          payoutStatus: statusFilter === "all" ? undefined : statusFilter,
+          payoutStatus: searchingByCase || statusFilter === "all" ? undefined : statusFilter,
+          caseRefQuery: searchingByCase ? caseQuery : undefined,
         },
       }),
   });
@@ -57,7 +64,23 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
   });
 
   const rows = payoutsQ.data?.rows ?? [];
-  const exportSheet = commissionRowsToSheet(allExportQ.data?.rows ?? []);
+  const sortedRows = useMemo(() => {
+    if (!searchingByCase) return rows;
+    return [...rows].sort((a, b) => {
+      const refA = a.caseRef ?? "";
+      const refB = b.caseRef ?? "";
+      if (refA !== refB) return refA.localeCompare(refB);
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [rows, searchingByCase]);
+
+  const exportSheets = useMemo(() => {
+    if (searchingByCase) {
+      return [commissionCaseSearchToSheet(sortedRows, caseQuery)];
+    }
+    return [commissionRowsToSheet(allExportQ.data?.rows ?? [])];
+  }, [allExportQ.data?.rows, caseQuery, searchingByCase, sortedRows]);
+
   const totals = rows.reduce(
     (acc, r) => {
       acc[r.payoutStatus] = (acc[r.payoutStatus] ?? 0) + r.amountPence;
@@ -89,6 +112,30 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
         </p>
       </div>
 
+      <div className="flex flex-col sm:flex-row gap-2 sm:items-center max-w-md">
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            value={caseSearch}
+            onChange={(e) => setCaseSearch(e.target.value)}
+            placeholder="Search by case ref…"
+            className="pl-9"
+            aria-label="Search by case reference"
+          />
+        </div>
+        {searchingByCase && (
+          <Button type="button" size="sm" variant="ghost" onClick={() => setCaseSearch("")}>
+            Clear
+          </Button>
+        )}
+      </div>
+
+      {searchingByCase && (
+        <p className="text-sm text-muted-foreground">
+          Showing all commission rows for cases matching &ldquo;{caseQuery}&rdquo; (all statuses).
+        </p>
+      )}
+
       <div className="flex flex-wrap gap-2">
         {(
           [
@@ -110,31 +157,42 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {(
-          [
-            ["all", "All statuses"],
-            ["pending", "Pending"],
-            ["paid", "Paid"],
-            ["rejected", "Rejected"],
-          ] as const
-        ).map(([value, label]) => (
-          <Button
-            key={value}
-            type="button"
-            size="sm"
-            variant={statusFilter === value ? "secondary" : "ghost"}
-            onClick={() => setStatusFilter(value)}
-          >
-            {label}
-          </Button>
-        ))}
-      </div>
+      {!searchingByCase && (
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              ["all", "All statuses"],
+              ["pending", "Pending"],
+              ["received", "Received"],
+              ["paid", "Paid"],
+              ["rejected", "Rejected"],
+              ["lost", "Lost"],
+            ] as const
+          ).map(([value, label]) => (
+            <Button
+              key={value}
+              type="button"
+              size="sm"
+              variant={statusFilter === value ? "secondary" : "ghost"}
+              onClick={() => setStatusFilter(value)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+      )}
 
-      {statusFilter !== "all" && rows.length > 0 && (
+      {!searchingByCase && statusFilter !== "all" && rows.length > 0 && (
         <p className="text-sm text-muted-foreground">
           Total ({PAYOUT_STATUS_LABELS[statusFilter as PayoutStatus]}): £
           {((totals[statusFilter] ?? 0) / 100).toFixed(2)}
+        </p>
+      )}
+
+      {searchingByCase && rows.length > 0 && (
+        <p className="text-sm text-muted-foreground">
+          {rows.length} row{rows.length === 1 ? "" : "s"} · Total £
+          {(rows.reduce((sum, r) => sum + r.amountPence, 0) / 100).toFixed(2)}
         </p>
       )}
 
@@ -142,13 +200,14 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
         {payoutsQ.isLoading && (
           <div className="p-6 text-sm text-muted-foreground">Loading commission…</div>
         )}
-        {!payoutsQ.isLoading && rows.length === 0 && (
+        {!payoutsQ.isLoading && sortedRows.length === 0 && (
           <div className="p-6 text-sm text-muted-foreground">
-            No commission rows match these filters. Commission is created when customer fees are posted,
-            or when a RAF bonus is marked eligible.
+            {searchingByCase
+              ? `No commission rows found for case "${caseQuery}".`
+              : "No commission rows match these filters. Commission is created when customer fees are posted, or when a RAF bonus is marked eligible."}
           </div>
         )}
-        {rows.length > 0 && (
+        {sortedRows.length > 0 && (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -161,7 +220,7 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {rows.map((row) => (
+              {sortedRows.map((row) => (
                 <PayoutRow
                   key={row.id}
                   row={row}
@@ -177,10 +236,14 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
       </div>
       <div className="self-start pt-1">
         <ReportExportBox
-          filename={`commission-all-${new Date().toISOString().slice(0, 10)}`}
+          filename={
+            searchingByCase
+              ? `commission-case-${caseQuery.replace(/\s+/g, "-")}-${new Date().toISOString().slice(0, 10)}`
+              : `commission-all-${new Date().toISOString().slice(0, 10)}`
+          }
           label="Reports"
-          sheets={[exportSheet]}
-          pdfTitle="All commission"
+          sheets={exportSheets}
+          pdfTitle={searchingByCase ? `Commission — case ${caseQuery}` : "All commission"}
         />
       </div>
     </div>
@@ -235,21 +298,36 @@ function PayoutRow({
       </td>
       <td className="p-3">
         {canAmend ? (
-          <select
-            className="h-8 rounded-md border bg-background px-2 text-xs"
-            value={row.payoutStatus}
-            disabled={pending}
-            onChange={(e) => onStatusChange(e.target.value as PayoutStatus)}
-            aria-label="Payout status"
-          >
-            {(["pending", "paid", "rejected"] as const).map((s) => (
-              <option key={s} value={s}>
-                {PAYOUT_STATUS_LABELS[s]}
-              </option>
-            ))}
-          </select>
+          <div className="flex flex-wrap items-center gap-2">
+            <PayoutStatusBadge status={row.payoutStatus} />
+            <select
+              className="h-8 rounded-md border bg-background px-2 text-xs"
+              value={row.payoutStatus}
+              disabled={pending}
+              onChange={(e) => onStatusChange(e.target.value as PayoutStatus)}
+              aria-label="Payout status"
+            >
+              {(["pending", "received", "paid", "rejected", "lost"] as const).map((s) => (
+                <option key={s} value={s}>
+                  {PAYOUT_STATUS_LABELS[s]}
+                </option>
+              ))}
+            </select>
+            {row.payoutStatus !== "rejected" && row.payoutStatus !== "lost" && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="text-destructive h-8"
+                disabled={pending}
+                onClick={() => onStatusChange("rejected")}
+              >
+                Reject
+              </Button>
+            )}
+          </div>
         ) : (
-          <span className="text-xs font-medium">{PAYOUT_STATUS_LABELS[row.payoutStatus]}</span>
+          <PayoutStatusBadge status={row.payoutStatus} />
         )}
       </td>
     </tr>

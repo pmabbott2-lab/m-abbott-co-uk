@@ -168,8 +168,10 @@ export function textChannelInviteMessage(opts: {
 
 const JOURNEY_MILESTONE_SMS: Record<string, string> = {
   appointment_seen: "We've noted your appointment in our system and look forward to speaking with you.",
-  id_confirmed: "Your ID has been confirmed — thank you.",
+  id_confirmed: "Your identity check has been confirmed — thank you.",
   aip_completed: "Great news — your Agreement in Principle (AIP) is complete.",
+  offer_received: "Great news — your mortgage offer has been received.",
+  completion: "Congratulations — your mortgage completion has been recorded.",
 };
 
 export async function sendJourneyMilestoneSms(

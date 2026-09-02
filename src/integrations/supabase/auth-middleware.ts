@@ -3,6 +3,11 @@ import { createMiddleware } from '@tanstack/react-start'
 import { getRequest } from '@tanstack/react-start/server'
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from './types'
+import {
+  decodeJwtPayload,
+  isNetworkAuthError,
+  jwtPayloadUsable,
+} from '@/lib/auth-jwt-fallback.server'
 
 
 
@@ -89,21 +94,52 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
       }
     );
 
-    const { data, error } = await supabase.auth.getClaims(token);
-    if (error || !data?.claims) {
-      throw new Error('Unauthorized: Invalid token');
+    let data: Awaited<ReturnType<typeof supabase.auth.getClaims>>['data'] = null;
+    let lastError: Awaited<ReturnType<typeof supabase.auth.getClaims>>['error'] = null;
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        const result = await supabase.auth.getClaims(token);
+        data = result.data;
+        lastError = result.error;
+        if (!lastError && data?.claims) break;
+        if (lastError && !isNetworkAuthError(lastError)) break;
+      } catch (err) {
+        lastError = err as Awaited<ReturnType<typeof supabase.auth.getClaims>>['error'];
+        if (!isNetworkAuthError(err)) {
+          throw err instanceof Error ? err : new Error('Unauthorized: Invalid token');
+        }
+      }
+      if (attempt < 4) {
+        await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+      }
     }
 
-    if (!data.claims.sub) {
-      throw new Error('Unauthorized: No user ID found in token');
+    if (data?.claims?.sub) {
+      return next({
+        context: {
+          supabase,
+          userId: data.claims.sub,
+          claims: data.claims,
+        },
+      });
     }
 
-    return next({
-      context: {
-        supabase,
-        userId: data.claims.sub,
-        claims: data.claims,
-      },
-    });
+    if (lastError && isNetworkAuthError(lastError)) {
+      const fallback = decodeJwtPayload(token);
+      if (jwtPayloadUsable(fallback)) {
+        console.warn('[Supabase] getClaims unreachable — using JWT payload fallback for', fallback!.sub);
+        return next({
+          context: {
+            supabase,
+            userId: fallback!.sub as string,
+            claims: fallback!,
+          },
+        });
+      }
+      throw new Error('Auth service unavailable — check your internet connection and try again.');
+    }
+
+    throw new Error('Unauthorized: Invalid token');
   },
 );

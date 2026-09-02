@@ -2021,14 +2021,18 @@ export const JOURNEY_MILESTONE_KEYS = [
   "appointment_seen",
   "id_confirmed",
   "aip_completed",
+  "offer_received",
+  "completion",
 ] as const;
 
 export type JourneyMilestoneKey = (typeof JOURNEY_MILESTONE_KEYS)[number];
 
 export const JOURNEY_MILESTONE_LABELS: Record<JourneyMilestoneKey, string> = {
   appointment_seen: "Appointment seen",
-  id_confirmed: "ID confirmed",
+  id_confirmed: "Identity check",
   aip_completed: "AIP completed",
+  offer_received: "Offer received",
+  completion: "Completion",
 };
 
 /** Highest completed journey stage label, or "Not started". */

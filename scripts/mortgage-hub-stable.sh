@@ -6,8 +6,10 @@ set -uo pipefail
 
 APP_PORT=8080
 MOCKUP_PORT=8081
+PROXY_PORT=8090
 MOCKUP_DIR="marketing/mortgage-hub-website"
 PUBLIC_URL="https://another-selector-ranged.ngrok-free.dev"
+USE_DEMO_PROXY="${MORTGAGE_USE_DEMO_PROXY:-1}"
 NGROK="$HOME/bin/ngrok"
 POLICY="$HOME/ngrok-policy.yml"
 LOG="/tmp/m-abbott-site"
@@ -47,6 +49,65 @@ ngrok_running() {
 
 mockup_running() {
   lsof -iTCP:"$MOCKUP_PORT" -sTCP:LISTEN -t >/dev/null 2>&1
+}
+
+proxy_running() {
+  lsof -iTCP:"$PROXY_PORT" -sTCP:LISTEN -t >/dev/null 2>&1
+}
+
+stop_demo_proxy() {
+  [[ -f "$LOG/proxy.pid" ]] && kill "$(cat "$LOG/proxy.pid")" 2>/dev/null || true
+  pkill -f "mortgage-demo-proxy.mjs" 2>/dev/null || true
+  lsof -iTCP:"$PROXY_PORT" -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null || true
+  for _ in $(seq 1 15); do
+    proxy_running || return 0
+    sleep 1
+  done
+  echo "port :$PROXY_PORT still in use after stop_demo_proxy" >>"$LOG/stable.err"
+}
+
+start_demo_proxy() {
+  if [[ "$USE_DEMO_PROXY" != "1" ]]; then
+    return 0
+  fi
+  if [[ ! -f "$PROJECT/scripts/mortgage-demo-proxy.mjs" ]]; then
+    echo "demo proxy script missing at $PROJECT/scripts/mortgage-demo-proxy.mjs" >>"$LOG/stable.err"
+    return 1
+  fi
+  load_node
+  # Proxy forwards to the hub — don't start until the app is listening.
+  for _ in $(seq 1 30); do
+    curl -sf "http://127.0.0.1:${APP_PORT}/" >/dev/null 2>&1 && break
+    sleep 1
+  done
+  if ! curl -sf "http://127.0.0.1:${APP_PORT}/" >/dev/null 2>&1; then
+    echo "hub not ready on :$APP_PORT — skipping demo proxy" >>"$LOG/stable.err"
+    return 1
+  fi
+  if proxy_running && curl -sf "http://127.0.0.1:${PROXY_PORT}/" >/dev/null 2>&1; then
+    return 0
+  fi
+  stop_demo_proxy
+  echo "$(date '+%F %T') starting demo proxy on 127.0.0.1:$PROXY_PORT" >>"$LOG/stable.log"
+  nohup node "$PROJECT/scripts/mortgage-demo-proxy.mjs" >>"$LOG/proxy.log" 2>&1 &
+  echo $! >"$LOG/proxy.pid"
+  disown -h "$!" 2>/dev/null || true
+  for _ in $(seq 1 30); do
+    if proxy_running && curl -sf "http://127.0.0.1:${PROXY_PORT}/" >/dev/null 2>&1; then
+      return 0
+    fi
+    if [[ -f "$LOG/proxy.pid" ]] && ! kill -0 "$(cat "$LOG/proxy.pid")" 2>/dev/null; then
+      echo "demo proxy process exited early" >>"$LOG/stable.err"
+      tail -5 "$LOG/proxy.log" >>"$LOG/stable.err" 2>/dev/null || true
+      return 1
+    fi
+    sleep 1
+  done
+  echo "demo proxy failed to start" >>"$LOG/stable.err"
+  if curl -sf "http://127.0.0.1:${PROXY_PORT}/" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
 }
 
 needs_production_build() {
@@ -114,38 +175,71 @@ start_app() {
   wait_for_port
 }
 
+ngrok_upstream() {
+  if [[ "$USE_DEMO_PROXY" == "1" ]] && proxy_running; then
+    echo "127.0.0.1:${PROXY_PORT}"
+  else
+    echo "127.0.0.1:${APP_PORT}"
+  fi
+}
+
 start_ngrok() {
+  local ngrok_target
+  ngrok_target="$(ngrok_upstream)"
   if ngrok_running; then
-    return 0
+    if [[ -f "$LOG/ngrok.target" ]] && [[ "$(cat "$LOG/ngrok.target")" == "$ngrok_target" ]]; then
+      return 0
+    fi
+    if [[ "$USE_DEMO_PROXY" == "1" ]] && ! proxy_running; then
+      echo "proxy down — restarting ngrok on hub only" >>"$LOG/stable.err"
+      ngrok_target="127.0.0.1:${APP_PORT}"
+    fi
+    [[ -f "$LOG/ngrok.pid" ]] && kill "$(cat "$LOG/ngrok.pid")" 2>/dev/null || true
+    pkill -f "another-selector-ranged.ngrok-free.dev" 2>/dev/null || true
+    sleep 2
   fi
   if [[ ! -x "$NGROK" ]]; then
     echo "ngrok missing at $NGROK" >>"$LOG/stable.err"
     return 1
   fi
-  echo "$(date '+%F %T') starting ngrok" >>"$LOG/stable.log"
-  nohup "$NGROK" http --url="$PUBLIC_URL" "$APP_PORT" --traffic-policy-file "$POLICY" >>"$LOG/ngrok.log" 2>&1 &
+  echo "$(date '+%F %T') starting ngrok -> :$ngrok_target" >>"$LOG/stable.log"
+  nohup "$NGROK" http --url="$PUBLIC_URL" "$ngrok_target" --traffic-policy-file "$POLICY" >>"$LOG/ngrok.log" 2>&1 &
   echo $! >"$LOG/ngrok.pid"
+  echo "$ngrok_target" >"$LOG/ngrok.target"
   disown -h "$!" 2>/dev/null || true
   sleep 2
 }
 
 case "${1:-start}" in
   start)
-    start_app && start_mockup && start_ngrok
+    start_app && start_mockup
+    if [[ "$USE_DEMO_PROXY" == "1" ]]; then
+      start_demo_proxy || echo "$(date '+%F %T') demo proxy start failed" >>"$LOG/stable.err"
+    fi
+    start_ngrok
     ;;
   ensure)
     start_app || true
     start_mockup || true
+    if [[ "$USE_DEMO_PROXY" == "1" ]]; then
+      start_demo_proxy || true
+    fi
     start_ngrok || true
+    # If ngrok points at proxy but proxy is down, fall back to hub.
+    if [[ -f "$LOG/ngrok.target" ]] && [[ "$(cat "$LOG/ngrok.target")" == "127.0.0.1:${PROXY_PORT}" ]] && ! proxy_running; then
+      echo "$(date '+%F %T') proxy missing — switching ngrok to hub" >>"$LOG/stable.err"
+      start_ngrok
+    fi
     ;;
   stop)
     stop_app_preview
+    stop_demo_proxy
     [[ -f "$LOG/mockup.pid" ]] && kill "$(cat "$LOG/mockup.pid")" 2>/dev/null || true
     [[ -f "$LOG/ngrok.pid" ]] && kill "$(cat "$LOG/ngrok.pid")" 2>/dev/null || true
     pkill -f "another-selector-ranged.ngrok-free.dev" 2>/dev/null || true
     lsof -iTCP:"$MOCKUP_PORT" -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null || true
     pkill -f "serve $MOCKUP_DIR" 2>/dev/null || true
-    rm -f "$LOG/prod.pid" "$LOG/mockup.pid" "$LOG/ngrok.pid"
+    rm -f "$LOG/prod.pid" "$LOG/mockup.pid" "$LOG/proxy.pid" "$LOG/ngrok.pid"
     ;;
   rebuild)
     "$0" stop
@@ -157,9 +251,13 @@ case "${1:-start}" in
   status)
     echo -n "app: "; app_running && echo "up" || echo "down"
     echo -n "mockup: "; mockup_running && echo "up" || echo "down"
+    echo -n "proxy: "; proxy_running && echo "up" || echo "down"
     echo -n "ngrok: "; ngrok_running && echo "up" || echo "down"
+    echo "marketing: ${PUBLIC_URL}/mortgageeasy/"
     curl -sf -o /dev/null -w "http:%{http_code}\n" "http://127.0.0.1:${APP_PORT}/" 2>/dev/null || echo "http:fail"
     curl -sf -o /dev/null -w "mockup:%{http_code}\n" "http://127.0.0.1:${MOCKUP_PORT}/" 2>/dev/null || echo "mockup:fail"
+    curl -sf -o /dev/null -w "proxy:%{http_code}\n" "http://127.0.0.1:${PROXY_PORT}/" 2>/dev/null || echo "proxy:fail"
+    [[ -f "$LOG/ngrok.target" ]] && echo "ngrok_target: $(cat "$LOG/ngrok.target")"
     ;;
   *)
     echo "Usage: $0 {start|ensure|stop|rebuild|status}"

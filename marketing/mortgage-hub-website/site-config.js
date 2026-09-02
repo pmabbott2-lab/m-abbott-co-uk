@@ -12,16 +12,16 @@
     }
 
     var host = window.location.hostname;
+    if (host.indexOf("ngrok") !== -1) {
+      return window.location.origin.replace(/\/$/, "");
+    }
+
     if (host === "localhost" || host === "127.0.0.1") {
       var params = new URLSearchParams(window.location.search);
       if (params.get("hub") === "public") {
         return HUB_PUBLIC_ORIGIN;
       }
       return "http://127.0.0.1:8080";
-    }
-
-    if (host.indexOf("ngrok") !== -1) {
-      return HUB_PUBLIC_ORIGIN;
     }
 
     return window.location.origin;

@@ -222,11 +222,19 @@ export const createManualLead = createServerFn({ method: "POST" })
     return lead;
   });
 
-const JOURNEY_ORDER = ["appointment_seen", "id_confirmed", "aip_completed"] as const;
+const JOURNEY_ORDER = [
+  "appointment_seen",
+  "id_confirmed",
+  "aip_completed",
+  "offer_received",
+  "completion",
+] as const;
 const JOURNEY_LABELS: Record<string, string> = {
   appointment_seen: "Appointment seen",
-  id_confirmed: "ID confirmed",
+  id_confirmed: "Identity check",
   aip_completed: "AIP completed",
+  offer_received: "Offer received",
+  completion: "Completion",
 };
 
 function journeyStageLabel(completed: string[]): string {

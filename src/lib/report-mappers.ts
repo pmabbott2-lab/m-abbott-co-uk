@@ -5,6 +5,15 @@ import {
   PAYOUT_STATUS_LABELS,
   type CommissionPayoutRow,
 } from "@/lib/finance.functions";
+import type {
+  MonthlyBreakdownRow,
+  PipelineWindow,
+  StatusAmounts,
+} from "@/lib/commission-summary";
+import {
+  statusLabel,
+  summarizePipelineWindow,
+} from "@/lib/commission-summary";
 import type { ContactHistoryEntry } from "@/lib/sessions.functions";
 import type { ExportSheet, OwnerCustomerExportRow } from "@/lib/report-export.types";
 import { penceToGbp } from "@/lib/report-export.types";
@@ -82,6 +91,61 @@ export function commissionRowsToSheet(rows: CommissionPayoutRow[]): ExportSheet 
       r.payoutAt ? format(new Date(r.payoutAt), "yyyy-MM-dd") : "",
     ]),
   };
+}
+
+export function commissionPeriodSummaryToSheet(
+  totals: StatusAmounts,
+): ExportSheet {
+  return {
+    name: "Period summary",
+    headers: ["Status", "Count", "Amount (£)"],
+    rows: (["pending", "received", "paid", "rejected", "lost"] as const).map((status) => [
+      statusLabel(status),
+      totals[status].count,
+      penceToGbp(totals[status].amountPence),
+    ]),
+  };
+}
+
+export function commissionAnnualBreakdownToSheet(rows: MonthlyBreakdownRow[]): ExportSheet {
+  return {
+    name: "Monthly breakdown",
+    headers: ["Month", "Pending (£)", "Received (£)", "Paid (£)", "Rejected (£)", "Lost (£)"],
+    rows: rows.map((m) => [
+      m.label,
+      penceToGbp(m.totals.pending.amountPence),
+      penceToGbp(m.totals.received.amountPence),
+      penceToGbp(m.totals.paid.amountPence),
+      penceToGbp(m.totals.rejected.amountPence),
+      penceToGbp(m.totals.lost.amountPence),
+    ]),
+  };
+}
+
+export function commissionPipelineSummaryToSheet(
+  rows: CommissionPayoutRow[],
+  windows: PipelineWindow[] = ["month", "ytd", "l12m"],
+): ExportSheet {
+  return {
+    name: "Pipeline summary",
+    headers: ["Period", "Pending (£)", "Received (£)", "Total pipeline (£)", "Rows"],
+    rows: windows.map((window) => {
+      const summary = summarizePipelineWindow(rows, window);
+      return [
+        summary.label,
+        penceToGbp(summary.pendingPence),
+        penceToGbp(summary.receivedPence),
+        penceToGbp(summary.totalPence),
+        summary.count,
+      ];
+    }),
+  };
+}
+
+export function commissionCaseSearchToSheet(rows: CommissionPayoutRow[], caseQuery: string): ExportSheet {
+  const sheet = commissionRowsToSheet(rows);
+  sheet.name = caseQuery.trim() ? `Case ${caseQuery.trim()}` : sheet.name;
+  return sheet;
 }
 
 export function customerReportToSheet(rows: OwnerCustomerExportRow[]): ExportSheet {

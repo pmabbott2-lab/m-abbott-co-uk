@@ -25,6 +25,7 @@ export const PERMISSION_KEYS = [
   "finance_advisor_pct",
   "finance_introducer_pct",
   "finance_raf",
+  "relationship",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -44,6 +45,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   finance_advisor_pct: "Finance — advisor commission %",
   finance_introducer_pct: "Finance — introducer commission %",
   finance_raf: "Finance — RAF commission highlight",
+  relationship: "Relationship management (renewals)",
 };
 
 /** Defaults applied when promoting someone to general admin. */
@@ -62,6 +64,7 @@ export const DEFAULT_GENERAL_PERMISSIONS: Record<PermissionKey, PermissionAccess
   finance_advisor_pct: "none",
   finance_introducer_pct: "none",
   finance_raf: "none",
+  relationship: "none",
 };
 
 export type AdminAccess = {
@@ -124,6 +127,19 @@ export function canAmendCommissionPayouts(access: AdminAccess | null | undefined
     canAmend(access, "finance_advisor_pct") ||
     canAmend(access, "finance_introducer_pct")
   );
+}
+
+/** Relationship / renewal pipeline — owner, supervisor, or relationship permission. */
+export function canViewRelationship(access: AdminAccess | null | undefined): boolean {
+  if (!access?.isAdmin) return false;
+  if (access.isOwner || access.isSupervisor) return true;
+  return canView(access, "relationship");
+}
+
+export function canAmendRelationship(access: AdminAccess | null | undefined): boolean {
+  if (!access?.isAdmin) return false;
+  if (access.isOwner || access.isSupervisor) return true;
+  return canAmend(access, "relationship");
 }
 
 /** Owner-only history amend. */

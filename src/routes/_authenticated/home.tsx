@@ -14,6 +14,8 @@ import {
   canViewFinanceReport,
   canViewCommissionPayouts,
   canAmendCommissionPayouts,
+  canViewRelationship,
+  canAmendRelationship,
   canEditAdminPermissions,
   canGrantAdminLevel,
   type AdminAccess,
@@ -34,6 +36,7 @@ import {
   resolvePostAuthStart,
 } from "@/lib/post-auth-journey";
 import { CommissionPayoutsPanel } from "@/components/CommissionPayoutsPanel";
+import { RelationshipManagementPanel } from "@/components/RelationshipManagementPanel";
 import { MyCommissionStatementPanel } from "@/components/MyCommissionStatementPanel";
 import { StaffCustomerBookingCard } from "@/components/StaffCustomerBookingCard";
 import { AdvisorViewBanner } from "@/components/AdvisorViewBanner";
@@ -70,7 +73,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Mic, MessageSquare, FileText, ArrowRight, Trash2, RotateCcw, ShieldCheck, ShieldOff, CalendarCheck, CalendarDays, Link2, UserPlus, UserMinus, Users, UserCog, Search, Hash, KeyRound, Copy, Check, Clock, Mail, Gift, Send, Phone, Briefcase, ChevronRight, PhoneCall, Inbox, PoundSterling, Eye } from "lucide-react";
+import { Mic, MessageSquare, FileText, ArrowRight, Trash2, RotateCcw, ShieldCheck, ShieldOff, CalendarCheck, CalendarDays, Link2, UserPlus, UserMinus, Users, UserCog, Search, Hash, KeyRound, Copy, Check, Clock, Mail, Gift, Send, Phone, Briefcase, ChevronRight, PhoneCall, Inbox, PoundSterling, Eye, History } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -81,6 +84,8 @@ import {
 } from "@/components/PostCompletionBooking";
 
 export const Route = createFileRoute("/_authenticated/home")({
+  pendingMs: 0,
+  pendingMinMs: 0,
   component: Home,
 });
 
@@ -3529,7 +3534,16 @@ function Home() {
   const introducerFn = useServerFn(checkIsIntroducer);
   const markOpenedFn = useServerFn(markContactOpened);
 
-  const roleQ = useQuery({ queryKey: ["my-role"], queryFn: () => roleFn() });
+  const roleQ = useQuery({
+    queryKey: ["my-role"],
+    queryFn: async () => {
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Account load timed out — please sign in again.")), 12000),
+      );
+      return Promise.race([roleFn(), timeout]);
+    },
+    retry: 1,
+  });
   const isAdvisor = roleQ.data?.isAdvisor ?? false;
   const isMainAdmin = roleQ.data?.isMainAdmin ?? false;
   const isOwner = roleQ.data?.isOwner ?? false;
@@ -3545,6 +3559,8 @@ function Home() {
     canView(adminAccess, "raf");
   const showAccessTab = isOwner || isSupervisor;
   const showFinanceReport = canViewFinanceReport(adminAccess);
+  const showRelationshipTab = canViewRelationship(adminAccess);
+  const canRefreshRelationship = canAmendRelationship(adminAccess);
   const showAdvisorViewTab = (isOwner || isSupervisor) && isMainAdmin;
 
   const introducerQ = useQuery({ queryKey: ["is-introducer"], queryFn: () => introducerFn() });
@@ -3673,7 +3689,16 @@ function Home() {
           <p className="text-muted-foreground">We couldn&apos;t load your account. Please sign in again.</p>
           <div className="flex flex-wrap justify-center gap-2">
             <Button onClick={() => roleQ.refetch()}>Try again</Button>
-            <Button variant="outline" onClick={() => navigate({ to: "/auth", replace: true })}>Sign in</Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                void supabase.auth.signOut({ scope: "local" }).finally(() => {
+                  window.location.replace("/auth");
+                });
+              }}
+            >
+              Sign in
+            </Button>
           </div>
         </div>
       </AppShell>
@@ -3739,6 +3764,7 @@ function Home() {
       (showCommissionPayouts ? 1 : 0) +
       (showManage ? 1 : 0) +
       (showAccessTab ? 1 : 0) +
+      (showRelationshipTab ? 1 : 0) +
       (showFinanceReport ? 1 : 0);
 
     return (
@@ -3833,6 +3859,12 @@ function Home() {
                 <TabsTrigger value="access">
                   <UserCog className="w-4 h-4 mr-1.5" />
                   Admin access
+                </TabsTrigger>
+              )}
+              {showRelationshipTab && (
+                <TabsTrigger value="relationship">
+                  <History className="w-4 h-4 mr-1.5" />
+                  Relationship
                 </TabsTrigger>
               )}
               {showFinanceReport && (
@@ -4025,6 +4057,12 @@ function Home() {
           {showAccessTab && (
             <TabsContent value="access">
               <AdminAccessPanel isOwner={isOwner} canEditPerms={canEditAdminPermissions(adminAccess)} />
+            </TabsContent>
+          )}
+
+          {showRelationshipTab && (
+            <TabsContent value="relationship">
+              <RelationshipManagementPanel canRefresh={canRefreshRelationship} />
             </TabsContent>
           )}
 
