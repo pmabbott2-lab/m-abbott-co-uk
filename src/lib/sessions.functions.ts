@@ -543,23 +543,53 @@ export async function createCaseSessionForCustomer(
 
 export const listMySessions = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+  .inputValidator((d: unknown) =>
+    z.object({ viewAsCustomerUserId: z.string().uuid().optional() }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    let customerId = context.userId;
+    if (data.viewAsCustomerUserId) {
+      const email = (context.claims as { email?: string }).email;
+      const { resolveAdminAccess } = await import("@/lib/admin.functions");
+      const access = await resolveAdminAccess(context.userId, email);
+      if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+      customerId = data.viewAsCustomerUserId;
+    }
+
+    const client =
+      data.viewAsCustomerUserId
+        ? (await import("@/integrations/supabase/client.server")).supabaseAdmin
+        : context.supabase;
+
+    const { data: rows, error } = await client
       .from("interview_sessions")
       .select("*")
+      .eq("customer_id", customerId)
       .order("started_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return (data ?? []).filter((s) => !(s as { deleted_at?: string | null }).deleted_at);
+    return (rows ?? []).filter((s) => !(s as { deleted_at?: string | null }).deleted_at);
   });
 
 export const listMyCases = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) =>
+    z.object({ viewAsCustomerUserId: z.string().uuid().optional() }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    let customerId = context.userId;
+    if (data.viewAsCustomerUserId) {
+      const email = (context.claims as { email?: string }).email;
+      const { resolveAdminAccess } = await import("@/lib/admin.functions");
+      const access = await resolveAdminAccess(context.userId, email);
+      if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+      customerId = data.viewAsCustomerUserId;
+    }
+
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: sessions, error } = await supabaseAdmin
       .from("interview_sessions")
       .select("id, case_ref, status, started_at, submitted_at, summary")
-      .eq("customer_id", context.userId)
+      .eq("customer_id", customerId)
       .is("deleted_at", null)
       .not("case_ref", "is", null)
       .order("started_at", { ascending: false });
@@ -1196,7 +1226,11 @@ export const listUsersWithRoles = createServerFn({ method: "GET" })
       .from("user_roles")
       .select("role")
       .eq("user_id", context.userId);
-    if (!(myRoles ?? []).some((r) => r.role === "advisor")) throw new Error("Forbidden");
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const adminAccess = await resolveAdminAccess(context.userId, email);
+    const isAdvisor = (myRoles ?? []).some((r) => r.role === "advisor");
+    if (!isAdvisor && !adminAccess.isAdmin) throw new Error("Forbidden");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: profiles, error } = await supabaseAdmin
@@ -1996,6 +2030,216 @@ export const unallocateSession = createServerFn({ method: "POST" })
       .eq("advisor_id", data.advisorId);
     if (error && !isMissingTableError(error)) throw new Error(error.message);
     return { ok: true };
+  });
+
+export const transferSession = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        sessionId: z.string().uuid(),
+        fromAdvisorId: z.string().uuid(),
+        toAdvisorId: z.string().uuid(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const roles = await getRolesForUser(context.userId);
+    if (!roles.includes("admin")) throw new Error("Forbidden");
+    if (data.fromAdvisorId === data.toAdvisorId) {
+      throw new Error("Choose a different advisor to transfer to.");
+    }
+
+    const targetRoles = await getRolesForUser(data.toAdvisorId);
+    if (!targetRoles.includes("advisor")) throw new Error("Target user is not an advisor.");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: current, error: currentErr } = await supabaseAdmin
+      .from("session_advisors")
+      .select("advisor_id")
+      .eq("session_id", data.sessionId);
+    if (currentErr && !isMissingTableError(currentErr)) throw new Error(currentErr.message);
+    const advisorIds = (current ?? []).map((r) => r.advisor_id);
+    if (!advisorIds.includes(data.fromAdvisorId)) {
+      throw new Error("This advisor is not assigned to that customer file.");
+    }
+    if (
+      advisorIds.length >= MAX_ADVISORS_PER_SESSION &&
+      !advisorIds.includes(data.toAdvisorId)
+    ) {
+      throw new Error(
+        `This customer already has the maximum of ${MAX_ADVISORS_PER_SESSION} advisors.`,
+      );
+    }
+
+    const { error: delErr } = await supabaseAdmin
+      .from("session_advisors")
+      .delete()
+      .eq("session_id", data.sessionId)
+      .eq("advisor_id", data.fromAdvisorId);
+    if (delErr && !isMissingTableError(delErr)) throw new Error(delErr.message);
+
+    if (!advisorIds.includes(data.toAdvisorId)) {
+      const { error: insErr } = await supabaseAdmin.from("session_advisors").upsert(
+        {
+          session_id: data.sessionId,
+          advisor_id: data.toAdvisorId,
+          assigned_by: context.userId,
+        },
+        { onConflict: "session_id,advisor_id" },
+      );
+      if (insErr && !isMissingTableError(insErr)) throw new Error(insErr.message);
+    }
+
+    return { ok: true };
+  });
+
+export const bulkTransferSessions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        sessionIds: z.array(z.string().uuid()).min(1),
+        fromAdvisorId: z.string().uuid(),
+        toAdvisorId: z.string().uuid().optional(),
+        toAdvisorCode: z.string().min(1).optional(),
+      })
+      .refine((v) => v.toAdvisorId || v.toAdvisorCode, {
+        message: "Provide a target advisor or advisor code.",
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const roles = await getRolesForUser(context.userId);
+    if (!roles.includes("admin")) throw new Error("Forbidden");
+
+    let toAdvisorId = data.toAdvisorId ?? null;
+    if (!toAdvisorId && data.toAdvisorCode) {
+      toAdvisorId = await resolveAdvisorIdByCode(data.toAdvisorCode);
+      if (!toAdvisorId) {
+        throw new Error(`No advisor found with code ${data.toAdvisorCode.toUpperCase()}.`);
+      }
+    }
+    if (!toAdvisorId) throw new Error("Provide a target advisor.");
+    if (data.fromAdvisorId === toAdvisorId) {
+      throw new Error("Choose a different advisor to transfer to.");
+    }
+
+    const targetRoles = await getRolesForUser(toAdvisorId);
+    if (!targetRoles.includes("advisor")) throw new Error("Target user is not an advisor.");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: existing, error: existingErr } = await supabaseAdmin
+      .from("session_advisors")
+      .select("session_id, advisor_id")
+      .in("session_id", data.sessionIds);
+    if (existingErr && !isMissingTableError(existingErr)) throw new Error(existingErr.message);
+
+    const bySession = new Map<string, string[]>();
+    for (const row of existing ?? []) {
+      bySession.set(row.session_id, [...(bySession.get(row.session_id) ?? []), row.advisor_id]);
+    }
+
+    let transferred = 0;
+    const skipped: Array<{ sessionId: string; reason: string }> = [];
+
+    for (const sessionId of data.sessionIds) {
+      const advisors = bySession.get(sessionId) ?? [];
+      if (!advisors.includes(data.fromAdvisorId)) {
+        skipped.push({ sessionId, reason: "not-assigned-from" });
+        continue;
+      }
+      if (advisors.includes(toAdvisorId)) {
+        const { error: delErr } = await supabaseAdmin
+          .from("session_advisors")
+          .delete()
+          .eq("session_id", sessionId)
+          .eq("advisor_id", data.fromAdvisorId);
+        if (delErr && !isMissingTableError(delErr)) throw new Error(delErr.message);
+        transferred += 1;
+        continue;
+      }
+      if (advisors.length >= MAX_ADVISORS_PER_SESSION) {
+        skipped.push({ sessionId, reason: "max-advisors" });
+        continue;
+      }
+      const { error: delErr } = await supabaseAdmin
+        .from("session_advisors")
+        .delete()
+        .eq("session_id", sessionId)
+        .eq("advisor_id", data.fromAdvisorId);
+      if (delErr && !isMissingTableError(delErr)) throw new Error(delErr.message);
+      const { error: insErr } = await supabaseAdmin.from("session_advisors").upsert(
+        {
+          session_id: sessionId,
+          advisor_id: toAdvisorId,
+          assigned_by: context.userId,
+        },
+        { onConflict: "session_id,advisor_id" },
+      );
+      if (insErr && !isMissingTableError(insErr)) throw new Error(insErr.message);
+      transferred += 1;
+    }
+
+    return { toAdvisorId, transferredCount: transferred, skipped };
+  });
+
+export type CustomerListItem = {
+  userId: string;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  sessionCount: number;
+};
+
+/** Owner/supervisor — pick a customer for Customer view. */
+export const listCustomersForAdmin = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const access = await resolveAdminAccess(context.userId, email);
+    if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const customerIds = new Set<string>();
+
+    const { data: roleRows } = await supabaseAdmin
+      .from("user_roles")
+      .select("user_id")
+      .eq("role", "customer");
+    for (const r of roleRows ?? []) customerIds.add(r.user_id);
+
+    const { data: sessions } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("customer_id")
+      .is("deleted_at", null);
+    const sessionCount = new Map<string, number>();
+    for (const s of sessions ?? []) {
+      if (!s.customer_id) continue;
+      customerIds.add(s.customer_id);
+      sessionCount.set(s.customer_id, (sessionCount.get(s.customer_id) ?? 0) + 1);
+    }
+
+    if (customerIds.size === 0) return [] as CustomerListItem[];
+
+    const { data: profiles } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name, email, phone")
+      .in("id", Array.from(customerIds));
+
+    return (profiles ?? [])
+      .map((p) => ({
+        userId: p.id,
+        full_name: p.full_name,
+        email: p.email,
+        phone: (p as { phone?: string | null }).phone ?? null,
+        sessionCount: sessionCount.get(p.id) ?? 0,
+      }))
+      .sort((a, b) =>
+        (a.full_name || a.email || "").localeCompare(b.full_name || b.email || ""),
+      );
   });
 
 export const addAdvisorNote = createServerFn({ method: "POST" })

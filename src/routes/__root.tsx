@@ -12,6 +12,7 @@ import { type ReactNode } from "react";
 import "../styles.css";
 import appCss from "../styles.css?url";
 import { Toaster } from "@/components/ui/sonner";
+import { ThemeInit } from "@/components/ThemeInit";
 import { supabase } from "@/integrations/supabase/client";
 
 function NotFoundComponent() {
@@ -55,6 +56,16 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
         <p className="mt-2 text-sm text-muted-foreground">
           Something went wrong on our end. Try again, or sign in again if the dashboard keeps failing.
         </p>
+        {error?.message?.includes("Invalid server action param") && (
+          <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+            Your browser may have an older version of the app cached. Hard refresh the page (Cmd+Shift+R on Mac, Ctrl+Shift+R on Windows) and try again.
+          </p>
+        )}
+        {error?.message && (
+          <p className="mt-3 rounded-md border bg-muted/40 px-3 py-2 text-left text-xs font-mono text-muted-foreground break-all">
+            {error.message}
+          </p>
+        )}
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
             type="button"
@@ -115,10 +126,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
-        <link rel="stylesheet" href={appCss} />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var k="mortgage-hub:theme-profile";var t=localStorage.getItem(k);var d=t||"classic-hub";document.documentElement.setAttribute("data-theme",d);}catch(e){document.documentElement.setAttribute("data-theme","classic-hub");}})();`,
+          }}
+        />
       </head>
       <body>
         {children}
@@ -133,6 +148,7 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <ThemeInit />
       <Outlet />
       <Toaster position="top-center" richColors closeButton />
     </QueryClientProvider>

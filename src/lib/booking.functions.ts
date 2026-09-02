@@ -1954,20 +1954,33 @@ export const markContactOpened = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z
-      .object({ contactType: z.enum(["appointment", "callback", "phone_call"]), contactId: z.string().uuid() })
+      .object({
+        contactType: z.enum(["appointment", "callback", "phone_call"]),
+        contactId: z.string().uuid(),
+        viewAsAdvisorId: z.string().uuid().optional(),
+      })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: roles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    if (!(roles ?? []).some((r) => r.role === "advisor")) {
-      const email = (context.claims as { email?: string }).email;
-      const { resolveAdminAccess } = await import("@/lib/admin.functions");
-      const adminAccess = await resolveAdminAccess(context.userId, email);
-      if (!adminAccess.isOwner && !adminAccess.isSupervisor && !adminAccess.isAdmin) {
-        throw new Error("Forbidden");
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const adminAccess = await resolveAdminAccess(context.userId, email);
+
+    let advisorId = context.userId;
+    let viewAsMode = false;
+    if (data.viewAsAdvisorId) {
+      if (!adminAccess.isOwner && !adminAccess.isSupervisor) throw new Error("Forbidden");
+      advisorId = data.viewAsAdvisorId;
+      viewAsMode = true;
+    } else {
+      const { data: roles } = await context.supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", context.userId);
+      if (!(roles ?? []).some((r) => r.role === "advisor")) {
+        if (!adminAccess.isOwner && !adminAccess.isSupervisor && !adminAccess.isAdmin) {
+          throw new Error("Forbidden");
+        }
       }
     }
 
@@ -1975,10 +1988,23 @@ export const markContactOpened = createServerFn({ method: "POST" })
     const { error } = await supabaseAdmin
       .from("advisor_contact_views")
       .upsert(
-        { advisor_id: context.userId, contact_type: data.contactType, contact_id: data.contactId },
+        { advisor_id: advisorId, contact_type: data.contactType, contact_id: data.contactId },
         { onConflict: "advisor_id,contact_type,contact_id" },
       );
     if (error && !isMissingContactTable(error)) throw new Error(error.message);
+
+    if (viewAsMode) {
+      const { logViewAsAudit } = await import("@/lib/view-as-audit.functions");
+      await logViewAsAudit(supabaseAdmin, {
+        viewType: "advisor",
+        actingUserId: context.userId,
+        targetUserId: advisorId,
+        action: "contact_opened",
+        summary: `Opened ${data.contactType} contact`,
+        detail: { contactId: data.contactId, contactType: data.contactType },
+      });
+    }
+
     return { ok: true };
   });
 
@@ -1999,7 +2025,13 @@ export const listAdvisorAppointments = createServerFn({ method: "POST" })
 
     let advisorId = context.userId;
     if (data.viewAsAdvisorId) {
-      if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+      const { canView } = await import("@/lib/admin-access");
+      const canViewAdvisorDiary =
+        access.isOwner ||
+        access.isSupervisor ||
+        canView(access, "advisors") ||
+        canView(access, "appointments");
+      if (!canViewAdvisorDiary) throw new Error("Forbidden");
       advisorId = data.viewAsAdvisorId;
     } else if (!roleList.includes("advisor") && !access.isAdmin) {
       throw new Error("Forbidden");
@@ -2016,6 +2048,58 @@ export const listAdvisorAppointments = createServerFn({ method: "POST" })
       .limit(50);
     if (error) throw new Error(error.message);
     return appts ?? [];
+  });
+
+/** All confirmed upcoming appointments (firm-wide diary grid). */
+export const listAllUpcomingAppointments = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const access = await resolveAdminAccess(context.userId, email);
+    const { canView } = await import("@/lib/admin-access");
+    const canViewGrid =
+      access.isOwner ||
+      access.isSupervisor ||
+      canView(access, "advisors") ||
+      canView(access, "appointments");
+    if (!canViewGrid) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: appts, error } = await supabaseAdmin
+      .from("appointments")
+      .select("*")
+      .gte("starts_at", new Date().toISOString())
+      .eq("status", "confirmed")
+      .order("starts_at", { ascending: true })
+      .limit(500);
+    if (error) throw new Error(error.message);
+
+    const advisorIds = [...new Set((appts ?? []).map((a) => a.advisor_id).filter(Boolean))] as string[];
+    const profileMap = new Map<string, { full_name: string | null; email: string | null }>();
+    const codeMap = new Map<string, string>();
+    if (advisorIds.length > 0) {
+      const { data: profiles } = await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", advisorIds);
+      for (const p of profiles ?? []) profileMap.set(p.id, p);
+
+      const { data: codes } = await supabaseAdmin
+        .from("advisor_profiles")
+        .select("user_id, code")
+        .in("user_id", advisorIds);
+      for (const c of codes ?? []) codeMap.set(c.user_id, c.code);
+    }
+
+    return (appts ?? []).map((a) => {
+      const profile = profileMap.get(a.advisor_id);
+      return {
+        ...a,
+        advisor_name: profile?.full_name ?? profile?.email ?? null,
+        advisor_code: codeMap.get(a.advisor_id) ?? null,
+      };
+    });
   });
 
 export const listIntroducerAppointments = createServerFn({ method: "GET" })
@@ -2040,18 +2124,38 @@ export const listIntroducerAppointments = createServerFn({ method: "GET" })
 
 export const sendLeadBookingSms = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ leadId: z.string().uuid() }).parse(d))
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        leadId: z.string().uuid(),
+        viewAsIntroducerUserId: z.string().uuid().optional(),
+      })
+      .parse(d),
+  )
   .handler(async ({ data, context }) => {
     if (!isTwilioConfigured()) throw new Error("SMS is not configured yet. Add Twilio credentials to your server environment.");
 
-    const { data: introducer, error: introErr } = await context.supabase
+    const {
+      data: { user },
+    } = await context.supabase.auth.getUser();
+    const { resolveViewAsIntroducer } = await import("@/lib/introducer.functions");
+    const { targetUserId, viewAsMode } = await resolveViewAsIntroducer(
+      context.userId,
+      user?.email ?? null,
+      data.viewAsIntroducerUserId,
+    );
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const introClient = viewAsMode ? supabaseAdmin : context.supabase;
+
+    const { data: introducer, error: introErr } = await introClient
       .from("introducers")
       .select("id, company_name, slug")
-      .eq("user_id", context.userId)
+      .eq("user_id", targetUserId)
       .single();
     if (introErr) throw new Error(introErr.message);
 
-    const { data: lead, error: leadErr } = await context.supabase
+    const { data: lead, error: leadErr } = await introClient
       .from("introducer_leads")
       .select("*")
       .eq("id", data.leadId)
@@ -2077,10 +2181,22 @@ export const sendLeadBookingSms = createServerFn({ method: "POST" })
       leadId: lead.id,
     });
 
-    await context.supabase
+    await introClient
       .from("introducer_leads")
       .update({ channel: "text", status: "contacted" })
       .eq("id", lead.id);
+
+    if (viewAsMode) {
+      const { logViewAsAudit } = await import("@/lib/view-as-audit.functions");
+      await logViewAsAudit(supabaseAdmin, {
+        viewType: "introducer",
+        actingUserId: context.userId,
+        targetUserId,
+        action: "send_booking_sms",
+        summary: `Sent booking link SMS to ${lead.customer_name ?? "customer"}`,
+        detail: { leadId: lead.id, customerPhone: lead.customer_phone },
+      });
+    }
 
     return { ok: true, bookUrl };
   });
@@ -2269,19 +2385,34 @@ export const bookNewCustomerAsIntroducer = createServerFn({ method: "POST" })
         advisorId: z.string().uuid().optional(),
         notes: z.string().max(500).optional(),
         sendSms: z.boolean().optional(),
+        viewAsIntroducerUserId: z.string().uuid().optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    await assertIntroducerBookingAccess(context.userId);
+    const {
+      data: { user },
+    } = await context.supabase.auth.getUser();
+    const { resolveViewAsIntroducer } = await import("@/lib/introducer.functions");
+    const { targetUserId, viewAsMode } = await resolveViewAsIntroducer(
+      context.userId,
+      user?.email ?? null,
+      data.viewAsIntroducerUserId,
+    );
+
+    if (!viewAsMode) {
+      await assertIntroducerBookingAccess(context.userId);
+    } else {
+      await assertIntroducerBookingAccess(targetUserId);
+    }
+
     const customerId = await resolveOrCreateCustomerProfile({
       customerName: data.customerName,
       customerPhone: data.customerPhone,
       customerEmail: data.customerEmail,
     });
-    // Prefer the advisorId used for slot picking so diary + Teams stay consistent.
     const advisorId = data.advisorId ?? (await getPrimaryAdvisorId());
-    return bookAppointment(
+    const result = await bookAppointment(
       {
         customerId,
         advisorId,
@@ -2293,8 +2424,27 @@ export const bookNewCustomerAsIntroducer = createServerFn({ method: "POST" })
         notes: data.notes,
         sendSms: data.sendSms ?? true,
       },
-      context.userId,
+      targetUserId,
     );
+
+    if (viewAsMode) {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { logViewAsAudit } = await import("@/lib/view-as-audit.functions");
+      await logViewAsAudit(supabaseAdmin, {
+        viewType: "introducer",
+        actingUserId: context.userId,
+        targetUserId,
+        action: "book_appointment",
+        summary: `Booked appointment for ${data.customerName}`,
+        detail: {
+          customerName: data.customerName,
+          startsAt: data.startsAt,
+          appointmentId: (result as { appointment?: { id?: string } }).appointment?.id,
+        },
+      });
+    }
+
+    return result;
   });
 
 export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST" })
@@ -2306,11 +2456,22 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
         customerPhone: z.string().min(7),
         customerEmail: z.string().email(),
         sendSms: z.boolean().optional(),
+        viewAsIntroducerUserId: z.string().uuid().optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const introducerId = await assertIntroducerBookingAccess(context.userId);
+    const {
+      data: { user },
+    } = await context.supabase.auth.getUser();
+    const { resolveViewAsIntroducer } = await import("@/lib/introducer.functions");
+    const { targetUserId, viewAsMode } = await resolveViewAsIntroducer(
+      context.userId,
+      user?.email ?? null,
+      data.viewAsIntroducerUserId,
+    );
+
+    const introducerId = await assertIntroducerBookingAccess(targetUserId);
     if (data.sendSms !== false && !isTwilioConfigured()) {
       throw new Error("SMS is not configured — copy the booking link instead.");
     }
@@ -2359,6 +2520,18 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
         .from("introducer_leads")
         .update({ status: "contacted" })
         .eq("id", lead.id);
+    }
+
+    if (viewAsMode) {
+      const { logViewAsAudit } = await import("@/lib/view-as-audit.functions");
+      await logViewAsAudit(supabaseAdmin, {
+        viewType: "introducer",
+        actingUserId: context.userId,
+        targetUserId,
+        action: "send_booking_link",
+        summary: `Sent booking link to ${data.customerName}`,
+        detail: { leadId: lead.id, customerEmail: data.customerEmail },
+      });
     }
 
     console.info(`[booking-email] Invite to ${data.customerEmail}: ${bookUrl}`);

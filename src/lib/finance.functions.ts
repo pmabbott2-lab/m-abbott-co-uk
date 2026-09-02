@@ -1003,20 +1003,29 @@ export const listMyCommissionStatement = createServerFn({ method: "GET" })
     z
       .object({
         payoutStatus: z.enum(["pending", "received", "paid", "rejected", "lost"]).optional(),
+        viewAsUserId: z.string().uuid().optional(),
       })
       .parse(d ?? {}),
   )
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
+    let beneficiaryUserId = context.userId;
+    if (data.viewAsUserId) {
+      const email = (context.claims as { email?: string }).email;
+      const access = await resolveAdminAccess(context.userId, email);
+      if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+      beneficiaryUserId = data.viewAsUserId;
+    }
+
     const { data: eligibleRefs } = await supabaseAdmin
       .from("referrals")
       .select("id")
-      .eq("referrer_user_id", context.userId)
+      .eq("referrer_user_id", beneficiaryUserId)
       .eq("bonus_status", "eligible")
       .limit(100);
     for (const r of eligibleRefs ?? []) {
-      await ensureRafCommissionLedgerEntry(r.id, context.userId);
+      await ensureRafCommissionLedgerEntry(r.id, beneficiaryUserId);
     }
 
     let query = supabaseAdmin
@@ -1025,7 +1034,7 @@ export const listMyCommissionStatement = createServerFn({ method: "GET" })
         "id, session_id, fee_type, amount_pence, commission_pct, beneficiary_user_id, beneficiary_role, referral_id, payout_status, payout_note, payout_at, lost_reason, created_at, note",
       )
       .eq("kind", "commission")
-      .eq("beneficiary_user_id", context.userId)
+      .eq("beneficiary_user_id", beneficiaryUserId)
       .order("created_at", { ascending: false })
       .limit(2000);
 

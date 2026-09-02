@@ -30,7 +30,9 @@ export function AppShell({
       <header className="border-b bg-card/60 backdrop-blur sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <Link to="/home" className="flex items-center gap-2 font-semibold shrink-0">
-            <span className="inline-block w-6 h-6 rounded-full bg-accent" />
+            <span className="inline-flex w-7 h-7 items-center justify-center rounded-lg bg-primary text-primary-foreground text-xs font-bold shadow-sm">
+              MH
+            </span>
             Mortgage Hub
           </Link>
           <h1 className="text-sm font-medium text-muted-foreground hidden sm:block min-w-0 truncate">{title}</h1>

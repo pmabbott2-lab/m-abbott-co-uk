@@ -85,29 +85,132 @@ export const checkIsIntroducer = createServerFn({ method: "GET" })
     return { isIntroducer: (roles ?? []).some((r) => r.role === "introducer") };
   });
 
-export const getIntroducerProfile = createServerFn({ method: "GET" })
+export type IntroducerListItem = {
+  userId: string;
+  full_name: string | null;
+  email: string | null;
+  company_name: string | null;
+  slug: string | null;
+  company_code: string | null;
+};
+
+/** Owner/supervisor — pick an introducer for Introducer view. */
+export const listIntroducersForAdmin = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: roles } = await context.supabase
+    const {
+      data: { user },
+    } = await context.supabase.auth.getUser();
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const access = await resolveAdminAccess(context.userId, user?.email ?? null);
+    if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: roleRows } = await supabaseAdmin
       .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    if (!(roles ?? []).some((r) => r.role === "introducer")) {
-      throw new Error("Forbidden");
+      .select("user_id")
+      .eq("role", "introducer");
+    const userIds = Array.from(new Set((roleRows ?? []).map((r) => r.user_id)));
+    if (userIds.length === 0) return [] as IntroducerListItem[];
+
+    const [{ data: profiles }, { data: introducers }] = await Promise.all([
+      supabaseAdmin.from("profiles").select("id, full_name, email").in("id", userIds),
+      supabaseAdmin
+        .from("introducers")
+        .select("user_id, company_name, slug, company_code")
+        .in("user_id", userIds),
+    ]);
+
+    const introByUser = new Map((introducers ?? []).map((i) => [i.user_id, i]));
+
+    return (profiles ?? [])
+      .map((p) => {
+        const intro = introByUser.get(p.id);
+        return {
+          userId: p.id,
+          full_name: p.full_name,
+          email: p.email,
+          company_name: intro?.company_name ?? p.full_name,
+          slug: intro?.slug ?? null,
+          company_code: (intro as { company_code?: string | null } | undefined)?.company_code ?? null,
+        };
+      })
+      .sort((a, b) =>
+        (a.company_name || a.full_name || a.email || "").localeCompare(
+          b.company_name || b.full_name || b.email || "",
+        ),
+      );
+  });
+
+async function assertIntroducerUser(userId: string): Promise<void> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: roles } = await supabaseAdmin
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId);
+  if (!(roles ?? []).some((r) => r.role === "introducer")) {
+    throw new Error("Not an introducer account");
+  }
+}
+
+/** Owner/supervisor view-as introducer — returns target user id. */
+export async function resolveViewAsIntroducer(
+  actingUserId: string,
+  email: string | null,
+  viewAsIntroducerUserId?: string,
+): Promise<{ targetUserId: string; viewAsMode: boolean }> {
+  if (!viewAsIntroducerUserId) {
+    return { targetUserId: actingUserId, viewAsMode: false };
+  }
+  const { resolveAdminAccess } = await import("@/lib/admin.functions");
+  const access = await resolveAdminAccess(actingUserId, email);
+  if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+  await assertIntroducerUser(viewAsIntroducerUserId);
+  return { targetUserId: viewAsIntroducerUserId, viewAsMode: true };
+}
+
+export const getIntroducerProfile = createServerFn({ method: "GET" })
+  .inputValidator((d: unknown) =>
+    z.object({ viewAsIntroducerUserId: z.string().uuid().optional() }).parse(d ?? {}),
+  )
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ data, context }) => {
+    const {
+      data: { user },
+    } = await context.supabase.auth.getUser();
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const access = await resolveAdminAccess(context.userId, user?.email ?? null);
+
+    let targetUserId = context.userId;
+    const viewAsMode = Boolean(data.viewAsIntroducerUserId);
+
+    if (viewAsMode) {
+      if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+      targetUserId = data.viewAsIntroducerUserId!;
+      await assertIntroducerUser(targetUserId);
+    } else {
+      const { data: roles } = await context.supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", context.userId);
+      if (!(roles ?? []).some((r) => r.role === "introducer")) {
+        throw new Error("Forbidden");
+      }
     }
 
-    const { data: existing } = await context.supabase
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const client = viewAsMode ? supabaseAdmin : context.supabase;
+
+    const { data: existing } = await client
       .from("introducers")
       .select("*")
-      .eq("user_id", context.userId)
+      .eq("user_id", targetUserId)
       .maybeSingle();
+
     if (existing) {
-      // Backfill a company code for introducers created before company codes
-      // existed (e.g. self-created profiles). Shared code → identifies a company.
       const existingCode = (existing as { company_code?: string | null }).company_code ?? null;
-      if (!existingCode) {
+      if (!existingCode && !viewAsMode) {
         const code = await generateUniqueCompanyCode();
-        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
         const { error: codeErr } = await supabaseAdmin
           .from("introducers")
           .update({ company_code: code })
@@ -117,10 +220,14 @@ export const getIntroducerProfile = createServerFn({ method: "GET" })
       return existing;
     }
 
+    if (viewAsMode) {
+      throw new Error("This introducer has no portal profile yet.");
+    }
+
     const { data: profile } = await context.supabase
       .from("profiles")
       .select("full_name, email")
-      .eq("id", context.userId)
+      .eq("id", targetUserId)
       .maybeSingle();
 
     const companyName = profile?.full_name?.trim() || profile?.email?.split("@")[0] || "Introducer";
@@ -128,7 +235,7 @@ export const getIntroducerProfile = createServerFn({ method: "GET" })
     const companyCode = await generateUniqueCompanyCode();
 
     const baseRecord = {
-      user_id: context.userId,
+      user_id: targetUserId,
       company_name: companyName,
       slug,
       contact_email: profile?.email ?? null,
@@ -139,7 +246,6 @@ export const getIntroducerProfile = createServerFn({ method: "GET" })
       .select()
       .single();
     if (error) {
-      // Column not present yet (migration not applied) — create without the code.
       if (isMissingColumnOrTable(error)) {
         const { data: fallback, error: fbErr } = await context.supabase
           .from("introducers")
@@ -161,18 +267,41 @@ export const updateIntroducerProfile = createServerFn({ method: "POST" })
       .object({
         companyName: z.string().min(2).max(80),
         contactEmail: z.string().email().optional().or(z.literal("")),
+        viewAsIntroducerUserId: z.string().uuid().optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: introducer, error: fetchErr } = await context.supabase
+    const {
+      data: { user },
+    } = await context.supabase.auth.getUser();
+    const { targetUserId, viewAsMode } = await resolveViewAsIntroducer(
+      context.userId,
+      user?.email ?? null,
+      data.viewAsIntroducerUserId,
+    );
+
+    if (!viewAsMode) {
+      const { data: roles } = await context.supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", context.userId);
+      if (!(roles ?? []).some((r) => r.role === "introducer")) {
+        throw new Error("Forbidden");
+      }
+    }
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const client = viewAsMode ? supabaseAdmin : context.supabase;
+
+    const { data: introducer, error: fetchErr } = await client
       .from("introducers")
-      .select("id")
-      .eq("user_id", context.userId)
+      .select("id, company_name, contact_email")
+      .eq("user_id", targetUserId)
       .single();
     if (fetchErr) throw new Error(fetchErr.message);
 
-    const { data: updated, error } = await context.supabase
+    const { data: updated, error } = await client
       .from("introducers")
       .update({
         company_name: data.companyName,
@@ -182,6 +311,24 @@ export const updateIntroducerProfile = createServerFn({ method: "POST" })
       .select()
       .single();
     if (error) throw new Error(error.message);
+
+    if (viewAsMode) {
+      const { logViewAsAudit } = await import("@/lib/view-as-audit.functions");
+      await logViewAsAudit(supabaseAdmin, {
+        viewType: "introducer",
+        actingUserId: context.userId,
+        targetUserId,
+        action: "profile_update",
+        summary: `Updated introducer profile: company "${data.companyName}"`,
+        detail: {
+          previousCompany: introducer.company_name,
+          previousEmail: introducer.contact_email,
+          newCompany: data.companyName,
+          newEmail: data.contactEmail || null,
+        },
+      });
+    }
+
     return updated;
   });
 
@@ -245,16 +392,33 @@ function journeyStageLabel(completed: string[]): string {
 }
 
 export const listIntroducerReferrals = createServerFn({ method: "GET" })
+  .inputValidator((d: unknown) =>
+    z.object({ viewAsIntroducerUserId: z.string().uuid().optional() }).parse(d ?? {}),
+  )
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { data: introducer, error: introErr } = await context.supabase
-      .from("introducers")
-      .select("id, company_name, company_code")
-      .eq("user_id", context.userId)
-      .single();
-    if (introErr) throw new Error(introErr.message);
+  .handler(async ({ data, context }) => {
+    const {
+      data: { user },
+    } = await context.supabase.auth.getUser();
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const access = await resolveAdminAccess(context.userId, user?.email ?? null);
+
+    let targetUserId = context.userId;
+    if (data.viewAsIntroducerUserId) {
+      if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+      targetUserId = data.viewAsIntroducerUserId;
+      await assertIntroducerUser(targetUserId);
+    } else {
+      await assertIntroducerUser(context.userId);
+    }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: introducer, error: introErr } = await supabaseAdmin
+      .from("introducers")
+      .select("id, company_name, company_code")
+      .eq("user_id", targetUserId)
+      .single();
+    if (introErr) throw new Error(introErr.message);
 
     const [{ data: leads, error: leadsErr }, { data: appointments, error: apptErr }] =
       await Promise.all([

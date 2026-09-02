@@ -24,7 +24,13 @@ import {
 import { CalendarCheck, CheckCircle2, Mail, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 
-export function IntroducerCustomerBookingCard({ onBooked }: { onBooked?: () => void }) {
+export function IntroducerCustomerBookingCard({
+  onBooked,
+  viewAsIntroducerUserId,
+}: {
+  onBooked?: () => void;
+  viewAsIntroducerUserId?: string;
+}) {
   const slotsFn = useServerFn(getAvailableSlots);
   const advisorFn = useServerFn(getStaffBookingAdvisorId);
   const bookFn = useServerFn(bookNewCustomerAsIntroducer);
@@ -61,6 +67,10 @@ export function IntroducerCustomerBookingCard({ onBooked }: { onBooked?: () => v
     setSentLink(null);
   };
 
+  const viewAsPayload = viewAsIntroducerUserId
+    ? { viewAsIntroducerUserId }
+    : {};
+
   const book = useMutation({
     mutationFn: () =>
       bookFn({
@@ -70,6 +80,7 @@ export function IntroducerCustomerBookingCard({ onBooked }: { onBooked?: () => v
           customerEmail: email,
           startsAt: selectedSlot!,
           advisorId: advisorId || undefined,
+          ...viewAsPayload,
         },
       }),
     onSuccess: () => {
@@ -87,6 +98,7 @@ export function IntroducerCustomerBookingCard({ onBooked }: { onBooked?: () => v
           customerPhone: phone,
           customerEmail: email,
           sendSms: channel === "sms",
+          ...viewAsPayload,
         },
       }),
     onSuccess: (res) => {

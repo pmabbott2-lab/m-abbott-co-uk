@@ -52,7 +52,7 @@ import { MarkContactedButton } from "@/components/MarkContactedButton";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { format } from "date-fns";
+import { safeFormat } from "@/lib/safe-format";
 import { CalendarCheck, Check, Clock, History, MapPin, PhoneCall, StickyNote } from "lucide-react";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -154,7 +154,7 @@ function SessionDetail() {
             <h3 className="font-semibold">Your upcoming appointment</h3>
             <p className="text-sm text-muted-foreground">
               Confirmed for{" "}
-              {format(new Date(customerApptQ.data.starts_at), "EEE d MMM yyyy, HH:mm")}. Choose how
+              {safeFormat(customerApptQ.data.starts_at, "EEE d MMM yyyy, HH:mm")}. Choose how
               you&apos;d like to prepare — or confirm attendance only.
             </p>
             <div className="flex flex-wrap gap-2">
@@ -194,7 +194,7 @@ function SessionDetail() {
               {caseRef && (
                 <span className="font-mono font-medium text-foreground mr-2">{caseRef}</span>
               )}
-              Started {format(new Date(session.started_at), "PPP")} ·{" "}
+              Started {safeFormat(session.started_at, "PPP")} ·{" "}
               <span className="font-medium">{session.status === "submitted" ? "Submitted" : "In progress"}</span>
             </p>
             {isAdvisor && customerId && (
@@ -215,7 +215,7 @@ function SessionDetail() {
         </div>
 
         <Tabs defaultValue={isAdvisor ? (isCase ? "crm" : "factfind") : "factfind"} className="w-full">
-          <TabsList className="flex flex-wrap h-auto gap-1 w-full justify-start">
+          <TabsList variant="hubSub" className="w-full justify-start">
             {isAdvisor && isCase ? (
               <>
                 <TabsTrigger value="crm">CRM</TabsTrigger>
@@ -320,7 +320,7 @@ function SessionDetail() {
               </div>
             )}
             <Tabs defaultValue="summary" className="w-full">
-              <TabsList className="flex flex-wrap h-auto gap-1 w-full justify-start mb-4">
+              <TabsList variant="hubSub" className="w-full justify-start mb-4">
                 <TabsTrigger value="summary">Summary</TabsTrigger>
                 <TabsTrigger value="keyfacts">Key figures</TabsTrigger>
                 <TabsTrigger value="illustration">Illustration</TabsTrigger>
@@ -400,7 +400,7 @@ function SessionDetail() {
                           className={`text-sm rounded-lg p-3 ${m.role === "avatar" ? "bg-muted/50" : "bg-background border"}`}
                         >
                           <div className="text-xs font-medium text-muted-foreground mb-1">
-                            {m.role === "avatar" ? "Susan" : "Customer"} · {format(new Date(m.created_at), "PPp")}
+                            {m.role === "avatar" ? "Susan" : "Customer"} · {safeFormat(m.created_at, "PPp")}
                           </div>
                           {m.text}
                         </div>
@@ -492,7 +492,7 @@ function CustomerNextStepsCard({
             <div>
               <dt className="text-muted-foreground">Date &amp; time</dt>
               <dd className="font-medium">
-                {format(new Date(appointment.startsAt), "EEE d MMM yyyy, HH:mm")}
+                {safeFormat(appointment.startsAt, "EEE d MMM yyyy, HH:mm")}
               </dd>
             </div>
             <div>
@@ -527,7 +527,7 @@ function CustomerNextStepsCard({
             </div>
             <div>
               <dt className="text-muted-foreground">Requested</dt>
-              <dd className="font-medium">{format(new Date(callback.createdAt), "d MMM yyyy, HH:mm")}</dd>
+              <dd className="font-medium">{safeFormat(callback.createdAt, "d MMM yyyy, HH:mm")}</dd>
             </div>
           </dl>
           <p className="text-xs text-muted-foreground">
@@ -907,7 +907,7 @@ function ContactTrackingCard({ sessionId }: { sessionId: string }) {
             <Clock className="w-3 h-3" /> Last contacted
           </div>
           <div className="text-sm font-medium">
-            {last ? format(new Date(last), "PPp") : <span className="text-muted-foreground">Not contacted yet</span>}
+            {last ? safeFormat(last, "PPp") : <span className="text-muted-foreground">Not contacted yet</span>}
           </div>
           <Button size="sm" variant="outline" onClick={() => mark.mutate()} disabled={mark.isPending}>
             {mark.isPending ? "Saving…" : "Mark contacted now"}
@@ -1030,7 +1030,7 @@ function ContactHistoryCard({
                     {e.deleted ? " · deleted" : e.amended ? " · amended" : ""}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="text-xs text-muted-foreground">{format(new Date(e.occurredAt), "PPp")}</div>
+                    <div className="text-xs text-muted-foreground">{safeFormat(e.occurredAt, "PPp")}</div>
                     {editingId === e.id ? (
                       <div className="mt-1 space-y-2">
                         <Input value={editBody} onChange={(ev) => setEditBody(ev.target.value)} />
@@ -1258,7 +1258,7 @@ function CustomerJourneyTab({
                 <div className="font-medium text-sm">{m.label}</div>
                 {m.completedAt && (
                   <div className="text-xs text-muted-foreground mt-0.5">
-                    Completed {format(new Date(m.completedAt), "PPp")}
+                    Completed {safeFormat(m.completedAt, "PPp")}
                   </div>
                 )}
               </div>

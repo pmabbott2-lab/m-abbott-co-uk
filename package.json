@@ -27,7 +27,8 @@
     "backfill:call-transcripts": "node scripts/backfill-call-transcripts.mjs",
     "build:marketing": "node marketing/build-all.mjs",
     "build:memorandum": "node marketing/build-memorandum.mjs",
-    "build:pe-pitch": "node marketing/build-pe-pitch.mjs"
+    "build:pe-pitch": "node marketing/build-pe-pitch.mjs",
+    "test:qa": "npx tsx scripts/qa-phase7.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

@@ -6,7 +6,9 @@ export const TEST_ACCOUNT_PASSWORD = "TestHub2026!";
 export type TestAccountSpec = {
   email: string;
   fullName: string;
-  role: "introducer" | "advisor" | "customer";
+  role: "introducer" | "advisor" | "customer" | "admin";
+  /** General admin test accounts — permissions allocated via Admin access after provision. */
+  adminLevel?: "general";
 };
 
 export const TEST_ACCOUNTS: TestAccountSpec[] = [
@@ -22,6 +24,12 @@ export const TEST_ACCOUNTS: TestAccountSpec[] = [
   { email: "10@test.co.uk", fullName: "Test Customer Ten", role: "customer" },
   { email: "11@test.co.uk", fullName: "Test Customer Eleven", role: "customer" },
   { email: "12@test.co.uk", fullName: "Test Customer Twelve", role: "customer" },
+  {
+    email: "13@test.co.uk",
+    fullName: "Test General Admin",
+    role: "admin",
+    adminLevel: "general",
+  },
 ];
 
 export function isTestAccountEmail(email: string | null | undefined): boolean {

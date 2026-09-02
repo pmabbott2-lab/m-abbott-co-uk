@@ -4,8 +4,9 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { listAdvisors } from "@/lib/sessions.functions";
-import { clearAdvisorView, getAdvisorView, setAdvisorView } from "@/lib/advisor-view";
-import { Eye, X } from "lucide-react";
+import { getAdvisorView, setAdvisorView } from "@/lib/advisor-view";
+import { recordViewAsAudit } from "@/lib/view-as-audit.functions";
+import { Eye } from "lucide-react";
 
 export function AdvisorViewBanner({
   canUse,
@@ -15,6 +16,7 @@ export function AdvisorViewBanner({
   onViewChange: () => void;
 }) {
   const advisorsFn = useServerFn(listAdvisors);
+  const auditFn = useServerFn(recordViewAsAudit);
   const advisorsQ = useQuery({
     queryKey: ["advisors-list"],
     queryFn: () => advisorsFn(),
@@ -27,22 +29,11 @@ export function AdvisorViewBanner({
 
   if (active) {
     return (
-      <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
         <div className="text-sm">
-          <span className="font-medium">Advisor view</span>
+          <span className="font-medium">Advisor view active</span>
           <span className="text-muted-foreground"> — viewing as {active.advisorName}</span>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            clearAdvisorView();
-            onViewChange();
-          }}
-        >
-          <X className="w-4 h-4 mr-1.5" />
-          Exit advisor view
-        </Button>
       </div>
     );
   }
@@ -78,13 +69,25 @@ export function AdvisorViewBanner({
         <Button
           size="sm"
           disabled={!pickId}
-          onClick={() => {
+          onClick={async () => {
             const picked = advisors.find((a) => a.id === pickId);
             if (!picked) return;
             setAdvisorView({
               advisorId: picked.id,
               advisorName: picked.full_name || picked.email || "Advisor",
             });
+            try {
+              await auditFn({
+                data: {
+                  viewType: "advisor",
+                  targetUserId: picked.id,
+                  action: "enter_view",
+                  summary: `Entered advisor view as ${picked.full_name || picked.email || "Advisor"}`,
+                },
+              });
+            } catch {
+              /* audit table may not exist yet */
+            }
             onViewChange();
           }}
         >

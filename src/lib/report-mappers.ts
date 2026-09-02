@@ -1,4 +1,4 @@
-import { format } from "date-fns";
+import { safeFormat } from "@/lib/safe-format";
 import {
   BENEFICIARY_ROLE_LABELS,
   FEE_TYPE_LABELS,
@@ -51,7 +51,7 @@ export function ledgerRowsToSheet(rows: LedgerRow[]): ExportSheet {
       "Note",
     ],
     rows: rows.map((r) => [
-      format(new Date(r.created_at), "yyyy-MM-dd HH:mm"),
+      safeFormat(r.created_at, "yyyy-MM-dd HH:mm"),
       r.kind,
       r.customerName ?? "",
       r.caseRef ?? "",
@@ -80,7 +80,7 @@ export function commissionRowsToSheet(rows: CommissionPayoutRow[]): ExportSheet 
       "Paid / updated",
     ],
     rows: rows.map((r) => [
-      format(new Date(r.createdAt), "yyyy-MM-dd"),
+      safeFormat(r.createdAt, "yyyy-MM-dd"),
       BENEFICIARY_ROLE_LABELS[r.beneficiaryRole] ?? r.beneficiaryRole,
       r.beneficiaryName,
       r.caseRef ?? (r.sessionId ? "Case (no ref)" : ""),
@@ -88,7 +88,7 @@ export function commissionRowsToSheet(rows: CommissionPayoutRow[]): ExportSheet 
       r.commissionPct != null ? String(r.commissionPct) : "",
       penceToGbp(r.amountPence),
       PAYOUT_STATUS_LABELS[r.payoutStatus],
-      r.payoutAt ? format(new Date(r.payoutAt), "yyyy-MM-dd") : "",
+      r.payoutAt ? safeFormat(r.payoutAt, "yyyy-MM-dd") : "",
     ]),
   };
 }
@@ -202,7 +202,7 @@ export function rateHistoryToSheet(
     name: "Rate history",
     headers: ["When", "Name", "Role", "Fee type", "From %", "To %"],
     rows: rows.map((h) => [
-      format(new Date(h.created_at), "yyyy-MM-dd HH:mm"),
+      safeFormat(h.created_at, "yyyy-MM-dd HH:mm"),
       h.user_name ?? "",
       h.role ?? "",
       FEE_TYPE_LABELS[h.fee_type as keyof typeof FEE_TYPE_LABELS] ?? h.fee_type,
@@ -219,11 +219,63 @@ export function financeAuditToSheet(
     name: "Finance audit",
     headers: ["When", "Type", "Summary", "Role", "Fee type"],
     rows: rows.map((r) => [
-      format(new Date(r.created_at), "yyyy-MM-dd HH:mm"),
+      safeFormat(r.created_at, "yyyy-MM-dd HH:mm"),
       r.audit_type,
       r.summary,
       r.role ?? "",
       r.fee_type ?? "",
+    ]),
+  };
+}
+
+export function viewAsAuditToSheet(
+  rows: Array<{ created_at: string; action: string; summary: string; view_type: string }>,
+): ExportSheet {
+  return {
+    name: "View-as audit",
+    headers: ["When", "View", "Action", "Summary"],
+    rows: rows.map((r) => [
+      safeFormat(r.created_at, "yyyy-MM-dd HH:mm"),
+      r.view_type,
+      r.action,
+      r.summary,
+    ]),
+  };
+}
+
+export function introducerReferralsToSheet(
+  rows: Array<{
+    customerName: string;
+    customerPhone?: string | null;
+    customerEmail?: string | null;
+    journeyStage: string;
+    leadSource: string;
+    advisorName?: string | null;
+    daysAtStage: number | string;
+    lastContactDate?: string | null;
+  }>,
+): ExportSheet {
+  return {
+    name: "Referrals",
+    headers: [
+      "Customer",
+      "Phone",
+      "Email",
+      "Stage",
+      "Lead source",
+      "Advisor",
+      "Days at stage",
+      "Last contact",
+    ],
+    rows: rows.map((r) => [
+      r.customerName || "",
+      r.customerPhone ?? "",
+      r.customerEmail ?? "",
+      r.journeyStage,
+      r.leadSource,
+      r.advisorName ?? "",
+      String(r.daysAtStage),
+      r.lastContactDate ? safeFormat(r.lastContactDate, "yyyy-MM-dd") : "",
     ]),
   };
 }
@@ -250,7 +302,7 @@ export function contactHistoryToSheet(
     name: "History",
     headers: ["When", "Type", "Entry"],
     rows: entries.map((e) => [
-      format(new Date(e.occurredAt), "yyyy-MM-dd HH:mm"),
+      safeFormat(e.occurredAt, "yyyy-MM-dd HH:mm"),
       typeLabels[e.type] ?? e.type,
       [
         e.body ?? "",

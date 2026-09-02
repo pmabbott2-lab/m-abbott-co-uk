@@ -5,7 +5,9 @@ import {
   TEST_ACCOUNT_PASSWORD,
   TEST_ACCOUNT_PHONE,
   isTestAccountEmail,
+  type TestAccountSpec,
 } from "@/lib/test-accounts";
+import { DEFAULT_GENERAL_PERMISSIONS, PERMISSION_KEYS } from "@/lib/admin-access";
 
 async function requireOwner(userId: string, email?: string): Promise<void> {
   const { resolveAdminAccess } = await import("@/lib/admin.functions");
@@ -28,7 +30,7 @@ async function listAllAuthUsers() {
 }
 
 async function upsertTestUser(
-  spec: (typeof TEST_ACCOUNTS)[number],
+  spec: TestAccountSpec,
 ): Promise<{ email: string; userId: string; created: boolean }> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const email = spec.email.toLowerCase();
@@ -78,6 +80,36 @@ async function upsertTestUser(
   if (spec.role === "introducer") {
     const { grantIntroducerRoleForTestAccount } = await import("@/lib/sessions.functions");
     await grantIntroducerRoleForTestAccount(userId);
+  }
+
+  if (spec.role === "admin" && spec.adminLevel === "general") {
+    const now = new Date().toISOString();
+    const { error: profileErr } = await supabaseAdmin.from("admin_profiles").upsert(
+      {
+        user_id: userId,
+        level: "general",
+        updated_at: now,
+      },
+      { onConflict: "user_id" },
+    );
+    if (profileErr) throw new Error(`${email}: ${profileErr.message}`);
+
+    // Seed default permissions only on first provision — owner allocates via Admin access after that.
+    const { data: existing, error: existingErr } = await supabaseAdmin
+      .from("admin_permissions")
+      .select("id")
+      .eq("user_id", userId)
+      .limit(1);
+    if (existingErr) throw new Error(`${email}: ${existingErr.message}`);
+    if (!existing?.length) {
+      const rows = PERMISSION_KEYS.map((key) => ({
+        user_id: userId,
+        permission_key: key,
+        access: DEFAULT_GENERAL_PERMISSIONS[key],
+      }));
+      const { error: insErr } = await supabaseAdmin.from("admin_permissions").insert(rows);
+      if (insErr) throw new Error(`${email}: ${insErr.message}`);
+    }
   }
 
   return { email, userId, created };
@@ -143,6 +175,7 @@ export const listTestAccountStatus = createServerFn({ method: "GET" })
         email: spec.email,
         fullName: spec.fullName,
         role: spec.role,
+        adminLevel: spec.adminLevel ?? null,
         exists: Boolean(u),
         emailConfirmed: Boolean(u?.email_confirmed_at),
         bypass: Boolean(

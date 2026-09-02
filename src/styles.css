@@ -1,6 +1,7 @@
 @import "tailwindcss" source(none);
 @source "../src";
 @import "tw-animate-css";
+@import "./theme-profiles.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -35,27 +36,6 @@
 
 :root {
   --radius: 0.875rem;
-  /* Cream paper background, deep navy ink, warm amber accent */
-  --background: oklch(0.985 0.013 85);
-  --foreground: oklch(0.22 0.04 260);
-  --surface: oklch(1 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.22 0.04 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.22 0.04 260);
-  --primary: oklch(0.28 0.06 260);
-  --primary-foreground: oklch(0.985 0.013 85);
-  --secondary: oklch(0.95 0.025 80);
-  --secondary-foreground: oklch(0.28 0.06 260);
-  --muted: oklch(0.95 0.012 90);
-  --muted-foreground: oklch(0.5 0.03 260);
-  --accent: oklch(0.78 0.16 55);
-  --accent-foreground: oklch(0.22 0.04 260);
-  --destructive: oklch(0.6 0.22 27);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.9 0.015 80);
-  --input: oklch(0.92 0.012 80);
-  --ring: oklch(0.78 0.16 55);
 }
 
 .dark {
