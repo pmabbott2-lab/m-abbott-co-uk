@@ -115,10 +115,30 @@ needs_production_build() {
   find src -type f \( -name '*.ts' -o -name '*.tsx' \) -newer dist/server/server.js -print -quit 2>/dev/null | grep -q .
 }
 
+# True when the running preview process is older than the current dist (stale CSS/JS hashes → unstyled UI).
+dist_newer_than_running_app() {
+  [[ -f dist/server/server.js ]] || return 1
+  if [[ -f "$LOG/prod.pid" ]]; then
+    [[ dist/server/server.js -nt "$LOG/prod.pid" ]] && return 0
+  fi
+  # Fallback: HTML from a quick curl would 404 the stylesheet — check disk vs last known.
+  local live_css
+  live_css="$(curl -sf --max-time 2 "http://127.0.0.1:${APP_PORT}/" 2>/dev/null | python3 -c 'import sys,re; m=re.search(r"styles-[A-Za-z0-9_-]+\.css", sys.stdin.read()); print(m.group(0) if m else "")' 2>/dev/null || true)"
+  if [[ -n "$live_css" ]] && [[ ! -f "dist/client/assets/$live_css" ]]; then
+    return 0
+  fi
+  return 1
+}
+
 stop_app_preview() {
   [[ -f "$LOG/prod.pid" ]] && kill "$(cat "$LOG/prod.pid")" 2>/dev/null || true
   pkill -f "vite preview --port ${APP_PORT}" 2>/dev/null || true
   lsof -iTCP:"$APP_PORT" -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null || true
+  # Wait until the port is free so a new preview does not race the old process.
+  for _ in $(seq 1 20); do
+    app_running || break
+    sleep 0.5
+  done
   rm -f "$LOG/prod.pid"
 }
 
@@ -160,8 +180,8 @@ start_app() {
   fi
 
   if app_running; then
-    if [[ "$rebuilt" -eq 1 ]]; then
-      echo "$(date '+%F %T') restarting app after rebuild" >>"$LOG/stable.log"
+    if [[ "$rebuilt" -eq 1 ]] || dist_newer_than_running_app; then
+      echo "$(date '+%F %T') restarting app (rebuild or stale dist vs running process)" >>"$LOG/stable.log"
       stop_app_preview
     else
       return 0
@@ -171,8 +191,27 @@ start_app() {
   echo "$(date '+%F %T') starting production server" >>"$LOG/stable.log"
   nohup npx vite preview --port "$APP_PORT" --host 0.0.0.0 --strictPort >>"$LOG/prod.log" 2>&1 &
   echo $! >"$LOG/prod.pid"
+  # Touch pid after start so mtime reflects this process (used for stale-dist detection).
+  touch "$LOG/prod.pid"
   disown -h "$!" 2>/dev/null || true
-  wait_for_port
+  if ! wait_for_port; then
+    echo "$(date '+%F %T') app failed to become ready on :$APP_PORT" >>"$LOG/stable.err"
+    return 1
+  fi
+
+  # Guardrail: linked stylesheet must exist on disk (prevents "formatting gone" after rebuild).
+  local css
+  css="$(curl -sf --max-time 3 "http://127.0.0.1:${APP_PORT}/" | python3 -c 'import sys,re; m=re.search(r"styles-[A-Za-z0-9_-]+\.css", sys.stdin.read()); print(m.group(0) if m else "")' 2>/dev/null || true)"
+  if [[ -n "$css" ]] && [[ ! -f "dist/client/assets/$css" ]]; then
+    echo "$(date '+%F %T') stylesheet mismatch ($css missing) — forcing rebuild+restart" >>"$LOG/stable.err"
+    stop_app_preview
+    npm run build >>"$LOG/build.log" 2>&1 || return 1
+    nohup npx vite preview --port "$APP_PORT" --host 0.0.0.0 --strictPort >>"$LOG/prod.log" 2>&1 &
+    echo $! >"$LOG/prod.pid"
+    touch "$LOG/prod.pid"
+    disown -h "$!" 2>/dev/null || true
+    wait_for_port
+  fi
 }
 
 ngrok_upstream() {

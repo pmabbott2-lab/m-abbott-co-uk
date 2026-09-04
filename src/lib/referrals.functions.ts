@@ -696,3 +696,66 @@ export const ensureMyReferralLink = createServerFn({ method: "POST" })
     }
     return { code: inserted.code };
   });
+
+/** Customer self-serve: text or email their own referral link. */
+export const sendMyReferralLink = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ channel: z.enum(["sms", "email"]) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: existing } = await supabaseAdmin
+      .from("referral_codes")
+      .select("code")
+      .eq("referrer_user_id", context.userId)
+      .eq("active", true)
+      .limit(1)
+      .maybeSingle();
+
+    let code = existing?.code;
+    if (!code) {
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("full_name, phone")
+        .eq("id", context.userId)
+        .maybeSingle();
+      code = await generateUniqueReferralCode();
+      const { data: inserted, error: insertErr } = await supabaseAdmin
+        .from("referral_codes")
+        .insert({
+          code,
+          referrer_user_id: context.userId,
+          referrer_name: profile?.full_name ?? null,
+          referrer_phone: profile?.phone ?? null,
+          active: true,
+          created_by: context.userId,
+        })
+        .select("code")
+        .single();
+      if (insertErr) {
+        if (isMissingTableError(insertErr)) throw new Error("Run the Refer-a-friend migration first.");
+        throw new Error(insertErr.message);
+      }
+      code = inserted.code;
+    }
+
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("full_name, email, phone")
+      .eq("id", context.userId)
+      .maybeSingle();
+
+    const baseUrl = getAppBaseUrl();
+    const link = `${baseUrl.replace(/\/$/, "")}/raf/${code}`;
+    const message = rafShareMessage(profile?.full_name ?? null, code, baseUrl);
+
+    if (data.channel === "sms") {
+      if (!profile?.phone) throw new Error("Add your mobile number to your profile first.");
+      if (!isTwilioConfigured()) throw new Error("Text messaging is not configured.");
+      await sendSms(profile.phone, message);
+      return { ok: true, channel: "sms" as const };
+    }
+
+    const subject = encodeURIComponent("Refer a friend to Mortgage Hub");
+    const body = encodeURIComponent(message);
+    return { ok: true, channel: "email" as const, mailto: `mailto:?subject=${subject}&body=${body}`, link };
+  });

@@ -16,10 +16,12 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
+  bookCaseFollowUpAppointment,
   bookCustomerAppointmentAsStaff,
   getAvailableSlots,
   getStaffBookingAdvisorId,
 } from "@/lib/booking.functions";
+import { promoteSessionToCaseAsStaff } from "@/lib/sessions.functions";
 import type { CustomerHubFactFind } from "@/lib/sessions.functions";
 import { CalendarCheck, CheckCircle2 } from "lucide-react";
 
@@ -33,6 +35,11 @@ type Props = {
   sessionId?: string;
   triggerLabel?: string;
   triggerVariant?: "default" | "outline" | "secondary";
+  /**
+   * Abandoned / relationship re-engage: keep the existing customer + session,
+   * promote to a case if needed, then book a follow-up into the advisor diary.
+   */
+  reengageExistingSession?: boolean;
   onBooked?: () => void;
 };
 
@@ -45,11 +52,14 @@ export function CustomerHubBookingDialog({
   sessionId: initialSessionId,
   triggerLabel = "Book appointment",
   triggerVariant = "default",
+  reengageExistingSession = false,
   onBooked,
 }: Props) {
   const slotsFn = useServerFn(getAvailableSlots);
   const advisorFn = useServerFn(getStaffBookingAdvisorId);
   const bookFn = useServerFn(bookCustomerAppointmentAsStaff);
+  const followUpFn = useServerFn(bookCaseFollowUpAppointment);
+  const promoteFn = useServerFn(promoteSessionToCaseAsStaff);
 
   const [open, setOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
@@ -88,8 +98,23 @@ export function CustomerHubBookingDialog({
   const bookableFactFinds = factFinds.filter((ff) => !ff.hasAppointment);
 
   const book = useMutation({
-    mutationFn: () =>
-      bookFn({
+    mutationFn: async () => {
+      if (reengageExistingSession) {
+        if (!sessionId) throw new Error("Missing fact-find to re-engage.");
+        await promoteFn({ data: { sessionId, customerId } });
+        return followUpFn({
+          data: {
+            sessionId,
+            customerId,
+            customerName: name,
+            customerPhone: phone,
+            customerEmail: email || undefined,
+            startsAt: selectedSlot!,
+            notes: "Abandoned lead re-engagement",
+          },
+        });
+      }
+      return bookFn({
         data: {
           customerId,
           sessionId: sessionId || undefined,
@@ -98,7 +123,8 @@ export function CustomerHubBookingDialog({
           customerEmail: email,
           startsAt: selectedSlot!,
         },
-      }),
+      });
+    },
     onSuccess: () => {
       setBookedAt(selectedSlot ? new Date(selectedSlot) : null);
       onBooked?.();
@@ -127,9 +153,19 @@ export function CustomerHubBookingDialog({
             <DialogHeader className="text-center">
               <DialogTitle>Appointment booked</DialogTitle>
               <DialogDescription>
-                Case opened for {name}. Appointment confirmed for{" "}
-                <strong>{format(bookedAt, "EEE d MMM yyyy, HH:mm")}</strong>.
-                The customer will receive a text if SMS is enabled.
+                {reengageExistingSession ? (
+                  <>
+                    Appointment confirmed for{" "}
+                    <strong>{format(bookedAt, "EEE d MMM yyyy, HH:mm")}</strong>. Same customer
+                    profile kept — they&apos;re back in the live pipeline.
+                  </>
+                ) : (
+                  <>
+                    Case opened for {name}. Appointment confirmed for{" "}
+                    <strong>{format(bookedAt, "EEE d MMM yyyy, HH:mm")}</strong>.
+                    The customer will receive a text if SMS is enabled.
+                  </>
+                )}
               </DialogDescription>
             </DialogHeader>
             <Button onClick={() => handleClose(false)}>Done</Button>
@@ -139,8 +175,9 @@ export function CustomerHubBookingDialog({
             <DialogHeader>
               <DialogTitle>Book appointment for {customerName}</DialogTitle>
               <DialogDescription>
-                Opens a case for this customer — links to an existing fact-find when selected, or
-                creates a new case if none apply.
+                {reengageExistingSession
+                  ? "Keeps this customer profile and fact-find, opens/keeps the case, and books into an advisor diary."
+                  : "Opens a case for this customer — links to an existing fact-find when selected, or creates a new case if none apply."}
               </DialogDescription>
             </DialogHeader>
 
@@ -216,7 +253,9 @@ export function CustomerHubBookingDialog({
                     <Input id="hub-book-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="hub-book-email">Email</Label>
+                    <Label htmlFor="hub-book-email">
+                      Email{reengageExistingSession ? " (optional)" : ""}
+                    </Label>
                     <Input
                       id="hub-book-email"
                       type="email"
@@ -240,7 +279,11 @@ export function CustomerHubBookingDialog({
                 disabled={!selectedSlot || !name.trim() || !phone.trim() || book.isPending}
                 onClick={() => book.mutate()}
               >
-                {book.isPending ? "Booking…" : "Confirm & open case"}
+                {book.isPending
+                  ? "Booking…"
+                  : reengageExistingSession
+                    ? "Confirm appointment"
+                    : "Confirm & open case"}
               </Button>
             </DialogFooter>
           </>

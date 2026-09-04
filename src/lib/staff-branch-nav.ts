@@ -11,6 +11,7 @@ export const STAFF_BRANCHES = {
   CUSTOMERS: "customers",
   DIARY: "diary",
   MANAGEMENT: "management",
+  MARKETING: "marketing",
   INTRODUCERS: "introducers",
   FINANCE: "finance",
 } as const;
@@ -26,6 +27,7 @@ export const CUSTOMERS_SUB_TABS = {
 export type CustomersSubTabId = (typeof CUSTOMERS_SUB_TABS)[keyof typeof CUSTOMERS_SUB_TABS];
 
 export const MANAGEMENT_SUB_TABS = {
+  ANALYTICS: "analytics",
   ADVISOR_COMMISSION: "advisor-commission",
   VIEW: "view",
   MANAGE: "manage",
@@ -41,6 +43,12 @@ export const VIEW_SUB_TABS = {
 } as const;
 
 export type ViewSubTabId = (typeof VIEW_SUB_TABS)[keyof typeof VIEW_SUB_TABS];
+
+export const MARKETING_SUB_TABS = {
+  REFER_A_FRIEND: "refer-a-friend",
+} as const;
+
+export type MarketingSubTabId = (typeof MARKETING_SUB_TABS)[keyof typeof MARKETING_SUB_TABS];
 
 export const DIARY_SUB_TABS = {
   MY_DIARY: "my-diary",
@@ -84,6 +92,7 @@ export type StaffBranchVisibility = {
     customers: boolean;
     diary: boolean;
     management: boolean;
+    marketing: boolean;
     introducers: boolean;
     finance: boolean;
   };
@@ -93,13 +102,16 @@ export type StaffBranchVisibility = {
     relationship: boolean;
   };
   management: {
+    analytics: boolean;
     advisorCommission: boolean;
     view: boolean;
     manage: boolean;
     adminAccess: boolean;
     manageInvites: boolean;
-    manageRaf: boolean;
     manageTeamRoles: boolean;
+  };
+  marketing: {
+    referAFriend: boolean;
   };
   diary: {
     myDiary: boolean;
@@ -134,19 +146,20 @@ export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranc
   const manage =
     isOwner ||
     manageTeamRoles ||
-    canView(adminAccess, "invites") ||
-    canView(adminAccess, "raf");
+    canView(adminAccess, "invites");
 
   const manageInvites = canView(adminAccess, "invites");
-  const manageRaf = canView(adminAccess, "raf");
+  const marketingRaf = canView(adminAccess, "raf");
+  const marketing = isMainAdmin && marketingRaf;
 
   const adminAccessTab = isOwner || isSupervisor;
+  const analytics = isOwner || isSupervisor;
   const viewAsAdmin = (isOwner || isSupervisor) && isMainAdmin;
   const view = viewAsAdmin;
   const advisorCommission =
     isMainAdmin && (isOwner || isSupervisor || canView(adminAccess, "advisors"));
   const management =
-    isMainAdmin && (advisorCommission || view || manage || adminAccessTab);
+    isMainAdmin && (analytics || advisorCommission || view || manage || adminAccessTab);
 
   /** Top Introducers tab — real introducer accounts only (not owner/supervisor admin). */
   const introducersBranch = isIntroducer && !isOwner && !isSupervisor;
@@ -172,6 +185,7 @@ export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranc
       customers: customersList || contacts || relationship,
       diary: diaryMy || diaryAll,
       management,
+      marketing,
       introducers: introducersBranch,
       finance: financeMyCommission || financeCommissionMgmt || financeReport,
     },
@@ -181,13 +195,16 @@ export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranc
       relationship,
     },
     management: {
+      analytics,
       advisorCommission,
       view,
       manage,
       adminAccess: adminAccessTab,
       manageInvites,
-      manageRaf,
       manageTeamRoles,
+    },
+    marketing: {
+      referAFriend: marketingRaf,
     },
     diary: {
       myDiary: diaryMy,
@@ -210,6 +227,7 @@ export function defaultStaffBranch(vis: StaffBranchVisibility): StaffBranchId {
   if (vis.branches.customers) return STAFF_BRANCHES.CUSTOMERS;
   if (vis.branches.diary) return STAFF_BRANCHES.DIARY;
   if (vis.branches.management) return STAFF_BRANCHES.MANAGEMENT;
+  if (vis.branches.marketing) return STAFF_BRANCHES.MARKETING;
   if (vis.branches.introducers) return STAFF_BRANCHES.INTRODUCERS;
   return STAFF_BRANCHES.FINANCE;
 }
@@ -225,6 +243,7 @@ export function defaultManagementSubTab(
   opts?: { showViewTab?: boolean },
 ): ManagementSubTabId {
   if (vis.management.advisorCommission) return MANAGEMENT_SUB_TABS.ADVISOR_COMMISSION;
+  if (vis.management.analytics) return MANAGEMENT_SUB_TABS.ANALYTICS;
   if (vis.management.view && opts?.showViewTab !== false) return MANAGEMENT_SUB_TABS.VIEW;
   if (vis.management.manage) return MANAGEMENT_SUB_TABS.MANAGE;
   return MANAGEMENT_SUB_TABS.ADMIN_ACCESS;

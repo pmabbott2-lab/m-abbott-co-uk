@@ -516,6 +516,12 @@ async function bookAppointment(
     } catch (e) {
       console.error("auto-allocate session failed", e);
     }
+    try {
+      const { ensureWelcomeCallTask } = await import("@/lib/staff-contact-tasks.server");
+      await ensureWelcomeCallTask(supabaseAdmin, sessionForAlloc, actingUserId ?? advisorId);
+    } catch (e) {
+      console.error("welcome call task on booking failed", e);
+    }
   }
 
   if (leadId) {
@@ -801,6 +807,78 @@ export const bookCustomerAppointmentAsStaff = createServerFn({ method: "POST" })
         customerEmail: data.customerEmail,
         startsAt: data.startsAt,
         notes: data.notes,
+        sendSms: data.sendSms ?? true,
+      },
+      context.userId,
+    );
+  });
+
+/** Book a follow-up into an advisor diary for an existing case (relationship renewals). */
+export const bookCaseFollowUpAppointment = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        sessionId: z.string().uuid(),
+        customerId: z.string().uuid(),
+        advisorId: z.string().uuid().optional(),
+        customerName: z.string().min(2),
+        customerPhone: z.string().min(7),
+        customerEmail: z.string().email().optional().or(z.literal("")),
+        startsAt: z.string().datetime(),
+        notes: z.string().max(500).optional(),
+        sendSms: z.boolean().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const { canViewRelationship } = await import("@/lib/admin-access");
+    const access = await resolveAdminAccess(context.userId, email);
+    if (!canViewRelationship(access)) {
+      await assertStaffCanAccessCustomer(context.userId, data.customerId);
+    }
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: session, error } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("id, customer_id, case_ref")
+      .eq("id", data.sessionId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!session || session.customer_id !== data.customerId) {
+      throw new Error("That case does not belong to this customer.");
+    }
+    if (!session.case_ref) {
+      throw new Error("Open a case before booking a relationship follow-up.");
+    }
+
+    let advisorId = data.advisorId ?? null;
+    if (!advisorId) {
+      const { data: alloc } = await supabaseAdmin
+        .from("session_advisors")
+        .select("advisor_id")
+        .eq("session_id", data.sessionId)
+        .limit(1)
+        .maybeSingle();
+      advisorId = alloc?.advisor_id ?? null;
+    }
+    if (!advisorId) {
+      advisorId = await resolveBookingAdvisorId(context.userId);
+    }
+
+    return bookAppointment(
+      {
+        sessionId: data.sessionId,
+        customerId: data.customerId,
+        advisorId,
+        channel: "direct_booking",
+        customerName: data.customerName,
+        customerPhone: data.customerPhone,
+        customerEmail: data.customerEmail || undefined,
+        startsAt: data.startsAt,
+        notes: data.notes ?? "Relationship renewal follow-up",
         sendSms: data.sendSms ?? true,
       },
       context.userId,
@@ -1260,7 +1338,7 @@ export const requestCallbackAuth = createServerFn({ method: "POST" })
 // whether THIS advisor has opened it yet (so new/unopened contacts highlight).
 // Degrades gracefully if the callback/views tables aren't present yet.
 export type AdvisorContact = {
-  kind: "appointment" | "callback" | "phone_call";
+  kind: "appointment" | "callback" | "phone_call" | "staff_task" | "abandoned";
   id: string;
   customerName: string;
   customerPhone: string;
@@ -1271,6 +1349,11 @@ export type AdvisorContact = {
   status: string | null;
   createdAt: string;
   opened: boolean;
+  /** Internal task type when kind === staff_task */
+  taskType?: "welcome_call" | "next_contact";
+  /** Due date for staff_task sorting and overdue styling */
+  dueAt?: string | null;
+  completedAt?: string | null;
   /** True when this row came from an inbound office-line voicemail. */
   isVoicemail?: boolean;
   /** No advisor assigned yet — owner/supervisor/admin only. */
@@ -1284,6 +1367,13 @@ export type AdvisorContact = {
   customerId?: string | null;
   introducerCode?: string | null;
   introducerCompany?: string | null;
+  /** Allocated / booking advisor — shown in Contacts summary. */
+  advisorId?: string | null;
+  advisorName?: string | null;
+  /** Fact-find channel for abandoned leads. */
+  channel?: string | null;
+  /** Last interview section for abandoned leads. */
+  lastSection?: string | null;
 };
 
 /** Items stay visible (greyed) for 24h after Contacted, then drop from Contacts/CRM. */
@@ -1445,6 +1535,7 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
           opened: opened.has(`appointment:${a.id}`),
           contacted: isContactArchived(contactedAt),
           contactedAt,
+          advisorId: (a as { advisor_id?: string | null }).advisor_id ?? null,
         });
       }
     }
@@ -1490,14 +1581,15 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
         };
 
         const isVoicemail = (row.notes ?? "").toLowerCase().includes("voicemail");
-        const unallocated = row.advisor_id == null && row.session_id == null;
+        // Unallocated inbound: no advisor yet (unknown caller, or matched customer without advisor).
+        const unallocated = row.advisor_id == null && (isVoicemail || row.session_id == null);
 
         if (!isStaffAdmin) {
           const mine =
             row.advisor_id === context.userId ||
             (row.session_id != null && allocatedSessionIds.has(row.session_id));
           if (!mine) continue;
-          if (unallocated && row.session_id == null) continue;
+          if (unallocated && row.advisor_id == null) continue;
         }
 
         const phoneCallId = row.phone_call_id ?? null;
@@ -1535,6 +1627,7 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
           aiStatus: meta?.aiStatus ?? null,
           contacted: isContactArchived(contactedAt),
           contactedAt,
+          advisorId: row.advisor_id,
         });
       }
     }
@@ -1547,7 +1640,7 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
       let callQuery = supabaseAdmin
         .from("phone_calls")
         .select(
-          "id, session_id, call_kind, direction, from_number, to_number, started_at, summary, ai_status, status",
+          "id, session_id, advisor_id, call_kind, direction, from_number, to_number, started_at, summary, ai_status, status",
         )
         .not("session_id", "is", null)
         .in("call_kind", ["outbound", "inbound_voicemail"])
@@ -1602,7 +1695,120 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
           aiStatus: call.ai_status,
           contacted: isContactArchived(contactedAt),
           contactedAt,
+          advisorId: (call as { advisor_id?: string | null }).advisor_id ?? null,
         });
+      }
+    }
+
+    const activeSessionIds = new Set(
+      contacts
+        .filter((c) => c.sessionId && (c.kind === "appointment" || c.kind === "callback"))
+        .map((c) => c.sessionId as string),
+    );
+
+    {
+      // Abandoned leads: in-progress fact-finds with email and/or phone so staff can re-engage.
+      let skipAbandoned = false;
+      let sessQuery = supabaseAdmin
+        .from("interview_sessions")
+        .select("id, customer_id, status, started_at, updated_at, created_at, channel, current_section")
+        .eq("status", "in_progress")
+        .order("updated_at", { ascending: false })
+        .limit(150);
+      if (!isStaffAdmin) {
+        const ids = [...allocatedSessionIds];
+        if (ids.length === 0) skipAbandoned = true;
+        else sessQuery = sessQuery.in("id", ids);
+      }
+
+      if (!skipAbandoned) {
+        let { data: abandonedSessions, error: abandonedErr } = await sessQuery;
+        if (abandonedErr && isMissingContactTable(abandonedErr)) {
+          abandonedSessions = [];
+        } else if (abandonedErr) {
+          const fallback = await supabaseAdmin
+            .from("interview_sessions")
+            .select("id, customer_id, status, started_at, updated_at, created_at")
+            .eq("status", "in_progress")
+            .order("updated_at", { ascending: false })
+            .limit(150);
+          if (fallback.error && !isMissingContactTable(fallback.error)) throw new Error(fallback.error.message);
+          abandonedSessions = (fallback.data ?? []).map((s) => ({
+            ...s,
+            channel: null,
+            current_section: null,
+          }));
+        }
+
+        const rows = (abandonedSessions ?? []).filter(
+          (s) => s.customer_id && !activeSessionIds.has(s.id),
+        );
+        const abandonedCustomerIds = [
+          ...new Set(rows.map((s) => s.customer_id).filter(Boolean)),
+        ] as string[];
+        const profileById = new Map<
+          string,
+          { full_name: string | null; email: string | null; phone: string | null }
+        >();
+        if (abandonedCustomerIds.length > 0) {
+          const { data: profiles } = await supabaseAdmin
+            .from("profiles")
+            .select("id, full_name, email, phone")
+            .in("id", abandonedCustomerIds);
+          for (const p of profiles ?? []) {
+            profileById.set(p.id, {
+              full_name: p.full_name,
+              email: p.email,
+              phone: (p as { phone?: string | null }).phone ?? null,
+            });
+          }
+        }
+
+        const advisorBySession = new Map<string, string>();
+        const abandonedIds = rows.map((r) => r.id);
+        if (abandonedIds.length > 0) {
+          const { data: allocs } = await supabaseAdmin
+            .from("session_advisors")
+            .select("session_id, advisor_id")
+            .in("session_id", abandonedIds);
+          for (const a of allocs ?? []) {
+            if (!advisorBySession.has(a.session_id)) advisorBySession.set(a.session_id, a.advisor_id);
+          }
+        }
+
+        for (const s of rows) {
+          const prof = s.customer_id ? profileById.get(s.customer_id) : undefined;
+          const emailRaw = (prof?.email ?? "").trim();
+          const email =
+            emailRaw && !emailRaw.toLowerCase().includes("@customers.mortgagehub.local")
+              ? emailRaw
+              : null;
+          const phone = (prof?.phone ?? "").trim();
+          if (!email && !phone) continue;
+
+          const contactedAt = contactedAtByKey.get(`abandoned:${s.id}`) ?? null;
+          if (contactedAt && !contactArchiveVisible(contactedAt)) continue;
+
+          contacts.push({
+            kind: "abandoned",
+            id: s.id,
+            customerName: prof?.full_name?.trim() || "Customer",
+            customerPhone: phone || "—",
+            customerEmail: email,
+            sessionId: s.id,
+            customerId: s.customer_id ?? null,
+            startsAt: null,
+            window: null,
+            status: s.status,
+            createdAt: (s as { updated_at?: string }).updated_at ?? s.started_at ?? s.created_at,
+            opened: opened.has(`abandoned:${s.id}`),
+            contacted: isContactArchived(contactedAt),
+            contactedAt,
+            advisorId: advisorBySession.get(s.id) ?? null,
+            channel: (s as { channel?: string | null }).channel ?? null,
+            lastSection: (s as { current_section?: string | null }).current_section ?? null,
+          });
+        }
       }
     }
 
@@ -1639,12 +1845,169 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
       }
     }
 
+    {
+      const { backfillWelcomeCallsFromAppointments, listOpenStaffContactTasks } = await import(
+        "@/lib/staff-contact-tasks.server"
+      );
+      const { STAFF_TASK_LABELS } = await import("@/lib/staff-contact-tasks");
+      const taskSessionFilter =
+        isAdvisor && !isStaffAdmin ? [...allocatedSessionIds] : undefined;
+      // Ensure booked appointments have a welcome-call contact task (idempotent).
+      try {
+        await backfillWelcomeCallsFromAppointments(supabaseAdmin, taskSessionFilter);
+      } catch (e) {
+        console.error("welcome call backfill failed", e);
+      }
+      const tasks = await listOpenStaffContactTasks(supabaseAdmin, taskSessionFilter);
+      const sessionIds = [...new Set(tasks.map((t) => t.session_id))];
+      const sessionMeta = new Map<
+        string,
+        { customerId: string | null; name: string; phone: string; email: string | null }
+      >();
+      if (sessionIds.length > 0) {
+        const { data: sessions } = await supabaseAdmin
+          .from("interview_sessions")
+          .select("id, customer_id")
+          .in("id", sessionIds);
+        const customerIds = [...new Set((sessions ?? []).map((s) => s.customer_id).filter(Boolean))] as string[];
+        const profileMap = new Map<string, { full_name: string | null; email: string | null; phone: string | null }>();
+        if (customerIds.length > 0) {
+          const { data: profiles } = await supabaseAdmin
+            .from("profiles")
+            .select("id, full_name, email, phone")
+            .in("id", customerIds);
+          for (const p of profiles ?? []) {
+            profileMap.set(p.id, {
+              full_name: p.full_name,
+              email: p.email,
+              phone: (p as { phone?: string | null }).phone ?? null,
+            });
+          }
+        }
+        for (const s of sessions ?? []) {
+          const prof = s.customer_id ? profileMap.get(s.customer_id) : undefined;
+          sessionMeta.set(s.id, {
+            customerId: s.customer_id ?? null,
+            name: prof?.full_name?.trim() || "Customer",
+            phone: prof?.phone ?? "",
+            email: prof?.email ?? null,
+          });
+        }
+      }
+
+      for (const task of tasks) {
+        if (isAdvisor && !isStaffAdmin && !allocatedSessionIds.has(task.session_id)) continue;
+        const meta = sessionMeta.get(task.session_id);
+        contacts.push({
+          kind: "staff_task",
+          id: task.id,
+          taskType: task.task_type,
+          customerName: meta?.name ?? "Customer",
+          customerPhone: meta?.phone ?? "",
+          customerEmail: meta?.email ?? null,
+          sessionId: task.session_id,
+          customerId: meta?.customerId ?? null,
+          startsAt: null,
+          window: null,
+          status: STAFF_TASK_LABELS[task.task_type],
+          createdAt: task.created_at,
+          dueAt: task.due_at,
+          completedAt: task.completed_at,
+          opened: opened.has(`staff_task:${task.id}`),
+          contacted: false,
+          contactedAt: null,
+        });
+      }
+    }
+
+    // Resolve advisor for rows that only have a session (tasks, some phone calls).
+    const sessionsNeedingAdvisor = [
+      ...new Set(
+        contacts
+          .filter((c) => !c.advisorId && c.sessionId)
+          .map((c) => c.sessionId as string),
+      ),
+    ];
+    if (sessionsNeedingAdvisor.length > 0) {
+      const { data: allocs } = await supabaseAdmin
+        .from("session_advisors")
+        .select("session_id, advisor_id")
+        .in("session_id", sessionsNeedingAdvisor);
+      const firstAdvisorBySession = new Map<string, string>();
+      for (const row of allocs ?? []) {
+        if (!firstAdvisorBySession.has(row.session_id)) {
+          firstAdvisorBySession.set(row.session_id, row.advisor_id);
+        }
+      }
+      for (const c of contacts) {
+        if (c.advisorId || !c.sessionId) continue;
+        c.advisorId = firstAdvisorBySession.get(c.sessionId) ?? null;
+      }
+    }
+
+    const advisorIds = [...new Set(contacts.map((c) => c.advisorId).filter(Boolean))] as string[];
+    if (advisorIds.length > 0) {
+      const { data: advisorProfiles } = await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", advisorIds);
+      const nameById = new Map(
+        (advisorProfiles ?? []).map((p) => [
+          p.id,
+          (p.full_name?.trim() || p.email || "Advisor") as string,
+        ]),
+      );
+      for (const c of contacts) {
+        if (!c.advisorId) continue;
+        c.advisorName = nameById.get(c.advisorId) ?? null;
+      }
+    }
+
     contacts.sort((a, b) => {
+      const aOpenTask = a.kind === "staff_task" && !a.completedAt;
+      const bOpenTask = b.kind === "staff_task" && !b.completedAt;
+      if (aOpenTask && bOpenTask) {
+        return new Date(a.dueAt ?? 0).getTime() - new Date(b.dueAt ?? 0).getTime();
+      }
+      if (aOpenTask !== bOpenTask) return aOpenTask ? -1 : 1;
+
       if (a.contacted !== b.contacted) return a.contacted ? 1 : -1;
       if (a.unallocated !== b.unallocated) return a.unallocated ? -1 : 1;
       if (a.opened !== b.opened) return a.opened ? 1 : -1;
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      const aSort = a.dueAt ?? a.startsAt ?? a.createdAt;
+      const bSort = b.dueAt ?? b.startsAt ?? b.createdAt;
+      return new Date(aSort).getTime() - new Date(bSort).getTime();
     });
+
+    // Pure advisors: hide contacts for journeys marked complete with lender details entered.
+    // Owner / supervisor / admin keep full visibility (Management View).
+    if (isAdvisor && !isStaffAdmin) {
+      const linkedIds = [
+        ...new Set(contacts.map((c) => c.sessionId).filter(Boolean) as string[]),
+      ];
+      if (linkedIds.length > 0) {
+        const archived = new Set<string>();
+        const { data: milestones } = await supabaseAdmin
+          .from("customer_journey_milestones")
+          .select("session_id")
+          .in("session_id", linkedIds)
+          .eq("milestone_key", "completion");
+        const completeIds = [...new Set((milestones ?? []).map((m) => m.session_id))];
+        if (completeIds.length > 0) {
+          const { data: details } = await supabaseAdmin
+            .from("case_mortgage_details")
+            .select("session_id, current_lender")
+            .in("session_id", completeIds);
+          for (const d of details ?? []) {
+            if (String(d.current_lender ?? "").trim()) archived.add(d.session_id);
+          }
+        }
+        if (archived.size > 0) {
+          return contacts.filter((c) => !c.sessionId || !archived.has(c.sessionId));
+        }
+      }
+    }
+
     return contacts;
   });
 
@@ -1744,7 +2107,7 @@ export const markAdvisorContactHandled = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) =>
     z
       .object({
-        contactType: z.enum(["appointment", "callback", "phone_call"]),
+        contactType: z.enum(["appointment", "callback", "phone_call", "abandoned"]),
         contactId: z.string().uuid(),
         sessionId: z.string().uuid().optional(),
         note: z.string().max(200).optional(),
@@ -1834,6 +2197,11 @@ export const markAdvisorContactHandled = createServerFn({ method: "POST" })
       historyNote = "Appointment — marked as contacted";
     }
 
+    if (data.contactType === "abandoned") {
+      sessionId = sessionId ?? data.contactId;
+      if (!historyNote) historyNote = "Abandoned lead — marked as contacted";
+    }
+
     if (sessionId) {
       await appendContactLog(sessionId, context.userId, "contact", historyNote ?? "Marked as contacted");
       await clearSessionAttention(sessionId, context.userId, "contact_handled");
@@ -1885,13 +2253,12 @@ export const assignUnallocatedVoicemail = createServerFn({ method: "POST" })
 
     const { data: cb, error: cbErr } = await supabaseAdmin
       .from("callback_requests")
-      .select("id, customer_phone, customer_name, session_id, advisor_id, phone_call_id, notes")
+      .select("id, customer_phone, customer_name, customer_id, session_id, advisor_id, phone_call_id, notes")
       .eq("id", data.callbackId)
       .maybeSingle();
     if (cbErr) throw new Error(cbErr.message);
     if (!cb) throw new Error("Call-back not found");
     if (cb.advisor_id) throw new Error("This call-back is already assigned to an advisor.");
-    if (cb.session_id) throw new Error("This call-back is already linked to a case.");
 
     const { data: advisor } = await supabaseAdmin
       .from("profiles")
@@ -1900,21 +2267,28 @@ export const assignUnallocatedVoicemail = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!advisor) throw new Error("Advisor not found");
 
-    const match = await findSessionForCallerPhone(cb.customer_phone);
+    const match = cb.session_id
+      ? {
+          sessionId: cb.session_id as string,
+          customerId: (cb.customer_id as string | null) ?? null,
+        }
+      : await findSessionForCallerPhone(cb.customer_phone);
 
     const callbackPatch: Record<string, unknown> = {
       advisor_id: data.advisorId,
-      notes: `${(cb.notes ?? "Inbound voicemail").replace(/\. Assign.*$/, "")} · Assigned to ${advisor.full_name ?? "advisor"} by admin.`,
+      notes: `${(cb.notes ?? "Inbound callback").replace(/\. Assign.*$/, "")} · Allocated to ${advisor.full_name ?? "advisor"} by admin.`,
     };
-    if (match) {
+    if (match?.sessionId) {
       callbackPatch.session_id = match.sessionId;
-      callbackPatch.customer_id = match.customerId;
-      const { data: prof } = await supabaseAdmin
-        .from("profiles")
-        .select("full_name")
-        .eq("id", match.customerId)
-        .maybeSingle();
-      if (prof?.full_name) callbackPatch.customer_name = prof.full_name;
+      if (match.customerId) {
+        callbackPatch.customer_id = match.customerId;
+        const { data: prof } = await supabaseAdmin
+          .from("profiles")
+          .select("full_name")
+          .eq("id", match.customerId)
+          .maybeSingle();
+        if (prof?.full_name) callbackPatch.customer_name = prof.full_name;
+      }
     }
 
     const { error: updateErr } = await supabaseAdmin
@@ -1925,14 +2299,14 @@ export const assignUnallocatedVoicemail = createServerFn({ method: "POST" })
 
     if (cb.phone_call_id) {
       const callPatch: Record<string, unknown> = { advisor_id: data.advisorId };
-      if (match) {
+      if (match?.sessionId) {
         callPatch.session_id = match.sessionId;
-        callPatch.customer_id = match.customerId;
+        if (match.customerId) callPatch.customer_id = match.customerId;
       }
       await supabaseAdmin.from("phone_calls").update(callPatch).eq("id", cb.phone_call_id);
     }
 
-    if (match) {
+    if (match?.sessionId) {
       try {
         await supabaseAdmin.from("session_advisors").upsert(
           { session_id: match.sessionId, advisor_id: data.advisorId, assigned_by: context.userId },
@@ -1940,6 +2314,12 @@ export const assignUnallocatedVoicemail = createServerFn({ method: "POST" })
         );
       } catch (e) {
         console.error("assign voicemail session_advisors failed", e);
+      }
+      try {
+        const { ensureWelcomeCallTask } = await import("@/lib/staff-contact-tasks.server");
+        await ensureWelcomeCallTask(supabaseAdmin, match.sessionId, context.userId);
+      } catch (e) {
+        console.error("welcome call on allocate callback failed", e);
       }
     }
 
@@ -1955,7 +2335,7 @@ export const markContactOpened = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) =>
     z
       .object({
-        contactType: z.enum(["appointment", "callback", "phone_call"]),
+        contactType: z.enum(["appointment", "callback", "phone_call", "staff_task", "abandoned"]),
         contactId: z.string().uuid(),
         viewAsAdvisorId: z.string().uuid().optional(),
       })

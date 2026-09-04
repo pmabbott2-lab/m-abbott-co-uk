@@ -70,7 +70,7 @@ function vis(partial: StaffBranchNavContext) {
 
 console.log("\nRole visibility QA\n");
 
-test("owner: customers, diary (filtered + all), management, finance (not my commission)", () => {
+test("owner: customers, diary, management, marketing, finance (not my commission)", () => {
   const v = vis({
     isAdvisor: true,
     isMainAdmin: true,
@@ -82,14 +82,18 @@ test("owner: customers, diary (filtered + all), management, finance (not my comm
   assert.equal(v.branches.customers, true);
   assert.equal(v.branches.diary, true);
   assert.equal(v.branches.management, true);
+  assert.equal(v.branches.marketing, true);
   assert.equal(v.diary.myDiary, true);
   assert.equal(v.diary.allAppointments, true);
   assert.equal(v.finance.myCommission, false);
   assert.equal(v.finance.commissionMgmt, true);
   assert.equal(v.finance.financeReport, true);
   assert.equal(v.management.view, true);
+  assert.equal(v.management.analytics, true);
   assert.equal(v.management.manageTeamRoles, true);
+  assert.equal(v.marketing.referAFriend, true);
   assert.equal(v.branches.introducers, false);
+  assert.equal(countStaffBranches(v), 5);
 });
 
 test("supervisor: diary + management, no finance report", () => {
@@ -103,6 +107,8 @@ test("supervisor: diary + management, no finance report", () => {
   });
   assert.equal(v.branches.diary, true);
   assert.equal(v.branches.management, true);
+  assert.equal(v.management.analytics, true);
+  assert.equal(v.branches.marketing, true);
   assert.equal(v.finance.financeReport, false);
   assert.equal(v.finance.myCommission, false);
   assert.equal(v.finance.commissionMgmt, true);
@@ -123,6 +129,7 @@ test("pure advisor: customers, diary (own only), my commission — no management
   assert.equal(v.diary.allAppointments, false);
   assert.equal(v.finance.myCommission, true);
   assert.equal(v.branches.management, false);
+  assert.equal(v.branches.marketing, false);
   assert.equal(countStaffBranches(v), 3);
 });
 
@@ -166,7 +173,7 @@ test("general admin appointments-only: Contacts + Diary tabs", () => {
   assert.equal(countStaffBranches(v), 2);
 });
 
-test("general admin advisors perm: diary filtered + team roles under manage", () => {
+test("general admin advisors perm: diary tab + team roles under manage", () => {
   const perms = emptyPermissions();
   perms.advisors = "view";
   const v = vis({

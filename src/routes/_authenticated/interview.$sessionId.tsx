@@ -953,7 +953,7 @@ function InterviewPage() {
       setNeedsGesture(true);
       setPaused(true);
       setStatus("Allow microphone, then tap Start");
-      toast.error("Please allow microphone access, then tap Start");
+      toast.message("Please allow microphone access, then tap Start");
       return;
     }
     if (current?.sayText) {
@@ -1034,7 +1034,7 @@ function InterviewPage() {
       setStarted(false);
       setPaused(true);
       setStatus("Allow microphone, then tap Start");
-      toast.error("Please allow microphone access, then tap Start");
+      toast.message("Please allow microphone access, then tap Start");
       return;
     }
     bootedRef.current = true;
@@ -1098,6 +1098,11 @@ function InterviewPage() {
 
   useEffect(() => {
     if (!sessionQ.data || started || done) return;
+    if (sessionQ.data.session?.status === "submitted") {
+      setDone(true);
+      setStarted(true);
+      return;
+    }
     setNeedsGesture(true);
     setStatus("Review the consent below, then tap Start");
     const firstPrompt = SECTIONS[0]?.questions[0]?.prompt ?? "";
@@ -1106,11 +1111,15 @@ function InterviewPage() {
     // hit). Prefetch it FIRST and on its own so time-to-first-audio is minimal,
     // then warm the acks/intros used later in the interview.
     const greeting = firstPrompt ? firstGreeting(profileFirstName, firstPrompt) : "";
-    if (greeting) void prefetch([greeting]);
-    void prefetch([
-      ...ACKNOWLEDGEMENTS.map(ackClip),
-      ...SECTIONS.map((s) => s.intro),
-    ]);
+    try {
+      if (greeting) void prefetch([greeting]);
+      void prefetch([
+        ...ACKNOWLEDGEMENTS.map(ackClip),
+        ...SECTIONS.map((s) => s.intro),
+      ]);
+    } catch {
+      /* prefetch is best-effort */
+    }
   }, [sessionQ.data, started, done, prefetch, profileFirstName]);
 
   useEffect(() => () => cleanupAudio(), []);
@@ -1126,6 +1135,32 @@ function InterviewPage() {
 
   if (sessionQ.isLoading) {
     return <AppShell title="Interview"><div className="py-16 text-center text-muted-foreground">Loading…</div></AppShell>;
+  }
+
+  if (sessionQ.isError || !sessionQ.data) {
+    return (
+      <AppShell title="Interview">
+        <div className="py-16 text-center space-y-3 max-w-md mx-auto">
+          <p className="text-muted-foreground">We couldn&apos;t open the voice interview.</p>
+          <p className="text-xs text-muted-foreground break-all">
+            {sessionQ.error instanceof Error ? sessionQ.error.message : ""}
+          </p>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button onClick={() => void sessionQ.refetch()}>Try again</Button>
+            <Button
+              variant="outline"
+              onClick={() =>
+                void navigate({ to: "/chat/$sessionId", params: { sessionId } }).catch((e) =>
+                  toast.error(e instanceof Error ? e.message : "Couldn't switch to typing"),
+                )
+              }
+            >
+              <MessageSquare className="w-4 h-4 mr-2" /> Continue typing instead
+            </Button>
+          </div>
+        </div>
+      </AppShell>
+    );
   }
 
   const sec = (current?.section ?? "personal") as Section;
@@ -1150,7 +1185,9 @@ function InterviewPage() {
             className="shrink-0"
             onClick={() => {
               handlePause();
-              navigate({ to: "/chat/$sessionId", params: { sessionId } });
+              void navigate({ to: "/chat/$sessionId", params: { sessionId } }).catch((e) =>
+                toast.error(e instanceof Error ? e.message : "Couldn't switch to typing"),
+              );
             }}
             title="Switch to the typed chat assistant"
           >

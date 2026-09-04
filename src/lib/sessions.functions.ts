@@ -1646,6 +1646,33 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "POST" })
       }
     }
 
+    // Journey completion + lender details drive archive / red-flag rules:
+    // completion + lender → archive from advisor Customers/Contacts;
+    // completion without lender → keep visible but flag red.
+    const journeyCompleteBySession = new Set<string>();
+    const hasLenderBySession = new Set<string>();
+    {
+      const sessionIds = activeSessions.map((s) => s.id);
+      if (sessionIds.length > 0) {
+        const { data: milestones, error: mileErr } = await supabaseAdmin
+          .from("customer_journey_milestones")
+          .select("session_id, milestone_key")
+          .in("session_id", sessionIds)
+          .eq("milestone_key", "completion");
+        if (mileErr && !isMissingTableError(mileErr)) throw new Error(mileErr.message);
+        for (const m of milestones ?? []) journeyCompleteBySession.add(m.session_id);
+
+        const { data: mortgageDetails, error: mdErr } = await supabaseAdmin
+          .from("case_mortgage_details")
+          .select("session_id, current_lender")
+          .in("session_id", sessionIds);
+        if (mdErr && !isMissingTableError(mdErr)) throw new Error(mdErr.message);
+        for (const d of mortgageDetails ?? []) {
+          if (String(d.current_lender ?? "").trim()) hasLenderBySession.add(d.session_id);
+        }
+      }
+    }
+
     // Open call-back requests, keyed by session, so the customer row highlights
     // as "ready to review" until the advisor resolves it. A call-back counts as
     // ready-to-review while its status is 'new'; an advisor "Spoke to customer"
@@ -1723,14 +1750,24 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "POST" })
       }
     }
 
-    return activeSessions.map((s) => ({
-      ...s,
-      customer: profileMap.get(s.customer_id) ?? null,
-      assignedAdvisors: allocBySession.get(s.id) ?? [],
-      lastContactedAt: trackingMap.get(s.id)?.last ?? null,
-      nextContactAt: trackingMap.get(s.id)?.next ?? null,
-      callback: callbackBySession.get(s.id) ?? null,
-    }));
+    return activeSessions.map((s) => {
+      const journeyComplete = journeyCompleteBySession.has(s.id);
+      const hasLenderDetails = hasLenderBySession.has(s.id);
+      return {
+        ...s,
+        customer: profileMap.get(s.customer_id) ?? null,
+        assignedAdvisors: allocBySession.get(s.id) ?? [],
+        lastContactedAt: trackingMap.get(s.id)?.last ?? null,
+        nextContactAt: trackingMap.get(s.id)?.next ?? null,
+        callback: callbackBySession.get(s.id) ?? null,
+        journeyComplete,
+        hasLenderDetails,
+        /** Completion + lender entered → hide from pure advisor Customers/Contacts. */
+        archivedFromAdvisor: journeyComplete && hasLenderDetails,
+        /** Completion without lender → keep visible but flag red. */
+        missingLenderAfterCompletion: journeyComplete && !hasLenderDetails,
+      };
+    });
   });
 
 export const listAdvisors = createServerFn({ method: "GET" })
@@ -1940,6 +1977,10 @@ export const allocateSession = createServerFn({ method: "POST" })
         { onConflict: "session_id,advisor_id" },
       );
     if (error && !isMissingTableError(error)) throw new Error(error.message);
+
+    const { ensureWelcomeCallTask } = await import("@/lib/staff-contact-tasks.server");
+    await ensureWelcomeCallTask(supabaseAdmin, data.sessionId, context.userId);
+
     return { ok: true };
   });
 
@@ -2008,6 +2049,11 @@ export const bulkAllocateSessions = createServerFn({ method: "POST" })
         .from("session_advisors")
         .upsert(toInsert, { onConflict: "session_id,advisor_id" });
       if (error && !isMissingTableError(error)) throw new Error(error.message);
+
+      const { ensureWelcomeCallTask } = await import("@/lib/staff-contact-tasks.server");
+      for (const row of toInsert) {
+        await ensureWelcomeCallTask(supabaseAdmin, row.session_id, context.userId);
+      }
     }
 
     return { advisorId, allocatedCount: allocated.length, skipped };
@@ -2454,11 +2500,21 @@ export const setNextContact = createServerFn({ method: "POST" })
     z.object({ sessionId: z.string().uuid(), nextContactAt: z.string().datetime().nullable() }).parse(d),
   )
   .handler(async ({ data, context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const adminAccess = await resolveAdminAccess(context.userId, email);
     const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("advisor")) throw new Error("Forbidden");
+    const isStaff = roles.includes("advisor") || adminAccess.isAdmin;
+    if (!isStaff) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await upsertContactTracking(data.sessionId, context.userId, {
       next_contact_at: data.nextContactAt,
     });
+
+    const { syncNextContactTask } = await import("@/lib/staff-contact-tasks.server");
+    await syncNextContactTask(supabaseAdmin, data.sessionId, data.nextContactAt, context.userId);
+
     if (data.nextContactAt) {
       const when = new Date(data.nextContactAt).toLocaleString("en-GB", {
         day: "numeric",
@@ -2815,7 +2871,55 @@ export const getCustomerJourney = createServerFn({ method: "POST" })
       if (idx >= 0) milestones[idx].completedAt = row.completed_at;
     }
 
-    return { milestones };
+    // Staff-only internal contact tasks (welcome call, next contact) — not shown to customers.
+    let internalTasks: Array<{
+      id: string;
+      taskType: string;
+      label: string;
+      dueAt: string;
+      completedAt: string | null;
+      overdue: boolean;
+    }> = [];
+    if (isStaff) {
+      const {
+        listStaffContactTasksForSession,
+        ensureWelcomeCallTask,
+        STAFF_TASK_LABELS,
+        isStaffTaskOverdue,
+        WELCOME_CALL_DUE_MS,
+      } = await import("@/lib/staff-contact-tasks.server");
+      // If this case has an appointment but no welcome task yet, create one now.
+      try {
+        const { data: appt } = await supabaseAdmin
+          .from("appointments")
+          .select("created_at")
+          .eq("session_id", data.sessionId)
+          .eq("status", "confirmed")
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (appt?.created_at) {
+          const dueAt = new Date(
+            new Date(appt.created_at).getTime() + WELCOME_CALL_DUE_MS,
+          ).toISOString();
+          await ensureWelcomeCallTask(supabaseAdmin, data.sessionId, null, { dueAt });
+        }
+      } catch (e) {
+        console.error("ensure welcome on journey load failed", e);
+      }
+
+      const tasks = await listStaffContactTasksForSession(supabaseAdmin, data.sessionId);
+      internalTasks = tasks.map((t) => ({
+        id: t.id,
+        taskType: t.task_type,
+        label: STAFF_TASK_LABELS[t.task_type] ?? t.task_type,
+        dueAt: t.due_at,
+        completedAt: t.completed_at,
+        overdue: isStaffTaskOverdue(t.due_at, t.completed_at),
+      }));
+    }
+
+    return { milestones, internalTasks };
   });
 
 export const confirmJourneyMilestone = createServerFn({ method: "POST" })
@@ -3633,6 +3737,18 @@ export const markStaffInviteUsed = createServerFn({ method: "POST" })
     if (!claimed) throw new Error("This invite link has already been used.");
 
     try {
+      const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(data.userId);
+      const meta = (authUser.user?.user_metadata ?? {}) as { full_name?: string; phone?: string };
+      const { error: profileUpsertErr } = await supabaseAdmin.from("profiles").upsert({
+        id: data.userId,
+        email: authUser.user?.email?.toLowerCase() ?? resolved.email,
+        full_name: meta.full_name ?? null,
+        phone: meta.phone ?? null,
+      });
+      if (profileUpsertErr && !isMissingTableError(profileUpsertErr)) {
+        console.error("staff invite profile upsert failed", profileUpsertErr);
+      }
+
       if (resolved.role === "advisor") {
         const { error } = await supabaseAdmin
           .from("user_roles")

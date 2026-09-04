@@ -48,7 +48,7 @@ export function AssignVoicemailAdvisor({
         }}
       >
         <option value="" disabled>
-          Assign to advisor…
+          Allocate to advisor…
         </option>
         {advisors.map((a) => (
           <option key={a.id} value={a.id}>

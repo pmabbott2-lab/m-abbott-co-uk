@@ -141,6 +141,7 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
   const dependantsRef = useRef<DependantFlow | null>(null);
   const textHandlerRef = useRef<((text: string) => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const completionRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const profileFirstName = firstNameFromFullName(sessionQ.data?.customer?.full_name);
@@ -166,8 +167,18 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
     if (handler) requestAnimationFrame(() => inputRef.current?.focus());
   };
 
-  // Auto-scroll to the newest message / typing indicator.
+  // Auto-scroll to the newest message, or to the next-step prompt when done.
   useEffect(() => {
+    if (done) {
+      const el = completionRef.current;
+      const parent = scrollRef.current;
+      if (el && parent) {
+        parent.scrollTo({ top: Math.max(0, el.offsetTop - 8), behavior: "smooth" });
+      } else {
+        el?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, thinking, optionsActive, credit, dependants, done]);
 
@@ -452,6 +463,19 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
   // ---- Bootstrap (fresh seed or resume from saved position) ----
   useEffect(() => {
     if (!sessionQ.data || bootedRef.current) return;
+    if (sessionQ.data.session?.status === "submitted") {
+      bootedRef.current = true;
+      const msgs = sessionQ.data.messages ?? [];
+      setMessages(
+        msgs.map((m) => ({
+          id: m.id,
+          role: m.role === "customer" ? "customer" : "assistant",
+          text: m.text,
+        })),
+      );
+      setDone(true);
+      return;
+    }
     bootedRef.current = true;
     const msgs = sessionQ.data.messages ?? [];
     if (msgs.length === 0) {
@@ -500,6 +524,32 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
     );
   }
 
+  if (sessionQ.isError || !sessionQ.data) {
+    return (
+      <AppShell title="Chat fact-find">
+        <div className="py-16 text-center space-y-3 max-w-md mx-auto">
+          <p className="text-muted-foreground">We couldn&apos;t open the typed chat.</p>
+          <p className="text-xs text-muted-foreground break-all">
+            {sessionQ.error instanceof Error ? sessionQ.error.message : ""}
+          </p>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button onClick={() => void sessionQ.refetch()}>Try again</Button>
+            <Button
+              variant="outline"
+              onClick={() =>
+                void navigate({ to: "/interview/$sessionId", params: { sessionId } }).catch((e) =>
+                  toast.error(e instanceof Error ? e.message : "Couldn't switch to voice"),
+                )
+              }
+            >
+              <Mic className="w-4 h-4 mr-1.5" /> Switch to voice
+            </Button>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
   const sec = (current?.section ?? "personal") as Section;
   const qi = current?.questionIndex ?? 0;
   const progress = done
@@ -527,7 +577,7 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
         </Button>
       }
     >
-      <div className="max-w-2xl mx-auto">
+      <div className="w-[90%] max-w-2xl mx-auto">
         <div className="mb-4">
           <Progress value={progress} className="h-2" />
           <div className="flex justify-between text-xs text-muted-foreground mt-2">
@@ -536,9 +586,9 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
           </div>
         </div>
 
-        <div className="flex flex-col bg-card rounded-3xl border overflow-hidden" style={{ height: "min(70vh, 640px)" }}>
+        <div className="flex flex-col bg-card rounded-3xl border overflow-hidden" style={{ height: "min(63vh, 576px)" }}>
           {/* Header */}
-          <div className="flex items-center gap-3 px-4 py-3 border-b bg-card/60">
+          <div className="flex items-center gap-3 px-4 py-3 border-b bg-card/60 shrink-0">
             <img src={avatarImg} alt="Susan" width={40} height={40} className="rounded-full object-cover object-top" />
             <div className="flex-1 min-w-0">
               <div className="font-semibold leading-tight">Susan</div>
@@ -548,7 +598,11 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
               variant="ghost"
               size="sm"
               className="rounded-full"
-              onClick={() => navigate({ to: "/interview/$sessionId", params: { sessionId } })}
+              onClick={() =>
+                void navigate({ to: "/interview/$sessionId", params: { sessionId } }).catch((e) =>
+                  toast.error(e instanceof Error ? e.message : "Couldn't switch to voice"),
+                )
+              }
               title="Switch to the spoken assistant"
             >
               <Mic className="w-4 h-4 mr-1.5" /> Switch to voice
@@ -556,7 +610,7 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
           </div>
 
           {/* Conversation */}
-          <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+          <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
             {messages.map((m) =>
               m.role === "assistant" ? (
                 <div key={m.id} className="flex items-end gap-2">
@@ -674,18 +728,33 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
             )}
 
             {done && (
-              <div className="text-center pt-3 text-sm text-muted-foreground">
-                {submitting
-                  ? "Submitting…"
-                  : "Book an appointment or request a call back below, or skip to review your answers."}
+              <div ref={completionRef} className="pt-3 space-y-4 scroll-mt-2">
+                <div className="text-center space-y-1">
+                  <div className="text-sm font-semibold">What would you like to do next?</div>
+                  <div className="text-sm text-muted-foreground">
+                    {submitting
+                      ? "Submitting…"
+                      : "Book an appointment or request a call back below, or skip to review your answers."}
+                  </div>
+                </div>
+                <div className="rounded-2xl border bg-background p-4 sm:p-6">
+                  <PostCompletionBooking
+                    sessionId={sessionId}
+                    channel="text"
+                    defaultName={sessionQ.data?.customer?.full_name ?? ""}
+                    defaultEmail={sessionQ.data?.customer?.email ?? ""}
+                    onComplete={handleFinish}
+                  />
+                </div>
               </div>
             )}
           </div>
 
-          {/* Input bar */}
-          <div className="border-t p-3">
+          {/* Input bar — hidden when fact-find is complete */}
+          {!done && (
+          <div className="border-t p-3 shrink-0 bg-card">
             <form
-              className="flex items-center gap-2"
+              className="flex items-end gap-2"
               onSubmit={(e) => {
                 e.preventDefault();
                 handleSend();
@@ -697,35 +766,22 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
                 onChange={(e) => setInput(e.target.value)}
                 disabled={!showTextInput || thinking}
                 placeholder={
-                  done
-                    ? "Fact-find complete"
-                    : showTextInput
-                      ? textPlaceholder
-                      : thinking
-                        ? "Susan is typing…"
-                        : "Tap an option above to continue"
+                  showTextInput
+                    ? textPlaceholder
+                    : thinking
+                      ? "Susan is typing…"
+                      : "Tap an option above to continue"
                 }
                 className="flex-1 rounded-full border bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
                 aria-label="Type your answer"
               />
-              <Button type="submit" size="icon" className="rounded-full shrink-0" disabled={!showTextInput || thinking || !input.trim()} aria-label="Send">
+              <Button type="submit" size="icon" className="rounded-full shrink-0 mb-0.5" disabled={!showTextInput || thinking || !input.trim()} aria-label="Send">
                 <Send className="w-4 h-4" />
               </Button>
             </form>
           </div>
+          )}
         </div>
-
-        {done && (
-          <div className="mt-6 bg-card rounded-3xl border p-6 sm:p-8">
-            <PostCompletionBooking
-              sessionId={sessionId}
-              channel="text"
-              defaultName={sessionQ.data?.customer?.full_name ?? ""}
-              defaultEmail={sessionQ.data?.customer?.email ?? ""}
-              onComplete={handleFinish}
-            />
-          </div>
-        )}
 
         <p className="text-xs text-muted-foreground text-center mt-3">
           Susan is an AI assistant. Your answers are saved for your mortgage adviser — this is assistive only, not mortgage advice.

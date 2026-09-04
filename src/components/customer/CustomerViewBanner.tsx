@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { listCustomersForAdmin } from "@/lib/sessions.functions";
 import { getCustomerView, setCustomerView } from "@/lib/customer-view";
+import { persistViewAsNav } from "@/lib/staff-nav-persistence";
+import { VIEW_SUB_TABS } from "@/lib/staff-branch-nav";
 import { recordViewAsAudit } from "@/lib/view-as-audit.functions";
 import { Eye } from "lucide-react";
 
@@ -90,6 +92,7 @@ export function CustomerViewBanner({ onViewChange }: { onViewChange: () => void 
                 customerId: picked.userId,
                 customerName: picked.full_name || picked.email || "Customer",
               });
+              persistViewAsNav(VIEW_SUB_TABS.CUSTOMER);
               try {
                 await auditFn({
                   data: {

@@ -1,8 +1,7 @@
-import { Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
-import { CalendarDays, KeyRound } from "lucide-react";
+import { KeyRound } from "lucide-react";
 import { listAllSessionsForAdvisor, getMyRole } from "@/lib/sessions.functions";
 import {
   ADMIN_LEVEL_LABELS,
@@ -20,7 +19,6 @@ import { StaffBranchTabs } from "@/components/staff/StaffBranchTabs";
 import { getStaffBranchVisibility } from "@/lib/staff-branch-nav";
 import { getAdvisorView } from "@/lib/advisor-view";
 import { AppShell } from "@/components/AppShell";
-import { Button } from "@/components/ui/button";
 import {
   CustomersListPanel,
   type CustomerSessionRow,
@@ -69,7 +67,9 @@ export function StaffDashboard({
         ? "Introducer dashboard"
         : "Dashboard";
 
-  const [allocationFilter, setAllocationFilter] = useState<CustomerAllocationFilter>("unallocated");
+  const [allocationFilter, setAllocationFilter] = useState<CustomerAllocationFilter>(
+    isMainAdmin ? "unallocated" : "all",
+  );
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<"recent" | "next_contact">("recent");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -90,9 +90,19 @@ export function StaffDashboard({
     onSuccess: () => qc.invalidateQueries({ queryKey: ["all-sessions"] }),
   });
 
+  const isStaffAdvisor = isAdvisor && !isMainAdmin;
+
   const q = search.trim().toLowerCase();
   const sessions = (allQ.data ?? [])
     .filter((s) => {
+      // Pure advisors: archive completed journeys once lender details are entered.
+      // Main admin Customers and Management → View keep them visible.
+      if (
+        isStaffAdvisor &&
+        (s as { archivedFromAdvisor?: boolean }).archivedFromAdvisor
+      ) {
+        return false;
+      }
       const assigned = (s as { assignedAdvisors?: AssignedAdvisor[] }).assignedAdvisors ?? [];
       const isCase = Boolean((s as { case_ref?: string | null }).case_ref);
       if (allocationFilter === "unallocated" && (isCase || assigned.length !== 0)) return false;
@@ -127,7 +137,6 @@ export function StaffDashboard({
     isIntroducer,
     adminAccess,
   });
-  const isStaffAdvisor = isAdvisor && !isMainAdmin;
 
   const customerRows: CustomerSessionRow[] = sessions.map((s) => ({
     id: s.id,
@@ -139,6 +148,10 @@ export function StaffDashboard({
     assignedAdvisors: (s as { assignedAdvisors?: AssignedAdvisor[] }).assignedAdvisors,
     nextContactAt: (s as { nextContactAt?: string | null }).nextContactAt,
     callback: (s as { callback?: { id: string; window: string | null } | null }).callback,
+    journeyComplete: (s as { journeyComplete?: boolean }).journeyComplete,
+    hasLenderDetails: (s as { hasLenderDetails?: boolean }).hasLenderDetails,
+    archivedFromAdvisor: (s as { archivedFromAdvisor?: boolean }).archivedFromAdvisor,
+    missingLenderAfterCompletion: (s as { missingLenderAfterCompletion?: boolean }).missingLenderAfterCompletion,
   }));
 
   return (
@@ -158,16 +171,6 @@ export function StaffDashboard({
             </span>
           )}
         </div>
-        {branchVis.branches.diary && (
-          <div className="flex flex-wrap gap-2">
-            <Link to="/diary">
-              <Button variant="secondary">
-                <CalendarDays className="w-4 h-4 mr-2" />
-                Diary
-              </Button>
-            </Link>
-          </div>
-        )}
       </div>
 
       <StaffBranchTabs

@@ -251,24 +251,8 @@ export const listAdmins = createServerFn({ method: "GET" })
 
     const levelOrder: Record<AdminLevel, number> = { owner: 0, supervisor: 1, general: 2 };
 
-    const { data: adminInvites } = await supabaseAdmin
-      .from("staff_invitations")
-      .select("used_by")
-      .eq("role", "admin")
-      .not("used_by", "is", null);
-    const invitedAdminIds = new Set(
-      (adminInvites ?? []).map((i) => i.used_by as string).filter(Boolean),
-    );
-
     return {
       admins: (profiles ?? [])
-        .filter((p) => {
-          if (isOwnerEmail(p.email)) return true;
-          const level = resolveListedAdminLevel(p.id, p.email, levelByUser, profilesMissing);
-          if (level === "owner") return true;
-          const granted = levelByUser.has(p.id);
-          return invitedAdminIds.has(p.id) || granted;
-        })
         .map((p) => {
           const level = resolveListedAdminLevel(p.id, p.email, levelByUser, profilesMissing);
           const defaults = { ...DEFAULT_GENERAL_PERMISSIONS };
@@ -428,18 +412,54 @@ export const listUsersForAdminGrant = createServerFn({ method: "GET" })
     if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const ids = new Set<string>();
+
     const { data: invites } = await supabaseAdmin
       .from("staff_invitations")
-      .select("used_by")
-      .eq("role", "admin")
-      .not("used_by", "is", null);
-    const ids = [...new Set((invites ?? []).map((i) => i.used_by as string).filter(Boolean))];
-    if (ids.length === 0) return [];
+      .select("used_by, email")
+      .eq("role", "admin");
+    for (const i of invites ?? []) {
+      if (i.used_by) ids.add(i.used_by as string);
+    }
+
+    const { data: roleRows } = await supabaseAdmin.from("user_roles").select("user_id").eq("role", "admin");
+    for (const r of roleRows ?? []) ids.add(r.user_id);
+
+    const { data: adminProfiles } = await supabaseAdmin.from("admin_profiles").select("user_id");
+    for (const p of adminProfiles ?? []) ids.add(p.user_id);
+
+    // Unused invite emails (e.g. test admin) — match existing profiles so they can be granted.
+    const unusedEmails = [...new Set(
+      (invites ?? [])
+        .filter((i) => !i.used_by && i.email)
+        .map((i) => (i.email as string).trim().toLowerCase()),
+    )];
+    if (unusedEmails.length > 0) {
+      const { data: byEmail } = await supabaseAdmin
+        .from("profiles")
+        .select("id, email")
+        .in("email", unusedEmails);
+      for (const p of byEmail ?? []) ids.add(p.id);
+    }
+
+    const { TEST_ACCOUNTS } = await import("@/lib/test-accounts");
+    const testAdminEmails = TEST_ACCOUNTS.filter((a) => a.role === "admin").map((a) => a.email);
+    if (testAdminEmails.length > 0) {
+      const { data: testProfiles } = await supabaseAdmin
+        .from("profiles")
+        .select("id, email")
+        .in("email", testAdminEmails);
+      for (const p of testProfiles ?? []) ids.add(p.id);
+    }
+
+    const idList = [...ids];
+    if (idList.length === 0) return [];
 
     const { data: profiles } = await supabaseAdmin
       .from("profiles")
       .select("id, full_name, email")
-      .in("id", ids)
+      .in("id", idList)
       .order("full_name", { ascending: true });
-    return profiles ?? [];
+
+    return (profiles ?? []).filter((p) => !isOwnerEmail(p.email));
   });

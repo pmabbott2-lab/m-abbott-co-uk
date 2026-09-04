@@ -30,17 +30,16 @@ export function referralLinkForSlug(slug: string, origin?: string) {
   return `${base}/go/${slug}`;
 }
 
-/** Marketing site base (MortgageEasy mockup on 8081 locally). */
+/** Marketing site base (MortgageEasy). Prefer same-origin `/mortgageeasy/` so remote Hub never opens localhost. */
 export function getMarketingSiteUrl(): string {
-  const configured = import.meta.env.VITE_MOCKUP_SITE_URL?.trim().replace(/\/$/, "");
-  if (configured) return configured;
   if (typeof window !== "undefined") {
     const { hostname, origin } = window.location;
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
-      return "http://127.0.0.1:8081";
+    if (hostname !== "localhost" && hostname !== "127.0.0.1") {
+      return `${origin}/mortgageeasy/`;
     }
-    return origin;
   }
+  const configured = import.meta.env.VITE_MOCKUP_SITE_URL?.trim().replace(/\/$/, "");
+  if (configured) return configured;
   return "http://127.0.0.1:8081";
 }
 

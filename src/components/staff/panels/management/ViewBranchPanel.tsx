@@ -1,9 +1,12 @@
 import type { ReactNode } from "react";
 import {
   VIEW_SUB_TABS,
-  defaultViewSubTab,
+  STAFF_BRANCHES,
+  MANAGEMENT_SUB_TABS,
   type StaffBranchVisibility,
+  type ViewSubTabId,
 } from "@/lib/staff-branch-nav";
+import { writeStaffNavStorage } from "@/lib/staff-nav-persistence";
 import { AdvisorViewPanel } from "@/components/staff/panels/management/AdvisorViewPanel";
 import { IntroducerViewPanel } from "@/components/staff/panels/management/IntroducerViewPanel";
 import { CustomerViewPanel } from "@/components/staff/panels/management/CustomerViewPanel";
@@ -15,6 +18,7 @@ type ViewBranchPanelProps = {
   isOwner: boolean;
   isSupervisor: boolean;
   isMainAdmin: boolean;
+  defaultViewSub: ViewSubTabId;
   onAdvisorViewChange: () => void;
   onIntroducerViewChange: () => void;
   onCustomerViewChange: () => void;
@@ -25,6 +29,7 @@ export function ViewBranchPanel({
   isOwner,
   isSupervisor,
   isMainAdmin,
+  defaultViewSub,
   onAdvisorViewChange,
   onIntroducerViewChange,
   onCustomerViewChange,
@@ -68,5 +73,17 @@ export function ViewBranchPanel({
   if (tabs.length === 0) return null;
   if (tabs.length === 1) return <div className="space-y-4">{tabs[0].content}</div>;
 
-  return <HubSubNav tabs={tabs} defaultValue={defaultViewSubTab(visibility)} />;
+  return (
+    <HubSubNav
+      tabs={tabs}
+      defaultValue={defaultViewSub}
+      persistKey="mortgage-hub:staff-view-sub"
+      onActiveChange={(id) =>
+        writeStaffNavStorage(STAFF_BRANCHES.MANAGEMENT, {
+          managementSub: MANAGEMENT_SUB_TABS.VIEW,
+          viewSub: id as ViewSubTabId,
+        })
+      }
+    />
+  );
 }

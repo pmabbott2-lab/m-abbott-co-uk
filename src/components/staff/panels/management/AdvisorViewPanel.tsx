@@ -41,7 +41,7 @@ export function AdvisorViewPanel({
 
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<"recent" | "next_contact">("recent");
-  const [allocationFilter, setAllocationFilter] = useState<CustomerAllocationFilter>("unallocated");
+  const [allocationFilter, setAllocationFilter] = useState<CustomerAllocationFilter>("all");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const advisorViewId = active?.advisorId;
@@ -102,6 +102,10 @@ export function AdvisorViewPanel({
     assignedAdvisors: (s as { assignedAdvisors?: AssignedAdvisor[] }).assignedAdvisors,
     nextContactAt: (s as { nextContactAt?: string | null }).nextContactAt,
     callback: (s as { callback?: { id: string; window: string | null } | null }).callback,
+    journeyComplete: (s as { journeyComplete?: boolean }).journeyComplete,
+    hasLenderDetails: (s as { hasLenderDetails?: boolean }).hasLenderDetails,
+    archivedFromAdvisor: (s as { archivedFromAdvisor?: boolean }).archivedFromAdvisor,
+    missingLenderAfterCompletion: (s as { missingLenderAfterCompletion?: boolean }).missingLenderAfterCompletion,
   }));
 
   const handleExit = async () => {

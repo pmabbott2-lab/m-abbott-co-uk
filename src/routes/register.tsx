@@ -93,30 +93,45 @@ function RegisterPage() {
     setStatus(null);
     setSubmitting(true);
     try {
+      const trimmedEmail = email.trim();
       const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
+        email: trimmedEmail,
         password,
         options: {
           emailRedirectTo: getAuthCallbackUrl(),
           data: { full_name: fullName.trim(), phone: phone.trim() },
         },
       });
-      if (error) throw error;
 
-      // Supabase returns a user with no identities when the email already exists.
-      if (data.user && data.user.identities?.length === 0) {
-        showStatus(
-          "error",
-          "An account with this email already exists. Please sign in and ask your admin to grant your role.",
-        );
+      const alreadyRegistered =
+        (data.user && data.user.identities?.length === 0) ||
+        (error && /already (been )?registered|already exists|user already/i.test(error.message));
+
+      if (alreadyRegistered) {
+        const { data: signedIn, error: signInErr } = await supabase.auth.signInWithPassword({
+          email: trimmedEmail,
+          password,
+        });
+        if (signInErr || !signedIn.user) {
+          showStatus(
+            "error",
+            "This email already has an account. Sign in with that password on this invite link to attach the staff role, or use a different email.",
+          );
+          return;
+        }
+        await markUsedFn({ data: { token, userId: signedIn.user.id } });
+        showStatus("success", "Invite attached to your existing account — taking you to your dashboard…");
+        navigate({ to: "/home" });
         return;
       }
+
+      if (error) throw error;
       if (!data.user) {
         showStatus("error", "Sign-up did not complete. Please try again.");
         return;
       }
 
-      // Consume the invite server-side: grants the advisor/introducer role and
+      // Consume the invite server-side: grants the advisor/introducer/admin role and
       // marks the invite used. This is what stops the new account being a plain
       // customer.
       await markUsedFn({ data: { token, userId: data.user.id } });
@@ -165,7 +180,7 @@ function RegisterPage() {
                     ? "Create your account below. We'll set you up with your own introducer company and referral links."
                     : `Create your account below. You'll be linked to ${invite.companyName ? `“${invite.companyName}”` : `company ${invite.companyCode}`}.`
                   : invite.role === "admin"
-                    ? "Create your account below. The owner will assign your supervisor or general admin access after you register."
+                    ? "Create your account below. If this email is already registered (for example a test account), use that password — we'll attach the admin role and mark the invite as used."
                     : "Create your account below to start working with customer fact-finds."}
               </p>
             </>

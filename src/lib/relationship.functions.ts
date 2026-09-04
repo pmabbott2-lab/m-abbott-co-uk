@@ -22,6 +22,9 @@ export type RelationshipPipelineRow = {
   caseRef: string | null;
   customerId: string | null;
   customerName: string;
+  customerPhone: string | null;
+  customerEmail: string | null;
+  advisorIds: string[];
   advisorNames: string[];
   currentLender: string | null;
   productExpiryDate: string | null;
@@ -70,13 +73,36 @@ export const listRelationshipPipeline = createServerFn({ method: "GET" })
     const sessionMap = new Map((sessions ?? []).filter((s) => !s.deleted_at).map((s) => [s.id, s]));
 
     const customerIds = [...new Set((sessions ?? []).map((s) => s.customer_id).filter(Boolean))] as string[];
-    const profileMap = new Map<string, string>();
+    const profileMap = new Map<
+      string,
+      { full_name: string; phone: string | null; email: string | null }
+    >();
     if (customerIds.length) {
-      const { data: profiles } = await supabaseAdmin
+      const withContact = await supabaseAdmin
         .from("profiles")
-        .select("id, full_name")
+        .select("id, full_name, phone, email")
         .in("id", customerIds);
-      for (const p of profiles ?? []) profileMap.set(p.id, p.full_name ?? "Customer");
+      if (withContact.error) {
+        const { data: basic } = await supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, email")
+          .in("id", customerIds);
+        for (const p of basic ?? []) {
+          profileMap.set(p.id, {
+            full_name: p.full_name ?? "Customer",
+            phone: null,
+            email: p.email ?? null,
+          });
+        }
+      } else {
+        for (const p of withContact.data ?? []) {
+          profileMap.set(p.id, {
+            full_name: p.full_name ?? "Customer",
+            phone: p.phone ?? null,
+            email: p.email ?? null,
+          });
+        }
+      }
     }
 
     const { data: milestones } = await supabaseAdmin
@@ -103,11 +129,15 @@ export const listRelationshipPipeline = createServerFn({ method: "GET" })
         .in("id", advisorIds);
       for (const a of advisors ?? []) advisorNameMap.set(a.id, a.full_name ?? "Advisor");
     }
-    const sessionAdvisorMap = new Map<string, string[]>();
+    const sessionAdvisorNameMap = new Map<string, string[]>();
+    const sessionAdvisorIdMap = new Map<string, string[]>();
     for (const a of allocations ?? []) {
-      const names = sessionAdvisorMap.get(a.session_id) ?? [];
+      const names = sessionAdvisorNameMap.get(a.session_id) ?? [];
       names.push(advisorNameMap.get(a.advisor_id) ?? "Advisor");
-      sessionAdvisorMap.set(a.session_id, names);
+      sessionAdvisorNameMap.set(a.session_id, names);
+      const ids = sessionAdvisorIdMap.get(a.session_id) ?? [];
+      ids.push(a.advisor_id);
+      sessionAdvisorIdMap.set(a.session_id, ids);
     }
 
     const withinDays = data.withinDays ?? 365;
@@ -124,14 +154,16 @@ export const listRelationshipPipeline = createServerFn({ method: "GET" })
         (JOURNEY_MILESTONE_KEYS as readonly string[]).includes(k),
       ) as Array<typeof JOURNEY_MILESTONE_KEYS[number]>;
 
+      const profile = session.customer_id ? profileMap.get(session.customer_id) : null;
       rows.push({
         sessionId: d.session_id,
         caseRef: session.case_ref,
         customerId: session.customer_id,
-        customerName: session.customer_id
-          ? profileMap.get(session.customer_id) ?? "Customer"
-          : "Customer",
-        advisorNames: sessionAdvisorMap.get(d.session_id) ?? [],
+        customerName: profile?.full_name ?? "Customer",
+        customerPhone: profile?.phone ?? null,
+        customerEmail: profile?.email ?? null,
+        advisorIds: sessionAdvisorIdMap.get(d.session_id) ?? [],
+        advisorNames: sessionAdvisorNameMap.get(d.session_id) ?? [],
         currentLender: d.current_lender ?? null,
         productExpiryDate: d.product_expiry_date ?? null,
         actionableFromDate: d.actionable_from_date ?? null,

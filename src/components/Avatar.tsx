@@ -176,17 +176,21 @@ export function useAudioPlayback(getAuthToken?: () => Promise<string | null>) {
   /** Current speech loudness 0..1, read live from the analyser (0 when idle or
    *  when using the browser voice, which has no analysable stream). */
   const getAmplitude = () => {
-    const a = analyserRef.current;
-    const data = ampDataRef.current;
-    if (!a || !data) return 0;
-    a.getByteTimeDomainData(data);
-    let sum = 0;
-    for (let i = 0; i < data.length; i++) {
-      const v = (data[i] - 128) / 128;
-      sum += v * v;
+    try {
+      const a = analyserRef.current;
+      const data = ampDataRef.current;
+      if (!a || !data) return 0;
+      a.getByteTimeDomainData(data as Uint8Array);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = (data[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      return Math.max(0, Math.min(1, rms * 3.2));
+    } catch {
+      return 0;
     }
-    const rms = Math.sqrt(sum / data.length);
-    return Math.max(0, Math.min(1, rms * 3.2));
   };
 
   const unlock = async () => {

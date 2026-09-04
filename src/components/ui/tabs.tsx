@@ -35,7 +35,7 @@ const tabsListClass: Record<"default" | "hub" | "hubSub", string> = {
   hub:
     "flex flex-wrap h-auto w-full max-w-4xl mx-auto mb-5 justify-center gap-1 p-1.5 rounded-xl border border-border bg-muted/50 text-muted-foreground shadow-sm",
   hubSub:
-    "inline-flex flex-wrap h-auto gap-1 p-1 mb-4 rounded-lg border border-border bg-muted text-muted-foreground",
+    "flex flex-wrap h-auto w-full max-w-4xl mx-auto justify-center gap-1 p-1 mb-4 rounded-lg border border-border bg-muted text-muted-foreground",
 };
 
 const tabsTriggerClass: Record<"default" | "hub" | "hubSub", string> = {
@@ -107,15 +107,30 @@ function HubSubNav({
   variant = "hubSub",
   className,
   listClassName,
+  persistKey,
+  onActiveChange,
 }: {
   tabs: HubSubNavTab[];
   defaultValue: string;
   variant?: "hub" | "hubSub";
   className?: string;
   listClassName?: string;
+  /** When set, active tab id is restored from sessionStorage on mount. */
+  persistKey?: string;
+  onActiveChange?: (tabId: string) => void;
 }) {
   const safeDefault = tabs.some((tab) => tab.id === defaultValue) ? defaultValue : (tabs[0]?.id ?? "");
-  const [active, setActive] = React.useState(safeDefault);
+  const [active, setActive] = React.useState(() => {
+    if (persistKey && typeof sessionStorage !== "undefined") {
+      try {
+        const stored = sessionStorage.getItem(persistKey);
+        if (stored && tabs.some((tab) => tab.id === stored)) return stored;
+      } catch {
+        /* ignore */
+      }
+    }
+    return safeDefault;
+  });
 
   const tabIds = tabs.map((tab) => tab.id).join("|");
 
@@ -125,6 +140,18 @@ function HubSubNav({
     }
   }, [active, safeDefault, tabIds]);
 
+  const selectTab = (tabId: string) => {
+    setActive(tabId);
+    if (persistKey && typeof sessionStorage !== "undefined") {
+      try {
+        sessionStorage.setItem(persistKey, tabId);
+      } catch {
+        /* ignore */
+      }
+    }
+    onActiveChange?.(tabId);
+  };
+
   if (tabs.length === 0) return null;
   if (tabs.length === 1) return <div className="space-y-4">{tabs[0].content}</div>;
 
@@ -133,7 +160,7 @@ function HubSubNav({
   return (
     <div className={cn("space-y-4", className)}>
       <div
-        className={cn(tabsListClass[variant], listClassName ?? "w-full justify-start")}
+        className={cn(tabsListClass[variant], listClassName ?? "w-full justify-center")}
         role="tablist"
       >
         {tabs.map((tab) => {
@@ -144,7 +171,7 @@ function HubSubNav({
               type="button"
               role="tab"
               aria-selected={selected}
-              onClick={() => setActive(tab.id)}
+              onClick={() => selectTab(tab.id)}
               className={cn(
                 tabsTriggerClass[variant],
                 "gap-1.5",

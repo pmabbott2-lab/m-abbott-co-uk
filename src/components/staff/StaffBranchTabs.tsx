@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import {
-  CalendarDays,
   Eye,
+  Gift,
   History,
   Inbox,
   Link2,
@@ -10,18 +10,26 @@ import {
   ShieldCheck,
   UserCog,
   Users,
+  CalendarDays,
+  BarChart3,
 } from "lucide-react";
 import {
   CUSTOMERS_SUB_TABS,
-  defaultCustomersSubTab,
   defaultFinanceSubTab,
-  defaultManagementSubTab,
-  defaultStaffBranch,
   FINANCE_SUB_TABS,
   MANAGEMENT_SUB_TABS,
+  MARKETING_SUB_TABS,
   STAFF_BRANCHES,
+  type ManagementSubTabId,
   type StaffBranchVisibility,
 } from "@/lib/staff-branch-nav";
+import {
+  resolveCustomersSubDefault,
+  resolveManagementSubDefault,
+  resolveStaffBranchDefault,
+  resolveViewSubDefault,
+  writeStaffNavStorage,
+} from "@/lib/staff-nav-persistence";
 import type { AdminAccess } from "@/lib/admin-access";
 import { CommissionPayoutsPanel } from "@/components/CommissionPayoutsPanel";
 import { RelationshipManagementPanel } from "@/components/RelationshipManagementPanel";
@@ -37,8 +45,10 @@ import {
 } from "@/components/staff/panels";
 import { ViewBranchPanel } from "@/components/staff/panels/management/ViewBranchPanel";
 import { AdvisorCommissionStatementsPanel } from "@/components/staff/panels/management/AdvisorCommissionStatementsPanel";
+import { JourneyAnalyticsPanel } from "@/components/staff/panels/management/JourneyAnalyticsPanel";
 import { TeamRolesPanel } from "@/components/staff/panels/management/TeamRolesPanel";
 import { DiaryTabsPanel } from "@/components/staff/panels/diary/DiaryTabsPanel";
+import { getAdvisorView } from "@/lib/advisor-view";
 import { canEditAdminPermissions } from "@/lib/admin-access";
 import { HubSubNav, type HubSubNavTab } from "@/components/ui/tabs";
 
@@ -68,16 +78,6 @@ type StaffBranchTabsProps = {
   staff: StaffBranchContext;
 };
 
-function DiaryBranchPanel({
-  visibility,
-  isStaffAdvisor,
-}: {
-  visibility: StaffBranchVisibility;
-  isStaffAdvisor: boolean;
-}) {
-  return <DiaryTabsPanel visibility={visibility} isStaffAdvisor={isStaffAdvisor} />;
-}
-
 function ManagementBranchPanel({
   visibility,
   staff,
@@ -86,6 +86,15 @@ function ManagementBranchPanel({
   staff: StaffBranchContext;
 }) {
   const tabs: HubSubNavTab[] = [];
+
+  if (visibility.management.analytics) {
+    tabs.push({
+      id: MANAGEMENT_SUB_TABS.ANALYTICS,
+      label: "Analytics",
+      icon: <BarChart3 className="w-4 h-4 shrink-0" />,
+      content: <JourneyAnalyticsPanel />,
+    });
+  }
 
   if (visibility.management.advisorCommission) {
     tabs.push({
@@ -107,6 +116,7 @@ function ManagementBranchPanel({
           isOwner={staff.isOwner}
           isSupervisor={staff.isSupervisor}
           isMainAdmin={staff.isMainAdmin}
+          defaultViewSub={resolveViewSubDefault(visibility)}
           onAdvisorViewChange={staff.onAdvisorViewChange}
           onIntroducerViewChange={staff.onIntroducerViewChange}
           onCustomerViewChange={staff.onCustomerViewChange}
@@ -125,7 +135,6 @@ function ManagementBranchPanel({
           isOwner={staff.isOwner}
           showTeamRoles={visibility.management.manageTeamRoles}
           showInvites={visibility.management.manageInvites}
-          showReferAFriend={visibility.management.manageRaf}
           teamRolesPanel={
             <TeamRolesPanel
               adminAccess={staff.adminAccess}
@@ -134,7 +143,6 @@ function ManagementBranchPanel({
             />
           }
           invitesPanel={<InviteStaffCard />}
-          referAFriendPanel={<RafLinksAccessCard />}
         />
       ),
     });
@@ -157,9 +165,13 @@ function ManagementBranchPanel({
   return (
     <HubSubNav
       tabs={tabs}
-      defaultValue={defaultManagementSubTab(visibility, {
+      defaultValue={resolveManagementSubDefault(visibility, {
         showViewTab: staff.showAdvisorViewTab,
       })}
+      persistKey="mortgage-hub:staff-management-sub"
+      onActiveChange={(id) =>
+        writeStaffNavStorage(STAFF_BRANCHES.MANAGEMENT, { managementSub: id as ManagementSubTabId })
+      }
     />
   );
 }
@@ -200,7 +212,16 @@ function CustomersBranchPanel({
     });
   }
 
-  return <HubSubNav tabs={tabs} defaultValue={defaultCustomersSubTab(visibility)} />;
+  return (
+    <HubSubNav
+      tabs={tabs}
+      defaultValue={resolveCustomersSubDefault(visibility)}
+      persistKey="mortgage-hub:staff-customers-sub"
+      onActiveChange={(id) =>
+        writeStaffNavStorage(STAFF_BRANCHES.CUSTOMERS, { customersSub: id as typeof CUSTOMERS_SUB_TABS.LIST })
+      }
+    />
+  );
 }
 
 function FinanceBranchPanel({ visibility, staff }: { visibility: StaffBranchVisibility; staff: StaffBranchContext }) {
@@ -253,7 +274,13 @@ export function StaffBranchTabs({ visibility, staff }: StaffBranchTabsProps) {
       id: STAFF_BRANCHES.DIARY,
       label: "Diary",
       icon: <CalendarDays className="w-4 h-4 shrink-0" />,
-      content: <DiaryBranchPanel visibility={visibility} isStaffAdvisor={staff.isStaffAdvisor} />,
+      content: (
+        <DiaryTabsPanel
+          visibility={visibility}
+          isStaffAdvisor={staff.isStaffAdvisor}
+          viewAsAdvisorId={getAdvisorView()?.advisorId}
+        />
+      ),
     });
   }
 
@@ -263,6 +290,15 @@ export function StaffBranchTabs({ visibility, staff }: StaffBranchTabsProps) {
       label: "Management",
       icon: <Settings className="w-4 h-4 shrink-0" />,
       content: <ManagementBranchPanel visibility={visibility} staff={staff} />,
+    });
+  }
+
+  if (visibility.branches.marketing) {
+    branchTabs.push({
+      id: STAFF_BRANCHES.MARKETING,
+      label: "Marketing",
+      icon: <Gift className="w-4 h-4 shrink-0" />,
+      content: <RafLinksAccessCard />,
     });
   }
 
@@ -287,12 +323,16 @@ export function StaffBranchTabs({ visibility, staff }: StaffBranchTabsProps) {
   if (branchTabs.length === 0) return null;
   if (branchTabs.length === 1) return <div className="space-y-4">{branchTabs[0].content}</div>;
 
+  const defaultBranch = resolveStaffBranchDefault(visibility);
+
   return (
     <HubSubNav
       tabs={branchTabs}
-      defaultValue={defaultStaffBranch(visibility)}
+      defaultValue={defaultBranch}
       variant="hub"
-      listClassName="w-full max-w-4xl mx-auto mb-5 justify-center"
+      listClassName="w-full max-w-5xl mx-auto mb-5 justify-center"
+      persistKey="mortgage-hub:staff-branch"
+      onActiveChange={(id) => writeStaffNavStorage(id as typeof STAFF_BRANCHES.CUSTOMERS)}
     />
   );
 }

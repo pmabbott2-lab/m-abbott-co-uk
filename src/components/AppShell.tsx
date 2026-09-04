@@ -3,6 +3,7 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 import { type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { getMarketingSiteUrl } from "@/lib/referral";
 
 export function AppShell({
   title,
@@ -20,7 +21,7 @@ export function AppShell({
   backLabel?: string;
 }) {
   const navigate = useNavigate();
-  const mockupSiteUrl = import.meta.env.VITE_MOCKUP_SITE_URL?.trim().replace(/\/$/, "");
+  const mortgageEasyUrl = getMarketingSiteUrl();
   const signOut = async () => {
     await supabase.auth.signOut();
     navigate({ to: "/auth", replace: true });
@@ -38,14 +39,12 @@ export function AppShell({
           <h1 className="text-sm font-medium text-muted-foreground hidden sm:block min-w-0 truncate">{title}</h1>
           <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
             {action}
-            {mockupSiteUrl && (
-              <Button variant="ghost" size="sm" className="shrink-0" asChild>
-                <a href={mockupSiteUrl} target="_blank" rel="noopener noreferrer">
-                  <ExternalLink className="w-4 h-4 mr-1.5" />
-                  MortgageEasy
-                </a>
-              </Button>
-            )}
+            <Button variant="ghost" size="sm" className="shrink-0" asChild>
+              <a href={mortgageEasyUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="w-4 h-4 mr-1.5" />
+                MortgageEasy
+              </a>
+            </Button>
             {backTo && (
               <Button
                 variant="ghost"

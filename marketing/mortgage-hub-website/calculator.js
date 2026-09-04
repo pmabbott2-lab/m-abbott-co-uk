@@ -1,12 +1,13 @@
 /**
- * MortgageEasy calculator — LTV-based rate estimate, callback leads, broker journey links.
+ * MortgageEasy calculator — purchase / remortgage, LTV rate estimate, callback leads, journey links.
  */
 (function () {
   "use strict";
 
   var rateFetchTimer = null;
   var rateFetchSeq = 0;
-  var currentRatePct = 4.75;
+  var currentRatePct = 4.26;
+  var calcMode = "purchase";
 
   function monthlyPayment(principal, annualRatePct, years) {
     var r = annualRatePct / 100 / 12;
@@ -47,13 +48,72 @@
     };
   }
 
+  function setText(id, text) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+
   function updateCalculatorDisplay(calc) {
-    document.getElementById("calc-ltv").textContent =
-      calc.ltvPct > 0 ? calc.ltvPct.toFixed(1) + "%" : "—";
-    document.getElementById("calc-monthly").textContent =
-      calc.loanAmount > 0 ? formatGbp(calc.monthlyPayment) : "—";
-    document.getElementById("calc-rate-display").textContent =
-      calc.loanAmount > 0 && calc.ratePct > 0 ? calc.ratePct.toFixed(2) + "%" : "—";
+    setText("calc-ltv", calc.ltvPct > 0 ? calc.ltvPct.toFixed(1) + "%" : "—");
+    setText("calc-monthly", calc.loanAmount > 0 ? formatGbp(calc.monthlyPayment) : "—");
+    setText(
+      "calc-rate-display",
+      calc.loanAmount > 0 && calc.ratePct > 0 ? calc.ratePct.toFixed(2) + "%" : "—",
+    );
+    setText("calc-total", calc.loanAmount > 0 ? formatGbp(calc.totalRepayable) : "—");
+    updateGuideCopy(calc);
+  }
+
+  function updateGuideCopy(calc) {
+    var price = calc.propertyPrice > 0 ? calc.propertyPrice : 335000;
+    var deposit = calcMode === "purchase" ? Math.max(calc.deposit, 0) : Math.max(price - calc.loanAmount, 0);
+    var loan = calc.loanAmount > 0 ? calc.loanAmount : 285000;
+    var term = calc.termYears || 30;
+    var rate = calc.ratePct > 0 ? calc.ratePct : currentRatePct;
+    var monthly =
+      calc.monthlyPayment > 0 ? calc.monthlyPayment : monthlyPayment(loan, rate, term);
+    var total = monthly * term * 12;
+
+    if (calcMode === "remortgage") {
+      setText(
+        "guide-example",
+        "",
+      );
+      var exampleEl = document.getElementById("guide-example");
+      if (exampleEl) {
+        exampleEl.innerHTML =
+          "If you're remortgaging a property worth <strong id=\"guide-price\">" +
+          formatGbp(price) +
+          "</strong> with an outstanding balance of <strong id=\"guide-deposit\">" +
+          formatGbp(loan) +
+          "</strong>, borrowing over <strong id=\"guide-term\">" +
+          String(term) +
+          "</strong> years at a <strong id=\"guide-rate\">" +
+          rate.toFixed(2) +
+          "%</strong> interest rate:";
+      }
+    } else {
+      var purchaseEl = document.getElementById("guide-example");
+      if (purchaseEl) {
+        purchaseEl.innerHTML =
+          "If you're buying a property worth <strong id=\"guide-price\">" +
+          formatGbp(price) +
+          "</strong>, put down a <strong id=\"guide-deposit\">" +
+          formatGbp(deposit) +
+          "</strong> deposit, and borrow over <strong id=\"guide-term\">" +
+          String(term) +
+          "</strong> years at a <strong id=\"guide-rate\">" +
+          rate.toFixed(2) +
+          "%</strong> interest rate:";
+      }
+    }
+
+    setText("guide-monthly", formatGbp(monthly));
+    setText("guide-loan", formatGbp(loan));
+    setText("guide-term-2", String(term));
+    setText("guide-total", formatGbp(total));
+    setText("guide-compare-loan", formatGbp(Math.min(loan, 200000) || 200000));
+    setText("guide-compare-rate", rate.toFixed(2) + "%");
   }
 
   function formatGbpInput(value) {
@@ -61,52 +121,89 @@
     return Math.round(value).toLocaleString("en-GB");
   }
 
-  function syncLoanFromDeposit() {
+  function syncLoanFromInputs() {
     var priceEl = document.getElementById("calc-price");
     var depositEl = document.getElementById("calc-deposit");
+    var outstandingEl = document.getElementById("calc-outstanding");
     var loanEl = document.getElementById("calc-loan");
-    if (!priceEl || !depositEl || !loanEl) return;
+    if (!priceEl || !loanEl) return;
 
     var price = parseMoney(priceEl.value);
-    var deposit = parseMoney(depositEl.value);
-    if (price > 0 && deposit > price) {
-      deposit = price;
-      depositEl.value = formatGbpInput(deposit);
+    var loan = 0;
+
+    if (calcMode === "remortgage") {
+      var outstanding = parseMoney(outstandingEl ? outstandingEl.value : "0");
+      if (price > 0 && outstanding > price) {
+        outstanding = price;
+        if (outstandingEl) outstandingEl.value = formatGbpInput(outstanding);
+      }
+      loan = Math.max(0, outstanding);
+    } else {
+      var deposit = parseMoney(depositEl ? depositEl.value : "0");
+      if (price > 0 && deposit > price) {
+        deposit = price;
+        if (depositEl) depositEl.value = formatGbpInput(deposit);
+      }
+      loan = price > 0 ? Math.max(0, price - deposit) : 0;
     }
-    var loan = price > 0 ? Math.max(0, price - deposit) : 0;
+
     loanEl.value = loan > 0 ? formatGbpInput(loan) : "";
   }
 
   function readCalculatorInputs() {
-    syncLoanFromDeposit();
+    syncLoanFromInputs();
     var price = parseMoney(document.getElementById("calc-price").value);
-    var deposit = parseMoney(document.getElementById("calc-deposit").value);
+    var deposit =
+      calcMode === "purchase"
+        ? parseMoney(document.getElementById("calc-deposit").value)
+        : 0;
+    var outstanding =
+      calcMode === "remortgage"
+        ? parseMoney(document.getElementById("calc-outstanding").value)
+        : 0;
     var loan = parseMoney(document.getElementById("calc-loan").value);
     var term = parseInt(document.getElementById("calc-term").value, 10) || 25;
     if (loan > price && price > 0) loan = price;
     var ltvPct = price > 0 ? (loan / price) * 100 : 0;
     var monthly =
       loan > 0 && currentRatePct > 0 ? monthlyPayment(loan, currentRatePct, term) : 0;
+    var totalRepayable = monthly > 0 ? monthly * term * 12 : 0;
 
     return {
+      mode: calcMode,
       propertyPrice: price,
       loanAmount: loan,
-      deposit: Math.max(price - loan, 0),
+      deposit: calcMode === "purchase" ? Math.max(price - loan, 0) : Math.max(price - outstanding, 0),
+      outstandingBalance: calcMode === "remortgage" ? outstanding : 0,
       termYears: term,
       ltvPct: ltvPct,
       ratePct: currentRatePct,
       monthlyPayment: monthly,
+      totalRepayable: totalRepayable,
     };
+  }
+
+  function applyMode(mode) {
+    calcMode = mode === "remortgage" ? "remortgage" : "purchase";
+    var depositField = document.getElementById("field-deposit");
+    var outstandingField = document.getElementById("field-outstanding");
+    var purchaseBtn = document.getElementById("mode-purchase");
+    var remortgageBtn = document.getElementById("mode-remortgage");
+    if (depositField) depositField.hidden = calcMode !== "purchase";
+    if (outstandingField) outstandingField.hidden = calcMode !== "remortgage";
+    if (purchaseBtn) purchaseBtn.classList.toggle("is-active", calcMode === "purchase");
+    if (remortgageBtn) remortgageBtn.classList.toggle("is-active", calcMode === "remortgage");
+    onCalculatorInput();
   }
 
   function scheduleRateFetch(calc) {
     if (rateFetchTimer) clearTimeout(rateFetchTimer);
     var statusEl = document.getElementById("rate-status");
     if (calc.loanAmount <= 0 || calc.propertyPrice <= 0) {
-      statusEl.textContent = "";
+      if (statusEl) statusEl.textContent = "";
       return;
     }
-    statusEl.textContent = "Updating illustrative rate…";
+    if (statusEl) statusEl.textContent = "Updating illustrative rate…";
     rateFetchTimer = setTimeout(function () {
       void fetchEstimatedRate(calc);
     }, 450);
@@ -135,21 +232,23 @@
         var disclaimerEl = document.getElementById("rate-disclaimer");
         if (result.ok && result.data.ok && typeof result.data.ratePct === "number") {
           currentRatePct = result.data.ratePct;
-          if (result.data.disclaimer) disclaimerEl.textContent = result.data.disclaimer;
-          statusEl.textContent =
-            result.data.source === "openai"
-              ? "Rate estimated from current UK market context (AI model)."
-              : "Rate estimated from illustrative LTV band (static fallback).";
+          if (result.data.disclaimer && disclaimerEl) disclaimerEl.textContent = result.data.disclaimer;
+          if (statusEl) {
+            statusEl.textContent =
+              result.data.source === "openai"
+                ? "Rate estimated from current UK market context (AI model)."
+                : "Rate estimated from illustrative LTV band (static fallback).";
+          }
           var updated = readCalculatorInputs();
           updateCalculatorDisplay(updated);
-        } else {
+        } else if (statusEl) {
           statusEl.textContent = "";
         }
       })
       .catch(function () {
         if (seq !== rateFetchSeq) return;
-        document.getElementById("rate-status").textContent =
-          "Could not refresh rate — using last estimate.";
+        var statusEl = document.getElementById("rate-status");
+        if (statusEl) statusEl.textContent = "Could not refresh rate — using last estimate.";
       });
   }
 
@@ -163,6 +262,11 @@
     el.textContent = text;
     el.className = "form-message " + (type || "");
     el.hidden = !text;
+  }
+
+  function smoothScrollTo(id) {
+    var section = document.getElementById(id);
+    if (section) section.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function init() {
@@ -181,15 +285,36 @@
       slugMissing.hidden = false;
     }
 
-    ["calc-price", "calc-deposit", "calc-term"].forEach(function (id) {
-      document.getElementById(id).addEventListener("input", onCalculatorInput);
+    document.querySelectorAll(".calc-mode-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        applyMode(btn.getAttribute("data-mode"));
+      });
     });
 
-    onCalculatorInput();
+    ["calc-price", "calc-deposit", "calc-outstanding", "calc-term"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener("input", onCalculatorInput);
+    });
+
+    var scrollCallback = document.getElementById("scroll-callback");
+    var scrollJourney = document.getElementById("scroll-journey");
+    if (scrollCallback) {
+      scrollCallback.addEventListener("click", function () {
+        smoothScrollTo("callback-section");
+      });
+    }
+    if (scrollJourney) {
+      scrollJourney.addEventListener("click", function () {
+        smoothScrollTo("journey-section");
+      });
+    }
+
+    applyMode("purchase");
 
     if (window.location.hash === "#callback") {
-      var section = document.getElementById("callback-section");
-      if (section) section.scrollIntoView({ behavior: "smooth" });
+      smoothScrollTo("callback-section");
+    } else if (window.location.hash === "#journey") {
+      smoothScrollTo("journey-section");
     }
 
     form.addEventListener("submit", function (e) {

@@ -1,21 +1,37 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { listMySessions, createSession, getMyRole, listMyCases } from "@/lib/sessions.functions";
-import { claimReferral, listMyReferralActivity, ensureMyReferralLink, getPublicShareBaseUrl } from "@/lib/referrals.functions";
+import { claimReferral, listMyReferralActivity, ensureMyReferralLink, sendMyReferralLink, getPublicShareBaseUrl } from "@/lib/referrals.functions";
 import { getRafCode, clearRafCookie, rafLinkForCode, rafShareMessage } from "@/lib/referral";
 import { checkIsIntroducer } from "@/lib/introducer.functions";
 import { clearPostAuthStart, resolvePostAuthStart } from "@/lib/post-auth-journey";
 import { StaffDashboardLoader } from "@/components/staff/StaffDashboard";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
-import { Mic, MessageSquare, FileText, ArrowRight, CalendarCheck, PhoneCall, Gift, Copy, Check } from "lucide-react";
-import { format } from "date-fns";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { HubSubNav } from "@/components/ui/tabs";
+import {
+  Mic,
+  MessageSquare,
+  FileText,
+  ArrowRight,
+  CalendarCheck,
+  PhoneCall,
+  Gift,
+  Copy,
+  Check,
+  Mail,
+  MapPin,
+} from "lucide-react";
+import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { PostCompletionBooking, CALLBACK_WINDOW_RANGES } from "@/components/PostCompletionBooking";
-import { getSessionBooking } from "@/lib/booking.functions";
+import { PostCompletionBooking, CALLBACK_WINDOW_OPTIONS, CALLBACK_WINDOW_RANGES } from "@/components/PostCompletionBooking";
+import { getSessionBooking, requestCallbackAuth } from "@/lib/booking.functions";
+import { CustomerHomeLanding } from "@/components/customer/CustomerHomeLanding";
 
 export const Route = createFileRoute("/_authenticated/home")({
   pendingMs: 0,
@@ -44,7 +60,82 @@ function CopyLinkButton({ value, label = "Copy link" }: { value: string; label?:
   );
 }
 
-function CustomerAppointmentCard() {
+const JOURNEY_CARD_CLASS =
+  "group text-left rounded-2xl border bg-card p-5 hover:border-primary hover:shadow-sm transition disabled:opacity-60 h-full w-full";
+
+function JourneyCard({
+  icon,
+  title,
+  description,
+  onClick,
+  disabled,
+  active,
+  cta,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  active?: boolean;
+  cta?: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`${JOURNEY_CARD_CLASS} ${active ? "border-primary bg-primary/5" : ""}`}
+    >
+      <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary">
+        {icon}
+      </span>
+      <h3 className="font-semibold text-base mt-3 flex items-center gap-1.5">
+        {title}
+        <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition shrink-0" />
+      </h3>
+      <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">{description}</p>
+      {cta && <p className="text-sm font-medium text-primary mt-3">{cta}</p>}
+    </button>
+  );
+}
+
+/** Legacy tile chrome kept for unused helpers until fully removed. */
+const TILE_CLASS = JOURNEY_CARD_CLASS;
+function OptionTile({
+  icon,
+  title,
+  subtitle,
+  onClick,
+  disabled,
+  active,
+}: {
+  icon: ReactNode;
+  title: string;
+  subtitle: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  active?: boolean;
+}) {
+  return (
+    <JourneyCard
+      icon={icon}
+      title={title}
+      description={subtitle}
+      onClick={onClick}
+      disabled={disabled}
+      active={active}
+    />
+  );
+}
+
+function CustomerAppointmentCard({
+  expanded,
+  onToggle,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   const qc = useQueryClient();
   const casesFn = useServerFn(listMyCases);
   const bookingFn = useServerFn(getSessionBooking);
@@ -97,29 +188,26 @@ function CustomerAppointmentCard() {
 
   if (casesQ.isLoading) {
     return (
-      <div className="rounded-2xl border p-5 text-sm text-muted-foreground">
-        Loading appointment…
+      <div className={`${TILE_CLASS} text-sm text-muted-foreground flex items-center`}>
+        Loading…
       </div>
     );
   }
 
   if (!upcoming?.appointment) {
     return (
-      <Link
-        to="/booking"
-        className="group text-left rounded-2xl border p-5 hover:border-primary hover:bg-muted/40 transition block"
-      >
-        <div className="flex items-center gap-3">
-          <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <CalendarCheck className="w-5 h-5" />
+      <Link to="/booking" className={`${TILE_CLASS} block`}>
+        <div className="flex items-start gap-2.5">
+          <span className="inline-flex w-9 h-9 items-center justify-center rounded-full bg-primary/10 text-primary shrink-0">
+            <CalendarCheck className="w-4 h-4" />
           </span>
-          <div>
-            <div className="font-semibold flex items-center gap-1">
-              Book an appointment
-              <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition" />
+          <div className="min-w-0">
+            <div className="font-semibold text-sm leading-tight flex items-center gap-1">
+              Book appointment
+              <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition shrink-0" />
             </div>
-            <div className="text-xs text-muted-foreground mt-0.5">
-              Pick a time to speak with your advisor.
+            <div className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+              Pick a time with your advisor.
             </div>
           </div>
         </div>
@@ -132,110 +220,246 @@ function CustomerAppointmentCard() {
   const callbackOpen = callback && callback.status !== "closed";
 
   return (
-    <div className="rounded-2xl border bg-card p-5 space-y-4 sm:col-span-2 lg:col-span-3">
-      <div className="flex items-start gap-3">
-        <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary shrink-0">
-          <CalendarCheck className="w-5 h-5" />
-        </span>
-        <div className="flex-1 min-w-0">
-          <div className="font-semibold">Your appointment</div>
+    <>
+      <OptionTile
+        icon={<CalendarCheck className="w-4 h-4" />}
+        title="Your appointment"
+        subtitle={format(new Date(appt.startsAt), "EEE d MMM, HH:mm")}
+        onClick={onToggle}
+        active={expanded}
+      />
+      {expanded && (
+        <div className="col-span-2 lg:col-span-3 rounded-2xl border bg-card p-4 space-y-3">
+          <dl className="grid sm:grid-cols-2 gap-x-4 gap-y-1 text-sm">
+            <div>
+              <dt className="text-xs text-muted-foreground">Date &amp; time</dt>
+              <dd className="font-medium">{format(new Date(appt.startsAt), "EEE d MMM yyyy, HH:mm")}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Advisor</dt>
+              <dd className="font-medium">{appt.advisorName}</dd>
+            </div>
+            {upcoming.case_ref && (
+              <div>
+                <dt className="text-xs text-muted-foreground">Case</dt>
+                <dd className="font-mono text-xs">{upcoming.case_ref}</dd>
+              </div>
+            )}
+          </dl>
+          {callbackOpen && (
+            <p className="text-xs text-primary inline-flex items-center gap-1">
+              <PhoneCall className="w-3 h-3" />
+              Call-back requested ·{" "}
+              {CALLBACK_WINDOW_RANGES[callback.preferredWindow as "9-12" | "12-4" | "4-8"] ??
+                callback.preferredWindow}
+            </p>
+          )}
           {panel === "none" && (
-            <>
-              <dl className="mt-2 grid sm:grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                <div>
-                  <dt className="text-xs text-muted-foreground">Date &amp; time</dt>
-                  <dd className="font-medium">
-                    {format(new Date(appt.startsAt), "EEE d MMM yyyy, HH:mm")}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-muted-foreground">Advisor</dt>
-                  <dd className="font-medium">{appt.advisorName}</dd>
-                </div>
-                {upcoming.case_ref && (
-                  <div>
-                    <dt className="text-xs text-muted-foreground">Case</dt>
-                    <dd className="font-mono text-xs">{upcoming.case_ref}</dd>
-                  </div>
-                )}
-              </dl>
-              {callbackOpen && (
-                <p className="text-xs text-primary mt-2 inline-flex items-center gap-1">
-                  <PhoneCall className="w-3 h-3" />
-                  Call-back requested ·{" "}
-                  {CALLBACK_WINDOW_RANGES[callback.preferredWindow as "9-12" | "12-4" | "4-8"] ??
-                    callback.preferredWindow}
-                </p>
-              )}
-              <div className="flex flex-wrap gap-2 mt-3">
-                <Button type="button" size="sm" variant="outline" onClick={() => setPanel("amend")}>
-                  Amend appointment
-                </Button>
-                <Button type="button" size="sm" variant="secondary" onClick={() => setPanel("callback")}>
-                  <PhoneCall className="w-4 h-4 mr-1.5" />
-                  Request a call back
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => setPanel("amend")}>
+                Amend appointment
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={onToggle}>
+                Close
+              </Button>
+            </div>
+          )}
+          {panel === "amend" && (
+            <div className="rounded-xl border bg-muted/20 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="font-medium text-sm">Change your appointment</h4>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setPanel("none")}>
+                  Cancel
                 </Button>
               </div>
-            </>
+              <PostCompletionBooking
+                sessionId={upcoming.id}
+                channel="text"
+                defaultName={profileName}
+                defaultEmail={profileEmail}
+                initialMode="appointment"
+                hideModeToggle
+                compact
+                onComplete={() => {
+                  refresh();
+                  toast.success("Appointment updated");
+                }}
+              />
+            </div>
           )}
         </div>
-      </div>
-
-      {panel === "amend" && (
-        <div className="rounded-xl border bg-muted/20 p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h4 className="font-medium text-sm">Change your appointment</h4>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setPanel("none")}>
-              Cancel
-            </Button>
-          </div>
-          <PostCompletionBooking
-            sessionId={upcoming.id}
-            channel="text"
-            defaultName={profileName}
-            defaultEmail={profileEmail}
-            initialMode="appointment"
-            hideModeToggle
-            compact
-            onComplete={() => {
-              refresh();
-              toast.success("Appointment updated");
-            }}
-          />
-        </div>
       )}
-
-      {panel === "callback" && (
-        <div className="rounded-xl border bg-muted/20 p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h4 className="font-medium text-sm">When should we call you?</h4>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setPanel("none")}>
-              Cancel
-            </Button>
-          </div>
-          <PostCompletionBooking
-            sessionId={upcoming.id}
-            channel="text"
-            defaultName={profileName}
-            defaultEmail={profileEmail}
-            initialMode="callback"
-            hideModeToggle
-            compact
-            onComplete={() => {
-              refresh();
-              toast.success("Call-back requested");
-            }}
-          />
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 
-function CustomerRafSelfServeCard() {
+function CustomerCallbackCard({
+  expanded,
+  onToggle,
+  sessionId,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+  sessionId: string | null;
+}) {
+  const callbackFn = useServerFn(requestCallbackAuth);
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [callbackWindow, setCallbackWindow] = useState<"9-12" | "12-4" | "4-8" | null>(null);
+  const [done, setDone] = useState(false);
+
+  useQuery({
+    queryKey: ["profile-for-home-callback"],
+    queryFn: async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name, email, phone")
+        .eq("id", user.id)
+        .maybeSingle();
+      const name = profile?.full_name ?? "";
+      const email = profile?.email ?? "";
+      const phone = (profile as { phone?: string | null } | null)?.phone ?? "";
+      if (name) {
+        setProfileName(name);
+        setCustomerName((prev) => prev || name);
+      }
+      if (email) {
+        setProfileEmail(email);
+        setCustomerEmail((prev) => prev || email);
+      }
+      if (phone) {
+        setCustomerPhone((prev) => prev || phone);
+      }
+      return profile;
+    },
+  });
+
+  const callback = useMutation({
+    mutationFn: () =>
+      callbackFn({
+        data: {
+          customerName,
+          customerPhone,
+          customerEmail,
+          window: callbackWindow!,
+        },
+      }),
+    onSuccess: () => {
+      setDone(true);
+      toast.success("Call-back requested");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not request call back"),
+  });
+
+  return (
+    <>
+      <OptionTile
+        icon={<PhoneCall className="w-4 h-4" />}
+        title="Arrange call back"
+        subtitle="We'll ring you in a time window that suits."
+        onClick={onToggle}
+        active={expanded}
+      />
+      {expanded && (
+        <div className="col-span-2 lg:col-span-3 rounded-2xl border bg-card p-4 space-y-3">
+          {sessionId ? (
+            <PostCompletionBooking
+              sessionId={sessionId}
+              channel="text"
+              defaultName={profileName}
+              defaultEmail={profileEmail}
+              initialMode="callback"
+              hideModeToggle
+              compact
+              onComplete={() => {
+                setDone(true);
+                toast.success("Call-back requested");
+              }}
+            />
+          ) : done ? (
+            <p className="text-sm text-muted-foreground">
+              Thanks — we&apos;ll call you
+              {callbackWindow
+                ? ` between ${CALLBACK_WINDOW_RANGES[callbackWindow]}`
+                : ""}
+              .
+            </p>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">Pick a window and leave a number we can reach you on.</p>
+              <div className="grid gap-2">
+                {CALLBACK_WINDOW_OPTIONS.map((opt) => (
+                  <label
+                    key={opt.value}
+                    className={`flex items-center gap-3 rounded-lg border p-3 cursor-pointer text-sm ${callbackWindow === opt.value ? "border-primary bg-primary/5" : ""}`}
+                  >
+                    <input
+                      type="radio"
+                      name="home-callback-window"
+                      checked={callbackWindow === opt.value}
+                      onChange={() => setCallbackWindow(opt.value)}
+                    />
+                    {opt.label}
+                  </label>
+                ))}
+              </div>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="home-cb-name">Full name</Label>
+                  <Input id="home-cb-name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="home-cb-phone">Mobile number</Label>
+                  <Input id="home-cb-phone" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="home-cb-email">Email (optional)</Label>
+                  <Input
+                    id="home-cb-email"
+                    type="email"
+                    value={customerEmail}
+                    onChange={(e) => setCustomerEmail(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  disabled={!callbackWindow || !customerName.trim() || !customerPhone.trim() || callback.isPending}
+                  onClick={() => callback.mutate()}
+                >
+                  {callback.isPending ? "Requesting…" : "Request call back"}
+                </Button>
+                <Button type="button" variant="ghost" onClick={onToggle}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+function CustomerRafSelfServeCard({
+  expanded,
+  onToggle,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   const qc = useQueryClient();
   const activityFn = useServerFn(listMyReferralActivity);
   const ensureFn = useServerFn(ensureMyReferralLink);
+  const sendFn = useServerFn(sendMyReferralLink);
   const publicUrlFn = useServerFn(getPublicShareBaseUrl);
 
   const activityQ = useQuery({ queryKey: ["my-raf-activity"], queryFn: () => activityFn() });
@@ -248,44 +472,83 @@ function CustomerRafSelfServeCard() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not create link"),
   });
 
+  const sendSmsLink = useMutation({
+    mutationFn: () => sendFn({ data: { channel: "sms" } }),
+    onSuccess: () => toast.success("Referral link sent to your mobile"),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not send text"),
+  });
+
+  const sendEmailLink = useMutation({
+    mutationFn: () => sendFn({ data: { channel: "email" } }),
+    onSuccess: (result) => {
+      if (result.mailto) window.location.href = result.mailto;
+      else toast.success("Ready to share");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not open email"),
+  });
+
   const code = activityQ.data?.codes?.[0]?.code;
   const referrals = activityQ.data?.referrals ?? [];
 
   return (
-    <div className="rounded-2xl border bg-card p-5 space-y-4 sm:col-span-2 lg:col-span-1">
-      <div className="flex items-center gap-3">
-        <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <Gift className="w-5 h-5" />
-        </span>
-        <div>
-          <div className="font-semibold">Refer a friend</div>
-          <div className="text-xs text-muted-foreground">Share your link and track referrals · £75 bonus</div>
-        </div>
-      </div>
-      {activityQ.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
-      {!activityQ.isLoading && !code && (
-        <Button size="sm" onClick={() => ensure.mutate()} disabled={ensure.isPending}>
-          {ensure.isPending ? "Creating…" : "Get my referral link"}
-        </Button>
-      )}
-      {code && (
-        <div className="space-y-2">
-          <p className="text-xs font-mono break-all">{rafLinkForCode(code, shareBase)}</p>
-          <CopyLinkButton value={rafShareMessage(null, code, shareBase)} label="Copy share message" />
-        </div>
-      )}
-      {referrals.length > 0 && (
-        <div className="rounded-xl border bg-muted/30 p-3 space-y-2">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Your referrals</p>
-          {referrals.slice(0, 5).map((r) => (
-            <div key={r.id} className="text-sm flex justify-between gap-2">
-              <span className="truncate">{r.referredEmail ?? r.referredPhone ?? "Friend"}</span>
-              <span className="text-xs text-muted-foreground shrink-0 capitalize">{r.status}</span>
+    <>
+      <OptionTile
+        icon={<Gift className="w-4 h-4" />}
+        title="Refer a friend"
+        subtitle="Share your link · £75 bonus"
+        onClick={onToggle}
+        active={expanded}
+      />
+      {expanded && (
+        <div className="col-span-2 lg:col-span-3 rounded-2xl border bg-card p-4 space-y-3">
+          {activityQ.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+          {!activityQ.isLoading && !code && (
+            <Button size="sm" onClick={() => ensure.mutate()} disabled={ensure.isPending}>
+              {ensure.isPending ? "Creating…" : "Get my referral link"}
+            </Button>
+          )}
+          {code && (
+            <div className="space-y-3">
+              <p className="text-xs font-mono break-all">{rafLinkForCode(code, shareBase)}</p>
+              <div className="flex flex-wrap gap-2">
+                <CopyLinkButton value={rafShareMessage(null, code, shareBase)} label="Copy share message" />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={sendSmsLink.isPending}
+                  onClick={() => sendSmsLink.mutate()}
+                >
+                  <MessageSquare className="w-4 h-4 mr-1.5" />
+                  {sendSmsLink.isPending ? "Sending…" : "Text me the link"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={sendEmailLink.isPending}
+                  onClick={() => sendEmailLink.mutate()}
+                >
+                  <Mail className="w-4 h-4 mr-1.5" />
+                  {sendEmailLink.isPending ? "Opening…" : "Email link"}
+                </Button>
+              </div>
             </div>
-          ))}
+          )}
+          {referrals.length > 0 && (
+            <div className="rounded-xl border bg-muted/30 p-3 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Your referrals</p>
+              {referrals.slice(0, 5).map((r) => (
+                <div key={r.id} className="text-sm flex justify-between gap-2">
+                  <span className="truncate">{r.referredEmail ?? r.referredPhone ?? "Friend"}</span>
+                  <span className="text-xs text-muted-foreground shrink-0 capitalize">{r.status}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -344,6 +607,10 @@ function Home() {
       toast.error(e instanceof Error ? e.message : "Could not start interview — please try again.");
     },
   });
+
+  const [homePanel, setHomePanel] = useState<"none" | "appointment" | "callback" | "raf">("none");
+  const toggleHomePanel = (panel: "appointment" | "callback" | "raf") =>
+    setHomePanel((current) => (current === panel ? "none" : panel));
 
   const brokerJourneyStarted = useRef(false);
 
@@ -468,120 +735,15 @@ function Home() {
   const sessions = sessionsQ.data ?? [];
   const inProgress = sessions.find((s) => s.status === "in_progress");
   const hasSubmitted = sessions.some((s) => s.status === "submitted");
-  const hasCases = (casesQ.data ?? []).length > 0;
   const caseCount = casesQ.data?.length ?? 0;
 
   return (
-    <AppShell title="Your fact-finds">
-      <div className="rounded-3xl bg-card border p-6 sm:p-8 mb-6">
-        <div>
-          <h2 className="text-2xl font-semibold">
-            {inProgress ? "Continue your fact-find" : "Start a new fact-find"}
-          </h2>
-          <p className="text-muted-foreground text-sm mt-1">
-            {inProgress
-              ? "Pick up where you left off with Susan. You can switch between talking and typing any time."
-              : hasSubmitted
-                ? "You can start a fresh fact-find any time — useful if your details have changed. Choose how you'd like to answer."
-                : "Choose how you'd like to answer Susan's questions. It takes around 5–10 minutes."}
-          </p>
-        </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-5">
-          <button
-            type="button"
-            disabled={create.isPending}
-            onClick={() =>
-              inProgress
-                ? navigate({ to: "/interview/$sessionId", params: { sessionId: inProgress.id } })
-                : create.mutate("voice")
-            }
-            className="group text-left rounded-2xl border p-5 hover:border-primary hover:bg-muted/40 transition disabled:opacity-60"
-          >
-            <div className="flex items-center gap-3">
-              <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <Mic className="w-5 h-5" />
-              </span>
-              <div>
-                <div className="font-semibold flex items-center gap-1">
-                  {inProgress ? "Continue talking" : "Talk to a spoken assistant"}
-                  <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition" />
-                </div>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  {create.isPending && create.variables === "voice"
-                    ? "Starting…"
-                    : "Susan speaks each question and listens to your voice."}
-                </div>
-              </div>
-            </div>
-          </button>
-          <button
-            type="button"
-            disabled={create.isPending}
-            onClick={() =>
-              inProgress
-                ? navigate({ to: "/chat/$sessionId", params: { sessionId: inProgress.id } })
-                : create.mutate("chat")
-            }
-            className="group text-left rounded-2xl border p-5 hover:border-primary hover:bg-muted/40 transition disabled:opacity-60"
-          >
-            <div className="flex items-center gap-3">
-              <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <MessageSquare className="w-5 h-5" />
-              </span>
-              <div>
-                <div className="font-semibold flex items-center gap-1">
-                  {inProgress ? "Continue typing" : "Type to a chat assistant"}
-                  <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition" />
-                </div>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  {create.isPending && create.variables === "chat"
-                    ? "Starting…"
-                    : "Answer in a quiet, typed chat — no microphone needed."}
-                </div>
-              </div>
-            </div>
-          </button>
-          <CustomerAppointmentCard />
-          {hasCases && (
-            <>
-              <Link
-                to="/cases"
-                className="group text-left rounded-2xl border p-5 hover:border-primary hover:bg-muted/40 transition block"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary">
-                    <FileText className="w-5 h-5" />
-                  </span>
-                  <div>
-                    <div className="font-semibold flex items-center gap-1">
-                      Your summary
-                      <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition" />
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-0.5">
-                      Journey progress, next steps, and your cases ({caseCount}).
-                    </div>
-                  </div>
-                </div>
-              </Link>
-              <CustomerRafSelfServeCard />
-            </>
-          )}
-        </div>
-      </div>
-      {inProgress && hasCases && (
-        <p className="text-sm text-muted-foreground mb-4">
-          You have a fact-find in progress — use Talk or Type above to continue, or open{" "}
-          <Link to="/cases" className="text-primary underline-offset-2 hover:underline">
-            Your summary
-          </Link>{" "}
-          for journey and booking details.
-        </p>
-      )}
-      {inProgress && !hasCases && (
-        <p className="text-sm text-muted-foreground mb-4">
-          You have a fact-find in progress — use Talk or Type above to continue.
-        </p>
-      )}
+    <AppShell title="Home">
+      <CustomerHomeLanding
+        inProgressId={inProgress?.id ?? null}
+        hasSubmitted={hasSubmitted}
+        caseCount={caseCount}
+      />
     </AppShell>
   );
 }

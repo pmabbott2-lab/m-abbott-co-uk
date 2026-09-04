@@ -14,7 +14,7 @@ export function MarkContactedButton({
   onDone,
   size = "sm",
 }: {
-  contactType: "appointment" | "callback" | "phone_call";
+  contactType: "appointment" | "callback" | "phone_call" | "abandoned";
   contactId: string;
   sessionId?: string | null;
   contacted?: boolean;

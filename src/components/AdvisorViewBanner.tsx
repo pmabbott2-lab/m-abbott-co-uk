@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { listAdvisors } from "@/lib/sessions.functions";
 import { getAdvisorView, setAdvisorView } from "@/lib/advisor-view";
+import { persistViewAsNav } from "@/lib/staff-nav-persistence";
+import { VIEW_SUB_TABS } from "@/lib/staff-branch-nav";
 import { recordViewAsAudit } from "@/lib/view-as-audit.functions";
 import { Eye } from "lucide-react";
 
@@ -76,6 +78,7 @@ export function AdvisorViewBanner({
               advisorId: picked.id,
               advisorName: picked.full_name || picked.email || "Advisor",
             });
+            persistViewAsNav(VIEW_SUB_TABS.ADVISOR);
             try {
               await auditFn({
                 data: {

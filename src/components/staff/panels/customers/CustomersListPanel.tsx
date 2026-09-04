@@ -25,6 +25,10 @@ export type CustomerSessionRow = {
   assignedAdvisors?: AssignedAdvisor[];
   nextContactAt?: string | null;
   callback?: { id: string; window: string | null } | null;
+  journeyComplete?: boolean;
+  hasLenderDetails?: boolean;
+  archivedFromAdvisor?: boolean;
+  missingLenderAfterCompletion?: boolean;
 };
 
 type CustomersListPanelProps = {
@@ -80,7 +84,7 @@ export function CustomersListPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      {isMainAdmin && (
+      {isMainAdmin ? (
         <div className="space-y-3 mb-3">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <p className="text-sm text-muted-foreground">
@@ -154,6 +158,27 @@ export function CustomersListPanel({
               />
             </div>
           </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 flex-wrap mb-3">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Search customers by name, email or phone…"
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <select
+            className="rounded-md border bg-background px-3 py-2 text-sm"
+            value={sortBy}
+            onChange={(e) => onSortByChange(e.target.value as "recent" | "next_contact")}
+            aria-label="Sort customers"
+          >
+            <option value="recent">Sort: Most recent</option>
+            <option value="next_contact">Sort: Next contact</option>
+          </select>
         </div>
       )}
       <div className="rounded-2xl border bg-card overflow-hidden max-h-[min(70vh,640px)] overflow-y-auto">

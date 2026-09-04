@@ -53,6 +53,7 @@ import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { safeFormat } from "@/lib/safe-format";
+import { completeStaffContactTask } from "@/lib/staff-contact-tasks.functions";
 import { CalendarCheck, Check, Clock, History, MapPin, PhoneCall, StickyNote } from "lucide-react";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -215,7 +216,7 @@ function SessionDetail() {
         </div>
 
         <Tabs defaultValue={isAdvisor ? (isCase ? "crm" : "factfind") : "factfind"} className="w-full">
-          <TabsList variant="hubSub" className="w-full justify-start">
+          <TabsList variant="hubSub" className="w-full justify-center">
             {isAdvisor && isCase ? (
               <>
                 <TabsTrigger value="crm">CRM</TabsTrigger>
@@ -277,7 +278,7 @@ function SessionDetail() {
             <TabsContent value="journey" className="space-y-6 mt-4">
               <CustomerJourneyTab
                 sessionId={sessionId}
-                isAdvisor={isAdvisor}
+                isAdvisor={isAdvisor || isOwner || Boolean(roleQ.data?.isMainAdmin)}
                 canReverse={canAmend(adminAccess, "journey")}
               />
             </TabsContent>
@@ -320,7 +321,7 @@ function SessionDetail() {
               </div>
             )}
             <Tabs defaultValue="summary" className="w-full">
-              <TabsList variant="hubSub" className="w-full justify-start mb-4">
+              <TabsList variant="hubSub" className="w-full justify-center mb-4">
                 <TabsTrigger value="summary">Summary</TabsTrigger>
                 <TabsTrigger value="keyfacts">Key figures</TabsTrigger>
                 <TabsTrigger value="illustration">Illustration</TabsTrigger>
@@ -1176,6 +1177,7 @@ function CustomerJourneyTab({
   const journeyFn = useServerFn(getCustomerJourney);
   const confirmFn = useServerFn(confirmJourneyMilestone);
   const reverseFn = useServerFn(reverseJourneyMilestone);
+  const completeTaskFn = useServerFn(completeStaffContactTask);
 
   const journeyQ = useQuery({
     queryKey: ["customer-journey", sessionId],
@@ -1186,6 +1188,7 @@ function CustomerJourneyTab({
     qc.invalidateQueries({ queryKey: ["customer-journey", sessionId] });
     qc.invalidateQueries({ queryKey: ["contact-history", sessionId] });
     qc.invalidateQueries({ queryKey: ["all-sessions"] });
+    qc.invalidateQueries({ queryKey: ["advisor-contacts"] });
   };
 
   const confirm = useMutation({
@@ -1218,69 +1221,149 @@ function CustomerJourneyTab({
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not reverse"),
   });
 
+  const completeInternal = useMutation({
+    mutationFn: (taskId: string) => completeTaskFn({ data: { taskId } }),
+    onSuccess: () => {
+      toast.success("Contact task completed");
+      invalidate();
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not complete"),
+  });
+
   const milestones = journeyQ.data?.milestones ?? [];
-  const busy = confirm.isPending || reverse.isPending;
+  const internalTasks = journeyQ.data?.internalTasks ?? [];
+  const busy = confirm.isPending || reverse.isPending || completeInternal.isPending;
 
   return (
-    <div className="rounded-2xl border bg-card p-5 space-y-4">
-      <h3 className="font-semibold flex items-center gap-2">
-        <MapPin className="w-4 h-4 text-muted-foreground" />
-        Customer journey
-      </h3>
-      <p className="text-xs text-muted-foreground">
-        {isAdvisor
-          ? "Confirm each milestone as the customer progresses. The customer is texted when you tick a step. Only an admin can reverse a confirmed milestone."
-          : "Track where you are in your mortgage journey with your advisor."}
-      </p>
-      {journeyQ.isLoading && <p className="text-sm text-muted-foreground">Loading journey…</p>}
-      <div className="space-y-2">
-        {milestones.map((m) => {
-          const done = !!m.completedAt;
-          return (
-            <div
-              key={m.key}
-              className={`w-full flex items-center gap-3 rounded-lg border p-4 text-left ${
-                done ? "bg-muted/40" : ""
-              }`}
-            >
-              <button
-                type="button"
-                disabled={!isAdvisor || done || busy}
-                onClick={() => isAdvisor && !done && confirm.mutate(m.key)}
-                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
-                  done ? "bg-primary border-primary text-primary-foreground" : "bg-background"
-                } ${isAdvisor && !done ? "hover:ring-2 hover:ring-primary/30" : ""}`}
-                aria-label={done ? m.label : `Confirm ${m.label}`}
-              >
-                {done && <Check className="w-3.5 h-3.5" />}
-              </button>
-              <div className="min-w-0 flex-1">
-                <div className="font-medium text-sm">{m.label}</div>
-                {m.completedAt && (
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    Completed {safeFormat(m.completedAt, "PPp")}
+    <div className="space-y-4">
+      {isAdvisor && internalTasks.length > 0 && (
+        <div className="rounded-2xl border bg-card p-5 space-y-4">
+          <h3 className="font-semibold flex items-center gap-2">
+            <PhoneCall className="w-4 h-4 text-muted-foreground" />
+            Internal contact tasks
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            Staff-only — not shown to the customer. Completing a task is timestamped and logged on
+            History.
+          </p>
+          <div className="space-y-2">
+            {internalTasks.map((t) => {
+              const done = !!t.completedAt;
+              return (
+                <div
+                  key={t.id}
+                  className={`w-full flex items-center gap-3 rounded-lg border p-4 text-left ${
+                    done ? "bg-muted/40" : t.overdue ? "border-red-500/60 bg-red-50/50 dark:bg-red-950/20" : ""
+                  }`}
+                >
+                  <button
+                    type="button"
+                    disabled={done || busy}
+                    onClick={() => !done && completeInternal.mutate(t.id)}
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
+                      done ? "bg-primary border-primary text-primary-foreground" : "bg-background"
+                    } ${!done ? "hover:ring-2 hover:ring-primary/30" : ""}`}
+                    aria-label={done ? t.label : `Complete ${t.label}`}
+                  >
+                    {done && <Check className="w-3.5 h-3.5" />}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
+                      {t.label}
+                      {!done && t.overdue && (
+                        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-red-600 text-white">
+                          Overdue
+                        </span>
+                      )}
+                    </div>
+                    {done && t.completedAt ? (
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        Completed {safeFormat(t.completedAt, "PPp")}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        Due {safeFormat(t.dueAt, "PPp")}
+                      </div>
+                    )}
                   </div>
+                  {!done && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={t.overdue ? "destructive" : "secondary"}
+                      disabled={busy}
+                      onClick={() => completeInternal.mutate(t.id)}
+                    >
+                      Mark done
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="rounded-2xl border bg-card p-5 space-y-4">
+        <h3 className="font-semibold flex items-center gap-2">
+          <MapPin className="w-4 h-4 text-muted-foreground" />
+          Customer journey
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          {isAdvisor
+            ? "Confirm each milestone as the customer progresses. The customer is texted when you tick a step. Only an admin can reverse a confirmed milestone."
+            : "Track where you are in your mortgage journey with your advisor."}
+        </p>
+        {journeyQ.isLoading && <p className="text-sm text-muted-foreground">Loading journey…</p>}
+        <div className="space-y-2">
+          {milestones.map((m) => {
+            const done = !!m.completedAt;
+            return (
+              <div
+                key={m.key}
+                className={`w-full flex items-center gap-3 rounded-lg border p-4 text-left ${
+                  done ? "bg-muted/40" : ""
+                }`}
+              >
+                <button
+                  type="button"
+                  disabled={!isAdvisor || done || busy}
+                  onClick={() => isAdvisor && !done && confirm.mutate(m.key)}
+                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
+                    done ? "bg-primary border-primary text-primary-foreground" : "bg-background"
+                  } ${isAdvisor && !done ? "hover:ring-2 hover:ring-primary/30" : ""}`}
+                  aria-label={done ? m.label : `Confirm ${m.label}`}
+                >
+                  {done && <Check className="w-3.5 h-3.5" />}
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-sm">{m.label}</div>
+                  {m.completedAt && (
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      Completed {safeFormat(m.completedAt, "PPp")}
+                    </div>
+                  )}
+                </div>
+                {done && canReverse && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => reverse.mutate(m.key)}
+                  >
+                    Reverse
+                  </Button>
                 )}
               </div>
-              {done && canReverse && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => reverse.mutate(m.key)}
-                >
-                  Reverse
-                </Button>
-              )}
-            </div>
-          );
-        })}
-        {!journeyQ.isLoading && milestones.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            Journey tracking will appear once the database migration is applied.
-          </p>
-        )}
+            );
+          })}
+          {!journeyQ.isLoading && milestones.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              Journey tracking will appear once the database migration is applied.
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

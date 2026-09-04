@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Gift, Palette, TestTube2, UserPlus, Users } from "lucide-react";
+import { Palette, TestTube2, UserPlus, Users } from "lucide-react";
 import { ThemeProfilePicker } from "@/components/ThemeProfilePicker";
 import { TestAccountsCard } from "@/components/TestAccountsCard";
 import { HubSubNav } from "@/components/ui/tabs";
@@ -19,10 +19,8 @@ type ManageTabPanelProps = {
   isOwner: boolean;
   showTeamRoles: boolean;
   showInvites: boolean;
-  showReferAFriend: boolean;
   teamRolesPanel: ReactNode;
   invitesPanel: ReactNode;
-  referAFriendPanel: ReactNode;
 };
 
 type SubTabDef = {
@@ -36,10 +34,8 @@ export function ManageTabPanel({
   isOwner,
   showTeamRoles,
   showInvites,
-  showReferAFriend,
   teamRolesPanel,
   invitesPanel,
-  referAFriendPanel,
 }: ManageTabPanelProps) {
   const tabs: SubTabDef[] = [];
 
@@ -73,15 +69,6 @@ export function ManageTabPanel({
       label: "Invites",
       icon: <UserPlus className="w-4 h-4 shrink-0" />,
       content: invitesPanel,
-    });
-  }
-
-  if (showReferAFriend) {
-    tabs.push({
-      id: MANAGE_SUB_TABS.REFER_A_FRIEND,
-      label: "Refer a friend",
-      icon: <Gift className="w-4 h-4 shrink-0" />,
-      content: referAFriendPanel,
     });
   }
 

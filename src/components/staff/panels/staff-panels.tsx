@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import {
   deleteSession,
   restoreSession,
@@ -54,6 +54,8 @@ import {
 import type { AdvisorCustomerRow } from "@/lib/sessions.functions";
 import { listAdvisorContacts, markContactOpened } from "@/lib/booking.functions";
 import type { AdvisorContact } from "@/lib/booking.functions";
+import { completeStaffContactTask } from "@/lib/staff-contact-tasks.functions";
+import { isStaffTaskOverdue, STAFF_TASK_LABELS } from "@/lib/staff-contact-tasks";
 import { AssignVoicemailAdvisor } from "@/components/AssignVoicemailAdvisor";
 import { MarkContactedButton } from "@/components/MarkContactedButton";
 import { PhoneCallDetailDialog } from "@/components/PhoneCallDetailDialog";
@@ -361,8 +363,10 @@ export function AdminAccessPanel({ isOwner, canEditPerms }: { isOwner: boolean; 
         <div>
           <h3 className="font-semibold text-lg">Admin access</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            Admins register via an invite link from Manage. The owner appoints supervisors; owner
-            and authorised general admins set permission matrices.
+            Admins register via an invite link from Manage. If that email already exists
+            (for example a test account), they can open the invite and sign in with the
+            existing password to attach the admin role. Then grant supervisor/general
+            access and the permission matrix here.
           </p>
         </div>
 
@@ -3018,6 +3022,8 @@ export function DashboardSessionRow({
     assignedAdvisors?: AssignedAdvisor[];
     nextContactAt?: string | null;
     callback?: { id: string; window: string | null } | null;
+    missingLenderAfterCompletion?: boolean;
+    archivedFromAdvisor?: boolean;
   };
   isMainAdmin: boolean;
   isOwner: boolean;
@@ -3032,6 +3038,8 @@ export function DashboardSessionRow({
   const nextContactAt = session.nextContactAt ?? null;
   const caseRef = session.case_ref ?? null;
   const isCase = Boolean(caseRef);
+  const missingLender = Boolean(session.missingLenderAfterCompletion);
+  const archivedComplete = Boolean(session.archivedFromAdvisor);
   const name = session.customer?.full_name || session.customer?.email || "Unnamed customer";
   const contactLine =
     [session.customer?.email, session.customer?.phone].filter(Boolean).join(" · ") ||
@@ -3074,7 +3082,13 @@ export function DashboardSessionRow({
       className={cn(
         "grid grid-cols-[1fr_auto] items-start gap-x-3 gap-y-2 px-4 py-3.5 sm:items-center sm:gap-x-4 sm:py-3 border-b border-border/60 last:border-0 transition-colors cursor-pointer",
         gridCols,
-        callback ? "bg-primary/[0.04] hover:bg-primary/[0.07]" : "hover:bg-muted/25",
+        missingLender
+          ? "bg-red-50/90 hover:bg-red-100/80 dark:bg-red-950/30 dark:hover:bg-red-950/45 border-l-4 border-l-red-500"
+          : archivedComplete
+            ? "bg-muted/40 hover:bg-muted/55 opacity-90"
+            : callback
+              ? "bg-primary/[0.04] hover:bg-primary/[0.07]"
+              : "hover:bg-muted/25",
       )}
     >
       {isMainAdmin && (
@@ -3093,6 +3107,16 @@ export function DashboardSessionRow({
           {callback && (
             <span className="inline-flex shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">
               New
+            </span>
+          )}
+          {missingLender && (
+            <span className="inline-flex shrink-0 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+              Lender needed
+            </span>
+          )}
+          {archivedComplete && !missingLender && (
+            <span className="inline-flex shrink-0 rounded-full bg-muted-foreground/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Completed
             </span>
           )}
         </div>
@@ -3375,76 +3399,134 @@ export function ContactsCard({
   const navigate = useNavigate();
   const contactsFn = useServerFn(listAdvisorContacts);
   const openFn = useServerFn(markContactOpened);
+  const completeTaskFn = useServerFn(completeStaffContactTask);
   const [voicemailCallId, setVoicemailCallId] = useState<string | null>(null);
+  const [advisorFilter, setAdvisorFilter] = useState<"all" | "unallocated" | string>("all");
+
+  const canFilterByAdvisor = Boolean(
+    isOwner || adminAccess?.isOwner || adminAccess?.isSupervisor || adminAccess?.isAdmin,
+  );
 
   const contactsQ = useQuery({ queryKey: ["advisor-contacts"], queryFn: () => contactsFn() });
-  const contacts = (contactsQ.data ?? []) as AdvisorContact[];
+  const allContacts = (contactsQ.data ?? []) as AdvisorContact[];
+
+  const advisorOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of allContacts) {
+      if (c.advisorId && c.advisorName) map.set(c.advisorId, c.advisorName);
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [allContacts]);
+
+  const contacts = useMemo(() => {
+    if (!canFilterByAdvisor || advisorFilter === "all") return allContacts;
+    if (advisorFilter === "unallocated") {
+      return allContacts.filter((c) => c.unallocated || !c.advisorId);
+    }
+    return allContacts.filter((c) => c.advisorId === advisorFilter);
+  }, [allContacts, advisorFilter, canFilterByAdvisor]);
+
+  const abandonedLeads = useMemo(
+    () => contacts.filter((c) => c.kind === "abandoned"),
+    [contacts],
+  );
+  const liveContacts = useMemo(
+    () => contacts.filter((c) => c.kind !== "abandoned"),
+    [contacts],
+  );
 
   const open = useMutation({
-    mutationFn: (vars: { contactType: "appointment" | "callback"; contactId: string }) =>
-      openFn({ data: vars }),
+    mutationFn: (vars: {
+      contactType: "appointment" | "callback" | "phone_call" | "staff_task" | "abandoned";
+      contactId: string;
+    }) => openFn({ data: vars }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["advisor-contacts"] }),
   });
 
-  const unopenedCount = contacts.filter((c) => !c.opened).length;
-  const unallocatedCount = contacts.filter((c) => c.unallocated).length;
+  const completeTask = useMutation({
+    mutationFn: (taskId: string) => completeTaskFn({ data: { taskId } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["advisor-contacts"] }),
+  });
 
-  return (
-    <div className="mt-2">
-      <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-          <Inbox className="w-4 h-4" />
-          Appointments &amp; call-backs
-        </h3>
-        {unopenedCount > 0 && (
-          <span className="text-xs px-2 py-0.5 rounded-full bg-primary/15 text-primary font-medium">
-            {unopenedCount} new
-          </span>
-        )}
-        {unallocatedCount > 0 && (
-          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 font-medium">
-            {unallocatedCount} unallocated
-          </span>
-        )}
-      </div>
-      <div className="rounded-2xl border bg-card divide-y overflow-hidden">
-        <div className="p-4 text-xs text-muted-foreground">
-          Booked appointments, call-back requests, and office-line voicemails. Voicemails are linked
-          to the allocated advisor when we recognise the caller; unknown numbers appear as unallocated
-          for owner and admin supervisors.
-        </div>
-        {contactsQ.isLoading && <div className="p-4 text-sm text-muted-foreground">Loading contacts…</div>}
-        {!contactsQ.isLoading && contacts.length === 0 && (
-          <div className="p-4 text-sm text-muted-foreground">No appointments or call-backs yet.</div>
-        )}
-        {contacts.map((c) => {
+  const unopenedCount = liveContacts.filter((c) => !c.opened).length;
+  const unallocatedCount = allContacts.filter((c) => c.unallocated).length;
+  const abandonedCount = abandonedLeads.length;
+
+  const renderContactRow = (c: AdvisorContact) => {
+          const overdue = c.kind === "staff_task" && isStaffTaskOverdue(c.dueAt, c.completedAt);
           const markSeen = () => {
-            if (!c.opened && c.kind !== "phone_call") {
-              open.mutate({ contactType: c.kind === "appointment" ? "appointment" : "callback", contactId: c.id });
-            }
-            if (!c.opened && c.kind === "phone_call") {
-              open.mutate({ contactType: "phone_call", contactId: c.id });
+            if (!c.opened) {
+              if (c.kind === "staff_task") {
+                open.mutate({ contactType: "staff_task", contactId: c.id });
+              } else if (c.kind === "abandoned") {
+                open.mutate({ contactType: "abandoned", contactId: c.id });
+              } else if (c.kind !== "phone_call") {
+                open.mutate({ contactType: c.kind === "appointment" ? "appointment" : "callback", contactId: c.id });
+              } else {
+                open.mutate({ contactType: "phone_call", contactId: c.id });
+              }
             }
           };
           const archiveType =
-            c.kind === "phone_call" ? "phone_call" : c.kind === "appointment" ? "appointment" : "callback";
+            c.kind === "staff_task"
+              ? null
+              : c.kind === "abandoned"
+                ? "abandoned"
+                : c.kind === "phone_call"
+                  ? "phone_call"
+                  : c.kind === "appointment"
+                    ? "appointment"
+                    : "callback";
           const body = (
             <div
               className={`flex items-center gap-3 p-4 transition ${
-                c.contacted ? "opacity-60 bg-muted/30" : c.opened ? "" : "bg-primary/5"
+                c.contacted
+                  ? "opacity-60 bg-muted/30"
+                  : overdue
+                    ? "bg-red-50 dark:bg-red-950/30 border-l-4 border-red-500"
+                    : c.kind === "abandoned"
+                      ? "bg-amber-50/60 dark:bg-amber-950/20"
+                      : c.opened
+                        ? ""
+                        : "bg-primary/5"
               }`}
             >
               <span
-                className={`inline-flex w-9 h-9 items-center justify-center rounded-full shrink-0 ${c.kind === "appointment" ? "bg-accent/30" : "bg-primary/10 text-primary"}`}
+                className={`inline-flex w-9 h-9 items-center justify-center rounded-full shrink-0 ${
+                  c.kind === "staff_task"
+                    ? overdue
+                      ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100"
+                      : "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-100"
+                    : c.kind === "abandoned"
+                      ? "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-100"
+                      : c.kind === "appointment"
+                        ? "bg-accent/30"
+                        : "bg-primary/10 text-primary"
+                }`}
               >
-                {c.kind === "appointment" ? <CalendarCheck className="w-4 h-4" /> : <PhoneCall className="w-4 h-4" />}
+                {c.kind === "appointment" ? (
+                  <CalendarCheck className="w-4 h-4" />
+                ) : c.kind === "abandoned" ? (
+                  <UserMinus className="w-4 h-4" />
+                ) : c.kind === "staff_task" ? (
+                  <PhoneCall className="w-4 h-4" />
+                ) : (
+                  <PhoneCall className="w-4 h-4" />
+                )}
               </span>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1 space-y-1">
                 <div className="font-medium truncate flex items-center gap-2 flex-wrap">
                   {c.customerName}
                   {!c.opened && (
                     <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground">
                       New
+                    </span>
+                  )}
+                  {c.kind === "abandoned" && (
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                      Abandoned
                     </span>
                   )}
                   {c.isVoicemail && (
@@ -3467,9 +3549,18 @@ export function ContactsCard({
                       Unallocated
                     </span>
                   )}
+                  {overdue && (
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-red-600 text-white">
+                      Overdue
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-muted-foreground truncate">
-                  {c.kind === "appointment"
+                  {c.kind === "abandoned"
+                    ? `Incomplete fact-find${c.lastSection ? ` · ${c.lastSection}` : ""}${c.channel ? ` · ${c.channel === "text" ? "Chat" : "Voice"}` : ""} · ${safeFormatDistanceToNow(c.createdAt)}`
+                    : c.kind === "staff_task"
+                    ? `${STAFF_TASK_LABELS[c.taskType ?? "welcome_call"]} · due ${safeFormat(c.dueAt, "EEE d MMM, HH:mm")}`
+                    : c.kind === "appointment"
                     ? c.startsAt
                       ? `Appointment · ${safeFormat(c.startsAt, "EEE d MMM, HH:mm")}`
                       : "Appointment"
@@ -3480,21 +3571,31 @@ export function ContactsCard({
                       : c.isVoicemail
                         ? "Voicemail · call back requested"
                         : `Call back · ${CALLBACK_WINDOW_LABELS[c.window ?? ""] ?? c.window}`}
-                  {c.customerPhone ? ` · ${c.customerPhone}` : ""}
+                  {c.customerPhone && c.customerPhone !== "—" ? ` · ${c.customerPhone}` : ""}
+                  {c.kind === "abandoned" && c.customerEmail ? ` · ${c.customerEmail}` : ""}
                 </div>
-                {c.summary && (
-                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{c.summary}</p>
-                )}
-                {c.introducerCode && (
-                  <div className="mt-2">
-                    <p className="text-[10px] sm:text-xs text-muted-foreground">
-                      Introducer:{" "}
-                      <span className="font-medium text-foreground">
-                        {c.introducerCompany ?? "Company"}
-                      </span>{" "}
-                      <span className="font-mono">({c.introducerCode})</span>
-                    </p>
+                {(c.advisorName || c.unallocated || c.introducerCode) && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                    {c.advisorName ? (
+                      <span>
+                        Advisor · <span className="font-medium text-foreground">{c.advisorName}</span>
+                      </span>
+                    ) : c.unallocated ? (
+                      <span className="text-amber-800 dark:text-amber-200">Advisor · Unallocated</span>
+                    ) : null}
+                    {c.introducerCode && (
+                      <span>
+                        Introducer ·{" "}
+                        <span className="font-medium text-foreground">
+                          {c.introducerCompany ?? "Company"}
+                        </span>{" "}
+                        <span className="font-mono">({c.introducerCode})</span>
+                      </span>
+                    )}
                   </div>
+                )}
+                {c.summary && (
+                  <p className="text-xs text-muted-foreground line-clamp-2">{c.summary}</p>
                 )}
               </div>
               <div className="flex flex-col gap-1 shrink-0 items-end">
@@ -3504,10 +3605,29 @@ export function ContactsCard({
                     onAssigned={() => qc.invalidateQueries({ queryKey: ["advisor-contacts"] })}
                   />
                 )}
-                {(c.kind === "callback" || c.kind === "phone_call" || c.kind === "appointment") && (
+                {c.kind === "staff_task" && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={overdue ? "destructive" : "secondary"}
+                    disabled={completeTask.isPending}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      completeTask.mutate(c.id);
+                    }}
+                  >
+                    Mark done
+                  </Button>
+                )}
+                {(c.kind === "callback" ||
+                  c.kind === "phone_call" ||
+                  c.kind === "appointment" ||
+                  c.kind === "abandoned") &&
+                  archiveType && (
                   <MarkContactedButton
                     contactType={archiveType}
-                    contactId={c.kind === "phone_call" ? c.id : c.id}
+                    contactId={c.id}
                     sessionId={c.sessionId}
                     contacted={c.contacted}
                     onDone={() => qc.invalidateQueries({ queryKey: ["advisor-contacts"] })}
@@ -3564,7 +3684,83 @@ export function ContactsCard({
               {body}
             </button>
           );
-        })}
+  };
+
+  return (
+    <div className="mt-2 space-y-4">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+          <Inbox className="w-4 h-4" />
+          Contacts &amp; tasks
+        </h3>
+        {unopenedCount > 0 && (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-primary/15 text-primary font-medium">
+            {unopenedCount} new
+          </span>
+        )}
+        {abandonedCount > 0 && (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 font-medium">
+            {abandonedCount} abandoned
+          </span>
+        )}
+        {unallocatedCount > 0 && (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 font-medium">
+            {unallocatedCount} unallocated
+          </span>
+        )}
+        {canFilterByAdvisor && (
+          <div className="flex items-center gap-2 ml-auto">
+            <Label htmlFor="contacts-advisor-filter" className="text-xs text-muted-foreground shrink-0">
+              Advisor
+            </Label>
+            <select
+              id="contacts-advisor-filter"
+              className="h-8 rounded-md border bg-background px-2 text-sm max-w-[220px]"
+              value={advisorFilter}
+              onChange={(e) => setAdvisorFilter(e.target.value)}
+            >
+              <option value="all">All advisors</option>
+              <option value="unallocated">Unallocated only</option>
+              {advisorOptions.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {abandonedCount > 0 && (
+        <div className="rounded-2xl border bg-card divide-y overflow-hidden">
+          <div className="p-4 text-xs text-muted-foreground flex items-center gap-2">
+            <UserMinus className="w-3.5 h-3.5 shrink-0" />
+            Abandoned leads — started a fact-find but didn&apos;t finish, and left an email and/or phone
+            so you can follow up.
+          </div>
+          {abandonedLeads.map(renderContactRow)}
+        </div>
+      )}
+
+      <div className="rounded-2xl border bg-card divide-y overflow-hidden">
+        <div className="p-4 text-xs text-muted-foreground">
+          Contact tasks (welcome call, next contact), booked appointments, call-backs, and office-line
+          voicemails — sorted by due date. Overdue tasks show in red. Unallocated inbound call-backs /
+          voicemails can be allocated to an advisor.
+          {canFilterByAdvisor ? " Filter by advisor above." : ""}
+        </div>
+        {contactsQ.isLoading && <div className="p-4 text-sm text-muted-foreground">Loading contacts…</div>}
+        {!contactsQ.isLoading && liveContacts.length === 0 && abandonedCount === 0 && (
+          <div className="p-4 text-sm text-muted-foreground">
+            {advisorFilter !== "all"
+              ? "No contacts for this advisor filter."
+              : "No appointments or call-backs yet."}
+          </div>
+        )}
+        {!contactsQ.isLoading && liveContacts.length === 0 && abandonedCount > 0 && (
+          <div className="p-4 text-sm text-muted-foreground">No open tasks or bookings right now.</div>
+        )}
+        {liveContacts.map(renderContactRow)}
       </div>
       <PhoneCallDetailDialog
         callId={voicemailCallId}

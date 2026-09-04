@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { listIntroducersForAdmin } from "@/lib/introducer.functions";
 import { getIntroducerView, setIntroducerView } from "@/lib/introducer-view";
+import { persistViewAsNav } from "@/lib/staff-nav-persistence";
+import { VIEW_SUB_TABS } from "@/lib/staff-branch-nav";
 import { recordViewAsAudit } from "@/lib/view-as-audit.functions";
 import { Eye } from "lucide-react";
 
@@ -106,6 +108,7 @@ export function IntroducerViewBanner({ onViewChange }: { onViewChange: () => voi
                 introducerName: picked.full_name || picked.email || "Introducer",
                 companyName: picked.company_name,
               });
+              persistViewAsNav(VIEW_SUB_TABS.INTRODUCER);
               try {
                 await auditFn({
                   data: {

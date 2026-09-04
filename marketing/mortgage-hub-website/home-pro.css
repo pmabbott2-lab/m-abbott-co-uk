@@ -7,6 +7,45 @@
 .hero-pro h1 em { font-style: normal; color: var(--green); }
 .hero-pro-lead { margin-top: 0.85rem; font-size: 1.02rem; color: var(--muted); max-width: 36rem; line-height: 1.6; }
 .hero-pro-actions { margin-top: 1.25rem; display: flex; flex-wrap: wrap; gap: 0.65rem; }
+.hero-callback-card {
+  margin-top: 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  max-width: 28rem;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--white);
+  color: inherit;
+  text-decoration: none;
+  box-shadow: 0 6px 18px rgba(26, 47, 79, 0.05);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.hero-callback-card:hover {
+  border-color: var(--green);
+  transform: translateY(-1px);
+}
+.hero-callback-icon {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--green-soft);
+  flex-shrink: 0;
+}
+.hero-callback-card strong {
+  display: block;
+  color: var(--navy);
+  margin-bottom: 0.15rem;
+}
+.hero-callback-card span:last-child {
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
 .hero-pro-aside { display: flex; flex-direction: column; gap: 0.75rem; }
 .hero-stat-card { background: var(--white); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: 0 4px 16px rgba(26, 47, 79, 0.06); }
 .hero-stat-label { display: block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }

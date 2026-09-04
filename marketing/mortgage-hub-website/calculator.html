@@ -42,35 +42,11 @@
       <div class="container">
         <span class="eyebrow">Illustrative only · not a quote</span>
         <h1>See what your mortgage might cost — then choose your next step.</h1>
-        <p>Enter property value and deposit — we calculate your loan amount, LTV, and illustrative repayment.</p>
+        <p>Estimate repayments for a purchase or remortgage, then request a callback or continue your advisor-led journey.</p>
         <p id="introducer-banner" class="introducer-banner" hidden></p>
         <p id="slug-missing" class="slug-warning" hidden>
           Add your partner code to attribute a callback (e.g. <code>?ref=your-partner-slug</code>).
           You can still use the calculator and journey links below.
-        </p>
-      </div>
-    </section>
-
-    <section id="rates" class="rates-strip rates-strip-compact" aria-labelledby="rates-heading">
-      <div class="container">
-        <div class="rates-head">
-          <div>
-            <h2 id="rates-heading">Bank of England Bank Rate</h2>
-            <p class="rates-sub" id="rates-as-of">Reference rate — updated when you load this page.</p>
-          </div>
-          <p class="rates-status" id="rates-status"></p>
-        </div>
-        <div class="rates-grid rates-grid-single">
-          <article class="rate-card rate-card-base">
-            <span class="rate-card-tag">Reference</span>
-            <p class="rate-card-label" id="rate-base-label">Bank of England Bank Rate</p>
-            <p class="rate-card-value" id="rate-base-value">—</p>
-            <p class="rate-source-micro" id="rate-base-source"></p>
-            <a class="rate-source-link" id="rate-base-source-link" href="#" target="_blank" rel="noopener noreferrer" hidden>View source</a>
-          </article>
-        </div>
-        <p class="rates-disclaimer" id="rates-disclaimer">
-          Bank of England Bank Rate for reference only — not a mortgage quote or recommendation.
         </p>
       </div>
     </section>
@@ -81,38 +57,50 @@
           <h2>Mortgage calculator</h2>
           <p class="calc-disclaimer">For illustration only — not a mortgage quote or recommendation.</p>
 
+          <div class="calc-mode-toggle" role="group" aria-label="Mortgage type">
+            <button type="button" class="calc-mode-btn is-active" data-mode="purchase" id="mode-purchase">Purchase</button>
+            <button type="button" class="calc-mode-btn" data-mode="remortgage" id="mode-remortgage">Remortgage</button>
+          </div>
+
           <div class="calc-row calc-row-4">
             <div class="calc-field">
               <label for="calc-price">Property value</label>
               <div class="calc-input-wrap">
                 <span class="calc-prefix">£</span>
-                <input type="text" id="calc-price" inputmode="numeric" value="250000" autocomplete="off" />
+                <input type="text" id="calc-price" inputmode="numeric" value="335000" autocomplete="off" />
               </div>
             </div>
-            <div class="calc-field">
+            <div class="calc-field" id="field-deposit">
               <label for="calc-deposit">Deposit</label>
               <div class="calc-input-wrap">
                 <span class="calc-prefix">£</span>
                 <input type="text" id="calc-deposit" inputmode="numeric" value="50000" autocomplete="off" />
               </div>
             </div>
+            <div class="calc-field" id="field-outstanding" hidden>
+              <label for="calc-outstanding">Outstanding mortgage</label>
+              <div class="calc-input-wrap">
+                <span class="calc-prefix">£</span>
+                <input type="text" id="calc-outstanding" inputmode="numeric" value="200000" autocomplete="off" />
+              </div>
+            </div>
             <div class="calc-field">
               <label for="calc-loan">Loan amount <span class="calc-label-note">(calculated)</span></label>
               <div class="calc-input-wrap calc-readonly-wrap">
                 <span class="calc-prefix">£</span>
-                <input type="text" id="calc-loan" readonly tabindex="-1" value="200000" aria-readonly="true" />
+                <input type="text" id="calc-loan" readonly tabindex="-1" value="285000" aria-readonly="true" />
               </div>
             </div>
             <div class="calc-field">
               <label for="calc-term">Term (years)</label>
-              <input type="number" id="calc-term" min="1" max="40" value="25" />
+              <input type="number" id="calc-term" min="1" max="40" value="30" />
             </div>
           </div>
 
-          <div class="calc-results">
+          <div class="calc-results" id="calc-illustration">
             <div class="calc-result">
               <span class="calc-result-label">LTV</span>
-              <strong id="calc-ltv">80.0%</strong>
+              <strong id="calc-ltv">85.1%</strong>
             </div>
             <div class="calc-result">
               <span class="calc-result-label">Est. market rate</span>
@@ -121,6 +109,10 @@
             <div class="calc-result highlight">
               <span class="calc-result-label">Estimated monthly payment</span>
               <strong id="calc-monthly">—</strong>
+            </div>
+            <div class="calc-result">
+              <span class="calc-result-label">Total repayable</span>
+              <strong id="calc-total">—</strong>
             </div>
           </div>
 
@@ -132,7 +124,34 @@
             Repayment mortgage illustration using the standard amortisation formula.
             Your actual rate and payment will depend on your circumstances and lender criteria.
           </p>
+
+          <div class="calc-nav-actions">
+            <button type="button" class="btn btn-primary" id="scroll-callback">Request a callback</button>
+            <button type="button" class="btn btn-outline" id="scroll-journey">Continue journey</button>
+          </div>
         </div>
+
+        <section id="rates" class="rates-strip rates-strip-compact rates-below-calc" aria-labelledby="rates-heading">
+          <div class="rates-head">
+            <div>
+              <h2 id="rates-heading">Bank of England Bank Rate</h2>
+              <p class="rates-sub" id="rates-as-of">Reference rate — updated when you load this page.</p>
+            </div>
+            <p class="rates-status" id="rates-status"></p>
+          </div>
+          <div class="rates-grid rates-grid-single">
+            <article class="rate-card rate-card-base">
+              <span class="rate-card-tag">Reference</span>
+              <p class="rate-card-label" id="rate-base-label">Bank of England Bank Rate</p>
+              <p class="rate-card-value" id="rate-base-value">—</p>
+              <p class="rate-source-micro" id="rate-base-source"></p>
+              <a class="rate-source-link" id="rate-base-source-link" href="#" target="_blank" rel="noopener noreferrer" hidden>View source</a>
+            </article>
+          </div>
+          <p class="rates-disclaimer" id="rates-disclaimer">
+            Bank of England Bank Rate for reference only — not a mortgage quote or recommendation.
+          </p>
+        </section>
 
         <div class="calculator-grid calculator-grid-below">
           <div id="callback-section" class="callback-card">
@@ -175,7 +194,7 @@
             </p>
           </div>
 
-          <div class="journey-continue-card">
+          <div id="journey-section" class="journey-continue-card">
             <h2>Or continue your journey</h2>
             <p>Create your account on Mortgage Hub and start voice, chat, or book an appointment with your advisor.</p>
             <div class="journey-grid journey-grid-compact">
@@ -203,8 +222,56 @@
       </div>
     </section>
 
-    <section class="alt">
-      <div class="container">
+    <section class="alt calc-guide-section" id="how-it-works">
+      <div class="container calc-guide">
+        <h2>How our mortgage calculator works</h2>
+        <p>
+          A mortgage calculator can help you work out your monthly repayments or understand how much you could borrow.
+          Our calculator estimates monthly repayments for a repayment mortgage using the standard amortisation formula.
+        </p>
+        <p>
+          A mortgage calculator should not replace a full affordability assessment or illustration from your lender —
+          it should only be used for quick calculations and estimates.
+        </p>
+
+        <h3>Key assumptions</h3>
+        <ul>
+          <li>Interest is compounded monthly</li>
+          <li>The best available rate used by the calculator is assumed to apply for the full mortgage term</li>
+          <li>Results are estimates and do not replace a full affordability assessment</li>
+        </ul>
+
+        <h3>For example</h3>
+        <p id="guide-example">
+          If you're buying a property worth <strong id="guide-price">£335,000</strong>,
+          put down a <strong id="guide-deposit">£50,000</strong> deposit,
+          and borrow over <strong id="guide-term">30</strong> years at a <strong id="guide-rate">4.26%</strong> interest rate:
+        </p>
+        <ul>
+          <li>Your monthly repayment is <strong id="guide-monthly">£1,404</strong></li>
+          <li>You're borrowing <strong id="guide-loan">£285,000</strong></li>
+          <li>The total amount repayable over those <strong id="guide-term-2">30</strong> years is <strong id="guide-total">£505,332</strong></li>
+        </ul>
+
+        <h3>What you can use this mortgage calculator for</h3>
+        <ul>
+          <li>Estimate your monthly repayments by inputting the purchase price (or outstanding balance for remortgage), deposit or equity, and term</li>
+          <li>Check if the repayments seem affordable before a full affordability check</li>
+          <li>Understand the total cost of borrowing, and how shortening and lengthening the term affects your monthly repayments and total amount payable</li>
+        </ul>
+        <p>
+          A mortgage calculator is less about giving an exact quote and more about helping you make the most informed decision before you speak with a lender or broker.
+        </p>
+
+        <h3>How changing the rate or term affects your mortgage</h3>
+        <p>
+          These examples assume borrowing <strong id="guide-compare-loan">£200,000</strong> at
+          <strong id="guide-compare-rate">4.26%</strong> over 25 years.
+        </p>
+        <p class="calc-guide-note">
+          <strong>Important:</strong> These examples are illustrative only and assume the interest rate stays the same for the full mortgage term.
+        </p>
+
         <div class="disclosure-inline" role="note">
           <h3>Important — illustrative figures only</h3>
           <p>
