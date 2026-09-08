@@ -19,7 +19,7 @@ import {
 } from "@/lib/browser-speech";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Pause, Play, ArrowLeft, Undo2, MessageSquare } from "lucide-react";
+import { Pause, Play, ArrowLeft, Undo2, MessageSquare, Send } from "lucide-react";
 import { toast } from "sonner";
 import { totalQuestions, questionIndexGlobal, getQuestion, findSection, prevStep, SECTIONS, ACKNOWLEDGEMENTS, ackClip, firstGreeting, firstNameFromFullName, buildQuestionSayText, type Section, type AnswersMap } from "@/lib/interview-script";
 import {
@@ -32,6 +32,7 @@ import {
   type CreditFlow,
   type DependantFlow,
 } from "@/lib/interview-wizards";
+import { OPEN_FIELD_KEY } from "@/lib/interview-opening";
 
 export const Route = createFileRoute("/_authenticated/interview/$sessionId")({
   component: InterviewPage,
@@ -51,6 +52,8 @@ interface StepResp {
   closing?: string;
   wizard?: "credit" | "dependants" | "dob";
   followupCount?: number;
+  options?: Array<{ value: string; label: string }>;
+  keepListening?: boolean;
 }
 
 // Hard cap on the spoken closing line so a stalled avatar/TTS never blocks the
@@ -65,7 +68,7 @@ const MAX_SILENT_RETRIES = 4; // silently re-listen this many times before promp
 const CALIBRATION_MS = 500; // measure ambient noise floor at start
 // Wait at most this long for the Simli session to connect before speaking the
 // first line, so it lip-syncs — but never hang if the avatar can't connect.
-const AVATAR_READY_TIMEOUT_MS = 6000;
+const AVATAR_READY_TIMEOUT_MS = 25000;
 const SPEECH_ON_MULT = 1.8; // RMS must exceed noiseFloor * this to count as speech
 const SPEECH_OFF_MULT = 1.25; // below noiseFloor * this counts as silence (hysteresis)
 const MIN_SPEECH_RMS = 0.006; // absolute floor for speech-on
@@ -130,6 +133,7 @@ function InterviewPage() {
   // Dependants wizard state (count, then per-child name & age).
   const [dependants, setDependants] = useState<DependantFlow | null>(null);
   const [dobSpeechMode, setDobSpeechMode] = useState(false);
+  const [typedAnswer, setTypedAnswer] = useState("");
 
   const mediaRef = useRef<MediaRecorder | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
@@ -246,8 +250,17 @@ function InterviewPage() {
   };
 
   const getStepOptions = (step: StepResp | null) => {
-    if (!step || step.done || !step.section || step.questionIndex == null) return null;
+    if (!step || step.done) return null;
     if (step.fieldKey === "home_confirm" && (step.followupCount ?? 0) > 0) return null;
+    if (step.options?.length) {
+      return {
+        options: step.options,
+        allowOther: false,
+        otherLabel: "Other",
+        otherPrompt: "No problem — please describe it in your own words.",
+      };
+    }
+    if (!step.section || step.questionIndex == null) return null;
     const q = getQuestion(step.section, step.questionIndex);
     if (!q?.options?.length) return null;
     return {
@@ -271,7 +284,16 @@ function InterviewPage() {
   // (tap options and the credit wizard wait for a tap instead).
   const armListenEarly = (step: StepResp | null) => {
     if (pausedRef.current || doneRef.current) return;
-    if (step?.wizard === "credit" || step?.wizard === "dependants" || (step?.wizard === "dob" && !dobSpeechMode) || getStepOptions(step)) return;
+    if (step?.wizard === "credit" || step?.wizard === "dependants") return;
+    if (
+      step?.wizard === "dob" ||
+      step?.keepListening ||
+      step?.fieldKey === OPEN_FIELD_KEY
+    ) {
+      startListeningOnce();
+      return;
+    }
+    if (getStepOptions(step)) return;
     startListeningOnce();
   };
 
@@ -283,11 +305,16 @@ function InterviewPage() {
       startCreditSelect();
     } else if (step?.wizard === "dependants") {
       startDependants();
-    } else if (step?.wizard === "dob" && !dobSpeechMode) {
+    } else if (step?.wizard === "dob") {
       startDob();
     } else if (getStepOptions(step)) {
       setOptionsActive(true);
-      setStatus("Tap the option that best fits");
+      setStatus(
+        step?.fieldKey === OPEN_FIELD_KEY
+          ? "Say no, ask a question, or tap below"
+          : "Tap the option that best fits — or say it",
+      );
+      if (step?.keepListening || step?.fieldKey === OPEN_FIELD_KEY) startListeningOnce();
     } else {
       startListeningOnce();
     }
@@ -448,7 +475,8 @@ function InterviewPage() {
     setOptionsActive(false);
     setDobSpeechMode(false);
     pendingTranscriptRef.current = null;
-    setStatus("Tap your date of birth below");
+    setStatus("You can tap the date below, or just say it");
+    startListeningOnce();
   };
 
   const confirmDob = (day: number, month: number, year: number) => {
@@ -456,18 +484,6 @@ function InterviewPage() {
     void callStep(buildDobAnswer(day, month, year));
   };
 
-  const dobSayInstead = async () => {
-    setDobSpeechMode(true);
-    setStatus("Susan is speaking…");
-    listenArmedRef.current = false;
-    const prompt = "No problem — just say your date of birth, including the day, month and year.";
-    try {
-      await play(prompt, { onNearEnd: () => startListeningOnce(), leadMs: 1000 });
-    } catch {
-      /* ignore playback failure — still listen */
-    }
-    startListeningOnce();
-  };
 
   // ---- Dependants wizard ----
   const setDependantsState = (next: DependantFlow | null) => {
@@ -534,6 +550,13 @@ function InterviewPage() {
       return;
     }
     void callStep(text);
+  };
+
+  const submitTypedAnswer = () => {
+    const value = typedAnswer.trim();
+    if (!value || thinking || transcribing) return;
+    setTypedAnswer("");
+    deliverTranscript(value);
   };
 
   const callStep = async (transcript: string) => {
@@ -618,10 +641,13 @@ function InterviewPage() {
           } else if (opts) {
             setOptionsActive(true);
             setStatus(
-              data.fieldKey === "home_confirm"
-                ? "Tap Yes to confirm, or No to try again"
-                : "Tap the option that best fits",
+              data.fieldKey === OPEN_FIELD_KEY
+                ? "Say no, ask a question, or tap below"
+                : data.fieldKey === "home_confirm"
+                  ? "Tap Yes to confirm, or No to try again"
+                  : "Tap the option that best fits — or say it",
             );
+            if (data.keepListening || data.fieldKey === OPEN_FIELD_KEY) startListeningOnce();
           } else {
             startListeningOnce();
           }
@@ -1167,12 +1193,13 @@ function InterviewPage() {
   const qi = current?.questionIndex ?? 0;
   const progress = done ? 100 : Math.round((questionIndexGlobal(sec, qi, answersMap) / Math.max(1, totalQuestions(answersMap))) * 100);
   const stepOpts = getStepOptions(current);
-  const showOptions = Boolean(stepOpts) && optionsActive && started && !done && !paused && !thinking && !transcribing && !listening;
+  const openFloor = current?.fieldKey === OPEN_FIELD_KEY || Boolean(current?.keepListening);
+  const showOptions = Boolean(stepOpts) && optionsActive && started && !done && !paused && !thinking && !transcribing && (openFloor || !listening);
   const wizardReady = started && !done && !paused && !thinking && !transcribing;
   const showCreditSelect = credit?.phase === "select" && wizardReady;
   const showCreditCount = credit?.phase === "count" && wizardReady && !listening;
   const showDependantsCount = dependants?.phase === "count" && wizardReady && !listening;
-  const showDobPicker = current?.wizard === "dob" && !dobSpeechMode && wizardReady && !listening;
+  const showDobPicker = current?.wizard === "dob" && wizardReady;
 
   return (
     <AppShell
@@ -1232,6 +1259,32 @@ function InterviewPage() {
                   ? revealByProgress(current.sayText, speechProgress)
                   : current?.prompt ?? (thinking ? "Preparing your first question…" : "")}
               </p>
+              {started && !done && !paused && !thinking && !needsGesture && !credit && !dependants && (
+                <form
+                  className="flex w-full max-w-md items-center gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    submitTypedAnswer();
+                  }}
+                >
+                  <input
+                    value={typedAnswer}
+                    onChange={(e) => setTypedAnswer(e.target.value)}
+                    placeholder={
+                      current?.wizard === "dob"
+                        ? "Or type your date of birth, e.g. 15 March 1980"
+                        : current?.fieldKey === OPEN_FIELD_KEY
+                          ? "Type a question, or say it"
+                          : "Or type your answer"
+                    }
+                    className="flex-1 rounded-full border bg-background px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    aria-label="Type your answer"
+                  />
+                  <Button type="submit" size="icon" className="rounded-full shrink-0" disabled={!typedAnswer.trim()} aria-label="Send">
+                    <Send className="w-4 h-4" />
+                  </Button>
+                </form>
+              )}
               {lastHeard && listening && (
                 <p className="text-xs text-muted-foreground">Hearing: {lastHeard}</p>
               )}
@@ -1356,7 +1409,7 @@ function InterviewPage() {
                 </div>
               )}
               {showDobPicker && (
-                <DobPicker onConfirm={confirmDob} onSayInstead={() => void dobSayInstead()} />
+                <DobPicker onConfirm={confirmDob} />
               )}
               <p className="text-sm text-muted-foreground">
                 {transcribing

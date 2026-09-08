@@ -206,7 +206,7 @@ export const SECTIONS: SectionDef[] = [
       {
         key: "date_of_birth",
         label: "Date of birth",
-        prompt: "What's your date of birth? Tap the day, month and year below — or say it aloud, for example 15 March 1980.",
+        prompt: "What's your date of birth? You can tap the day, month and year below, or you can just say it — for example, 15 March 1980.",
         expects: "A complete date of birth: day, month, and year.",
         wizard: "dob",
         silenceMs: 2000,

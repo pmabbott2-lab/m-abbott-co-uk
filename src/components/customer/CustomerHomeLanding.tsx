@@ -38,7 +38,7 @@ import { getSessionBooking, requestCallbackAuth } from "@/lib/booking.functions"
 import { supabase } from "@/integrations/supabase/client";
 
 const CARD =
-  "group text-left rounded-2xl border bg-card p-5 hover:border-primary hover:shadow-sm transition disabled:opacity-60 h-full w-full";
+  "group text-left rounded-2xl border bg-card p-3.5 lg:p-4 hover:border-primary hover:shadow-sm transition disabled:opacity-60 h-full w-full";
 
 function CopyLinkButton({ value, label = "Copy link" }: { value: string; label?: string }) {
   const [copied, setCopied] = useState(false);
@@ -88,15 +88,19 @@ function JourneyCard({
       onClick={onClick}
       className={`${CARD} ${active ? "border-primary bg-primary/5" : ""}`}
     >
-      <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary">
-        {icon}
+      <span className="flex flex-row items-start gap-3 text-left">
+        <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary shrink-0">
+          {icon}
+        </span>
+        <span className="min-w-0 flex-1">
+          <h3 className="font-semibold text-base flex items-center gap-1.5 leading-tight">
+            {title}
+            <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition shrink-0" />
+          </h3>
+          <p className="text-sm text-muted-foreground mt-1 leading-snug">{description}</p>
+          {cta && <p className="text-sm font-medium text-primary mt-1.5">{cta}</p>}
+        </span>
       </span>
-      <h3 className="font-semibold text-base mt-3 flex items-center gap-1.5">
-        {title}
-        <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition shrink-0" />
-      </h3>
-      <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">{description}</p>
-      {cta && <p className="text-sm font-medium text-primary mt-3">{cta}</p>}
     </button>
   );
 }
@@ -165,27 +169,29 @@ function CallbackBanner({
   });
 
   return (
-    <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/[0.06] to-transparent p-4 sm:p-5">
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-        <span className="inline-flex w-12 h-12 items-center justify-center rounded-full bg-primary text-primary-foreground shrink-0">
+    <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/[0.06] to-transparent p-3.5 lg:p-4">
+      <div className="flex items-start gap-3">
+        <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary text-primary-foreground shrink-0">
           <PhoneCall className="w-5 h-5" />
         </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="font-semibold text-base">Prefer us to call you?</h3>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Arrange a call back and an advisor will ring you in a window that suits — no need to start a
-            fact-find first.
-          </p>
+        <div className="min-w-0 flex-1 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <h3 className="font-semibold text-base leading-tight">Prefer us to call you?</h3>
+            <p className="text-sm text-muted-foreground mt-1 leading-snug">
+              Arrange a call back and an advisor will ring you in a window that suits — no need to start a
+              fact-find first.
+            </p>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant={expanded ? "secondary" : "default"}
+            className="shrink-0 self-start sm:self-auto"
+            onClick={onToggle}
+          >
+            {expanded ? "Close" : "Arrange a call back"}
+          </Button>
         </div>
-        <Button
-          type="button"
-          size="sm"
-          variant={expanded ? "secondary" : "default"}
-          className="shrink-0"
-          onClick={onToggle}
-        >
-          {expanded ? "Close" : "Arrange a call back"}
-        </Button>
       </div>
 
       {expanded && (
@@ -324,17 +330,21 @@ function AppointmentJourneyCard({
   if (!upcoming?.appointment) {
     return (
       <Link to="/booking" className={`${CARD} block`}>
-        <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <CalendarCheck className="w-5 h-5" />
+        <span className="flex flex-row items-start gap-3 text-left">
+          <span className="inline-flex w-11 h-11 items-center justify-center rounded-full bg-primary/10 text-primary shrink-0">
+            <CalendarCheck className="w-5 h-5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <h3 className="font-semibold text-base flex items-center gap-1.5 leading-tight">
+              Book an appointment
+              <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition shrink-0" />
+            </h3>
+            <p className="text-sm text-muted-foreground mt-1 leading-snug">
+              Prefer to speak to an advisor first? Choose a time that suits you — we&apos;ll confirm by text.
+            </p>
+            <p className="text-sm font-medium text-primary mt-1.5">Pick a time →</p>
+          </span>
         </span>
-        <h3 className="font-semibold text-base mt-3 flex items-center gap-1.5">
-          Book an appointment
-          <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition shrink-0" />
-        </h3>
-        <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
-          Prefer to speak to an advisor first? Choose a time that suits you — we&apos;ll confirm by text.
-        </p>
-        <p className="text-sm font-medium text-primary mt-3">Pick a time →</p>
       </Link>
     );
   }
@@ -643,7 +653,7 @@ export function CustomerHomeLanding({
   });
 
   return (
-    <div className="max-w-3xl mx-auto space-y-5">
+    <div className="max-w-3xl mx-auto space-y-3 sm:space-y-5">
       <CallbackBanner
         expanded={homePanel === "callback"}
         onToggle={() => toggle("callback")}
@@ -653,17 +663,19 @@ export function CustomerHomeLanding({
       <HubSubNav
         persistKey="customer-home"
         defaultValue="start"
+        className="space-y-3 sm:space-y-4"
+        listClassName="w-full justify-center mb-0"
         tabs={[
           {
             id: "start",
             label: "Start",
             content: (
-              <div className="space-y-5">
+              <div className="space-y-3 sm:space-y-5">
                 <div>
-                  <h2 className="text-2xl font-semibold tracking-tight">
+                  <h2 className="text-xl sm:text-2xl font-semibold tracking-tight">
                     {inProgressId ? "Continue your mortgage journey" : "How would you like to start?"}
                   </h2>
-                  <p className="text-muted-foreground text-sm mt-1.5 leading-relaxed">
+                  <p className="text-muted-foreground text-sm mt-1.5 leading-snug">
                     {inProgressId
                       ? "Pick up where you left off — talk or type, and you can switch any time."
                       : hasSubmitted
@@ -672,7 +684,7 @@ export function CustomerHomeLanding({
                   </p>
                 </div>
 
-                <div className="grid sm:grid-cols-3 gap-3">
+                <div className="grid sm:grid-cols-3 gap-2 sm:gap-3">
                   <JourneyCard
                     icon={<Mic className="w-5 h-5" />}
                     title={inProgressId ? "Continue talking" : "Talk it through"}

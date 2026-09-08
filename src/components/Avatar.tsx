@@ -9,8 +9,10 @@ import {
 } from "@/lib/browser-speech";
 import {
   REALTIME_AVATAR_ENABLED,
+  SIMLI_SAMPLE_RATE,
   encodePcm16kMono,
   getRealtimeAvatarSink,
+  trimPcmLeadingSilence,
   type RealtimeAvatarSink,
 } from "@/lib/realtime-avatar-bridge";
 
@@ -354,12 +356,12 @@ export function useAudioPlayback(getAuthToken?: () => Promise<string | null>) {
     if (ctx.state === "suspended") await ctx.resume();
     const arrayBuffer = await blob.arrayBuffer();
     const buffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
-    const pcm = encodePcm16kMono(buffer);
+    const pcm = trimPcmLeadingSilence(encodePcm16kMono(buffer));
     await sink.speak(pcm);
 
     const report = (v: number) => { if (!opts?.noReveal) setProgress(v); };
     setProgress(0);
-    const dur = buffer.duration;
+    const dur = pcm.length / SIMLI_SAMPLE_RATE;
     const leadSec = (opts?.leadMs ?? 1000) / 1000;
     await new Promise<void>((resolve) => {
       const startMs = performance.now();

@@ -31,6 +31,7 @@ import {
   type CreditFlow,
   type DependantFlow,
 } from "@/lib/interview-wizards";
+import { OPEN_FIELD_KEY } from "@/lib/interview-opening";
 
 interface StepResp {
   done: boolean;
@@ -45,6 +46,8 @@ interface StepResp {
   sayText?: string;
   wizard?: "credit" | "dependants" | "dob";
   followupCount?: number;
+  options?: Array<{ value: string; label: string }>;
+  keepListening?: boolean;
 }
 
 interface ChatMsg {
@@ -57,8 +60,17 @@ let bubbleSeq = 0;
 const nextId = () => `m-${Date.now()}-${bubbleSeq++}`;
 
 function getStepOptions(step: StepResp | null) {
-  if (!step || step.done || !step.section || step.questionIndex == null) return null;
+  if (!step || step.done) return null;
   if (step.fieldKey === "home_confirm" && (step.followupCount ?? 0) > 0) return null;
+  if (step.options?.length) {
+    return {
+      options: step.options,
+      allowOther: false,
+      otherLabel: "Other",
+      otherPrompt: "No problem — please describe it in your own words.",
+    };
+  }
+  if (!step.section || step.questionIndex == null) return null;
   const q = getQuestion(step.section, step.questionIndex);
   if (!q?.options?.length) return null;
   return {
@@ -232,7 +244,7 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
       startCreditSelect();
     } else if (step.wizard === "dependants") {
       startDependants();
-    } else if (step.wizard === "dob" && !dobTypingMode) {
+    } else if (step.wizard === "dob") {
       startDob();
     } else if (getStepOptions(step)) {
       setOptionsActive(true);
@@ -271,12 +283,6 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
     submitAnswer(buildDobAnswer(day, month, year));
   };
 
-  const dobTypeInstead = () => {
-    setDobTypingMode(true);
-    setTextPlaceholder("e.g. 15 March 1980");
-    appendAssistant("No problem — type your date of birth below, including the day, month and year.");
-    requestAnimationFrame(() => inputRef.current?.focus());
-  };
 
   // ---- Credit-commitments wizard ----
   const setCreditState = (next: CreditFlow | null) => {
@@ -561,12 +567,12 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
   const showCreditSelect = credit?.phase === "select" && !done && !thinking;
   const showCreditCount = credit?.phase === "count" && !done && !thinking;
   const showDependantsCount = dependants?.phase === "count" && !done && !thinking;
-  const showDobPicker = current?.wizard === "dob" && !dobTypingMode && !done && !thinking;
+  const showDobPicker = current?.wizard === "dob" && !done && !thinking;
   const showTextInput =
     !done &&
     Boolean(current) &&
     (textHandlerActive ||
-      (!credit && !dependants && !optionsActive && !stepOpts && !(current?.wizard === "dob" && !dobTypingMode)));
+      (!credit && !dependants && !(optionsActive && stepOpts && current?.fieldKey !== OPEN_FIELD_KEY)));
 
   return (
     <AppShell
@@ -659,11 +665,7 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
 
             {showDobPicker && (
               <div className="pt-1">
-                <DobPicker
-                  onConfirm={confirmDob}
-                  onSayInstead={dobTypeInstead}
-                  sayInsteadLabel="Type it instead"
-                />
+                <DobPicker onConfirm={confirmDob} />
               </div>
             )}
 
@@ -767,7 +769,11 @@ export function ChatInterview({ sessionId }: { sessionId: string }) {
                 disabled={!showTextInput || thinking}
                 placeholder={
                   showTextInput
-                    ? textPlaceholder
+                    ? current?.wizard === "dob"
+                      ? "Or type your date of birth, e.g. 15 March 1980"
+                      : current?.fieldKey === OPEN_FIELD_KEY
+                        ? "Type a question, or tap below"
+                        : textPlaceholder
                     : thinking
                       ? "Susan is typing…"
                       : "Tap an option above to continue"

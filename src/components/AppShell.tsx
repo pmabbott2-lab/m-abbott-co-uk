@@ -29,20 +29,20 @@ export function AppShell({
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card/60 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="max-w-5xl mx-auto px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2">
           <Link to="/home" className="flex items-center gap-2 font-semibold shrink-0">
             <span className="inline-flex w-7 h-7 items-center justify-center rounded-lg bg-primary text-primary-foreground text-xs font-bold shadow-sm">
               MH
             </span>
-            Mortgage Hub
+            <span className="hidden sm:inline">Mortgage Hub</span>
           </Link>
           <h1 className="text-sm font-medium text-muted-foreground hidden sm:block min-w-0 truncate">{title}</h1>
-          <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
+          <div className="flex items-center justify-end gap-1 sm:gap-2 min-w-0">
             {action}
-            <Button variant="ghost" size="sm" className="shrink-0" asChild>
+            <Button variant="ghost" size="sm" className="shrink-0 px-2 sm:px-3" asChild>
               <a href={mortgageEasyUrl} target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="w-4 h-4 mr-1.5" />
-                MortgageEasy
+                <ExternalLink className="w-4 h-4 sm:mr-1.5" />
+                <span className="hidden sm:inline">MortgageEasy</span>
               </a>
             </Button>
             {backTo && (
@@ -66,7 +66,7 @@ export function AppShell({
           </div>
         </div>
       </header>
-      <main className="max-w-5xl mx-auto px-4 py-6">{children}</main>
+      <main className="max-w-5xl mx-auto px-4 py-4 sm:py-6">{children}</main>
     </div>
   );
 }

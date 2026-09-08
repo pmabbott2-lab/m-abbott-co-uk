@@ -96,6 +96,15 @@ export function whenRealtimeAvatarReady(timeoutMs = 6000): Promise<boolean> {
  * We resample manually rather than relying on a 16 kHz AudioContext because
  * Safari/iOS don't reliably honour a custom `sampleRate` on AudioContext.
  */
+/** Drop TTS lead-in silence so visemes start with audible speech. Keep ~40ms pre-roll. */
+export function trimPcmLeadingSilence(pcm: Int16Array, threshold = 400): Int16Array {
+  let i = 0;
+  while (i < pcm.length && Math.abs(pcm[i]) < threshold) i += 1;
+  const preRoll = Math.min(i, Math.round(SIMLI_SAMPLE_RATE * 0.04));
+  const start = Math.max(0, i - preRoll);
+  return start <= 0 ? pcm : pcm.subarray(start);
+}
+
 export function encodePcm16kMono(buffer: AudioBuffer): Int16Array {
   const srcRate = buffer.sampleRate;
   const srcLen = buffer.length;

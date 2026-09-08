@@ -5,6 +5,8 @@ import { resolveAddress, isLikelyPostcode } from "@/lib/address-lookup.server";
 import { ageFromText, parseDob, formatDobText } from "@/lib/dob-parse";
 import { getQuestion, nextStep, findSection, SECTIONS, ACKNOWLEDGEMENTS, ackClip, firstGreeting, firstNameFromFullName, resolveQuestionPrompt, type Section, type AnswersMap } from "@/lib/interview-script";
 import { smalltalkEnabled, isAsideMoment, generateAside } from "@/lib/interview-smalltalk.server";
+import { beginJourneyLine, maybeConversationalStep } from "@/lib/interview-conversation.server";
+import { isInternalAnswerKey } from "@/lib/interview-opening";
 import { createClient } from "@supabase/supabase-js";
 import { sendInterviewCompleteSms } from "@/lib/sms.server";
 import type { Database } from "@/integrations/supabase/types";
@@ -100,6 +102,21 @@ export const Route = createFileRoute("/api/interview-step")({
         const index = session.current_question_index;
         const currentQ = getQuestion(section, index);
 
+        const conv = await maybeConversationalStep({
+          supabase,
+          sessionId: body.sessionId,
+          transcript: body.transcript,
+          firstName: profileFirstName,
+          section,
+          index,
+          currentQ,
+        });
+        if (conv.action === "respond") {
+          return Response.json(conv.json);
+        }
+        const comingFromOpening = conv.action === "begin_journey";
+        const workingTranscript = comingFromOpening ? "" : body.transcript;
+
         // Save customer transcript (first call sends empty transcript to get first question)
         let cleanedValue: string | null = null;
         let acknowledgement = "";
@@ -107,21 +124,22 @@ export const Route = createFileRoute("/api/interview-step")({
         let stayOnSameQuestion = false;
         let nextFollowupCount = 0;
 
-        if (body.transcript.trim() && currentQ) {
+        if (workingTranscript.trim() && currentQ) {
           await supabase.from("interview_messages").insert({
             session_id: body.sessionId,
             role: "customer",
-            text: body.transcript,
+            text: workingTranscript,
             section,
           });
 
-          const rawValue = body.transcript.trim().replace(/\s+/g, " ");
+          const rawValue = workingTranscript.trim().replace(/\s+/g, " ");
           const { data: priorRows } = await supabase
             .from("interview_answers")
             .select("section, field_key, value")
             .eq("session_id", body.sessionId);
           const priorMap: AnswersMap = {};
           (priorRows ?? []).forEach((a) => {
+            if (isInternalAnswerKey(a.field_key)) return;
             priorMap[`${a.section}:${a.field_key}`] = a.value ?? "";
           });
           const firstName = profileFirstName;
@@ -280,6 +298,7 @@ export const Route = createFileRoute("/api/interview-step")({
           .eq("session_id", body.sessionId);
         const answersMap: AnswersMap = {};
         (answerRows ?? []).forEach((a) => {
+          if (isInternalAnswerKey(a.field_key)) return;
           answersMap[`${a.section}:${a.field_key}`] = a.value ?? "";
         });
         if (currentQ && cleanedValue !== null) {
@@ -287,7 +306,7 @@ export const Route = createFileRoute("/api/interview-step")({
         }
 
         // Determine next question (advance), or stay for AI follow-up / dependants loop
-        const isFirst = !body.transcript.trim() && index === 0 && section === "personal";
+        const isFirst = !workingTranscript.trim() && index === 0 && section === "personal";
         let step = isFirst ? { section, index } : nextStep(section, index, answersMap);
 
         if (stayOnSameQuestion) {
@@ -295,7 +314,7 @@ export const Route = createFileRoute("/api/interview-step")({
           acknowledgement = "";
         }
 
-        if (body.transcript.trim() && currentQ?.key === "dependants_details" && !isFinishedChildren(body.transcript)) {
+        if (workingTranscript.trim() && currentQ?.key === "dependants_details" && !isFinishedChildren(workingTranscript)) {
           const expectedChildren = parseSmallNumber(answersMap["personal:dependants_count"]);
           const detailsSoFar = answersMap["personal:dependants_details"] ?? cleanedValue ?? "";
           const capturedChildren = countChildDetails(detailsSoFar);
@@ -318,6 +337,7 @@ export const Route = createFileRoute("/api/interview-step")({
 
           const grouped: Record<string, string[]> = {};
           (allAnswers ?? []).forEach((a) => {
+            if (isInternalAnswerKey(a.field_key)) return;
             const sec = findSection(a.section as Section)?.title ?? a.section;
             grouped[sec] = grouped[sec] ?? [];
             grouped[sec].push(`- ${a.field_label}: ${a.value}`);
@@ -393,7 +413,7 @@ export const Route = createFileRoute("/api/interview-step")({
         // customer already shared, woven in before the next scripted question.
         const smalltalk = smalltalkEnabled();
         let aside = "";
-        if (smalltalk && !isFirst && !stayOnSameQuestion && body.transcript.trim() && isAsideMoment(currentQ?.key)) {
+        if (smalltalk && !isFirst && !comingFromOpening && !stayOnSameQuestion && workingTranscript.trim() && isAsideMoment(currentQ?.key)) {
           aside = await generateAside({
             answers: answersMap,
             justAnsweredKey: currentQ!.key,
@@ -442,7 +462,11 @@ export const Route = createFileRoute("/api/interview-step")({
         const scriptedSay =
           followupPrompt ||
           confirmPrompt ||
-          (isFirst ? firstGreeting(firstName, firstPrompt) : intro + borrowNote + resolveQuestionPrompt(nextQ, answersMap));
+          (comingFromOpening
+            ? beginJourneyLine(firstName, firstPrompt)
+            : isFirst
+              ? firstGreeting(firstName, firstPrompt)
+              : intro + borrowNote + resolveQuestionPrompt(nextQ, answersMap));
         const sayText = personalise(aside ? `${aside} ${scriptedSay}` : scriptedSay);
         // The ack is only spoken when advancing to a new question, not on follow-ups.
         const ack = stayOnSameQuestion ? "" : ackText;

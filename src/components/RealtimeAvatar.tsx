@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SimliClient } from "simli-client";
+import { ConnectingHold } from "@/components/ConnectingHold";
 import { TalkingPhoto } from "@/components/TalkingPhoto";
+import { AVATAR_STAGE, avatarCropInnerStyle, avatarStageFrameHeight } from "@/lib/avatar-frame";
 import { supabase } from "@/integrations/supabase/client";
 import {
   REALTIME_AVATAR_ENABLED,
   registerRealtimeAvatarSink,
+  trimPcmLeadingSilence,
   type RealtimeAvatarSink,
 } from "@/lib/realtime-avatar-bridge";
 
@@ -12,164 +15,161 @@ import {
  * RealtimeAvatar — a real-time, lip-synced "Susan" avatar powered by Simli
  * (https://docs.simli.com), wired behind the `VITE_REALTIME_AVATAR` flag.
  *
- * ─────────────────────────────────────────────────────────────────────────
- * SAFE BY DEFAULT
- * ─────────────────────────────────────────────────────────────────────────
- * When the flag is OFF (default), this renders <TalkingPhoto> verbatim — the
- * Simli code below never even mounts. It is a literal drop-in for <TalkingPhoto>
- * (identical props), so it can replace it in the interview route with no risk.
- *
- * When the flag is ON, on the first user gesture we:
- *   1. Mint a short-lived Simli session token from `/api/avatar-token`
- *      (server keeps SIMLI_API_KEY; the faceId is baked into the token).
- *   2. Open ONE Simli WebRTC session for the whole interview (billed per
- *      second — we never open one per line) and attach the streamed video to a
- *      <video> in the same circular footprint as <TalkingPhoto>.
- *   3. Register a sink (see realtime-avatar-bridge) so `useAudioPlayback` can
- *      hand us decoded TTS as 16 kHz mono Int16 PCM. Simli plays that audio and
- *      lip-syncs to it — so the existing <audio> element does NOT play it too
- *      (avoids double audio).
- *
- * On ANY failure (no key/501, token error, WebRTC failure, or browser-voice
- * fallback) we keep showing <TalkingPhoto>, so behaviour degrades gracefully.
- * We use OpenAI `sage` TTS + our STT/turn-taking exactly as before; Simli only
- * renders the face.
+ * When the flag is OFF, this renders <TalkingPhoto> verbatim.
+ * When the flag is ON, the connecting tile is the consultation-room hold until
+ * live video has painted. We never put a still of Susan in that slot.
  */
 
 type Props = {
-  /** True while Susan is speaking. */
   speaking?: boolean;
-  /** True while listening on the mic. */
   listening?: boolean;
-  /** Live 0..1 speech loudness (from useAudioPlayback). */
   getAmplitude?: () => number;
-  /** Browser-voice sessions have no analysable stream — drive a procedural pulse. */
   usingBrowserVoice?: boolean;
   size?: number;
+  layout?: "circle" | "stage";
 };
 
-/** Simli recommends ~6000-byte PCM chunks (even → keeps Int16 alignment). */
 const SIMLI_CHUNK_BYTES = 6000;
+const CONNECT_RETRY_MS = 3000;
+const CONNECT_RETRY_MAX_MS = 10000;
 
-type SessionStatus = "idle" | "connecting" | "ready" | "failed";
+type SessionStatus = "idle" | "connecting" | "ready";
 
 function RealtimeAvatarImpl(props: Props) {
-  const { size = 240, usingBrowserVoice } = props;
+  const { size = 240, usingBrowserVoice, layout = "stage" } = props;
+  const stage = layout === "stage";
+  const width = stage ? AVATAR_STAGE.width : size;
+  const height = stage ? avatarStageFrameHeight() : size;
+  const frameRadius = stage ? AVATAR_STAGE.radius : "9999px";
+  const cropInner = avatarCropInnerStyle();
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const clientRef = useRef<SimliClient | null>(null);
   const startedRef = useRef(false);
+  const cancelledRef = useRef(false);
   const unregisterRef = useRef<(() => void) | null>(null);
 
   const [status, setStatus] = useState<SessionStatus>("idle");
   const statusRef = useRef<SessionStatus>(status);
   statusRef.current = status;
 
-  // True only once the streamed <video> has actually PRESENTED a frame. We gate
-  // the still→live crossfade on this (not merely on the WebRTC session being
-  // "ready") so we never flip the portrait to a blank/frozen video frame — that
-  // pop was the "clunky flip" on the first question.
   const [videoReady, setVideoReady] = useState(false);
 
   const usingBrowserVoiceRef = useRef(usingBrowserVoice);
   usingBrowserVoiceRef.current = usingBrowserVoice;
 
-  const teardown = useCallback((next: SessionStatus) => {
+  const stopClient = useCallback(() => {
     const client = clientRef.current;
     clientRef.current = null;
     if (client) {
-      // stop() is async but we don't need to await — closing the session is
-      // best-effort cleanup (it ends Simli billing for this session).
       void Promise.resolve()
         .then(() => client.stop())
         .catch(() => {});
     }
     setVideoReady(false);
-    setStatus(next);
   }, []);
 
   const startSession = useCallback(async () => {
     if (startedRef.current) return;
-    // No OpenAI MP3 to stream when on the browser voice — stay on the portrait.
     if (usingBrowserVoiceRef.current) return;
     startedRef.current = true;
     setStatus("connecting");
 
-    try {
-      const { data } = await supabase.auth.getSession();
-      const accessToken = data.session?.access_token ?? null;
+    let delay = CONNECT_RETRY_MS;
+    while (!cancelledRef.current && !usingBrowserVoiceRef.current) {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const accessToken = data.session?.access_token ?? null;
 
-      const res = await fetch("/api/avatar-token", {
-        method: "POST",
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-      });
-      if (!res.ok) throw new Error(`avatar-token ${res.status}`);
-      const { session_token: sessionToken } = (await res.json()) as { session_token?: string };
-      if (!sessionToken) throw new Error("Missing Simli session token");
+        const res = await fetch("/api/avatar-token", {
+          method: "POST",
+          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+        });
+        if (!res.ok) throw new Error(`avatar-token ${res.status}`);
+        const { session_token: sessionToken } = (await res.json()) as { session_token?: string };
+        if (!sessionToken) throw new Error("Missing Simli session token");
 
-      const video = videoRef.current;
-      const audio = audioRef.current;
-      if (!video || !audio) throw new Error("Avatar media elements unavailable");
+        const video = videoRef.current;
+        const audio = audioRef.current;
+        if (!video || !audio) throw new Error("Avatar media elements unavailable");
 
-      // Client-only import: keeps Simli (and its livekit-client dep, which
-      // touches browser globals) out of the SSR bundle.
-      const { SimliClient, LogLevel } = await import("simli-client");
-      const client = new SimliClient(
-        sessionToken,
-        video,
-        audio,
-        null, // livekit mode — no manual ICE servers; better behind firewalls
-        LogLevel.ERROR,
-        "livekit",
-      );
-      clientRef.current = client;
+        const { SimliClient, LogLevel } = await import("simli-client");
+        const client = new SimliClient(
+          sessionToken,
+          video,
+          audio,
+          null,
+          LogLevel.ERROR,
+          "livekit",
+        );
+        clientRef.current = client;
 
-      // Terminal failures (bad faceId, depleted minutes, WebRTC crash): the SDK
-      // retries transient issues itself, so these mean "fall back to portrait".
-      client.on("error", () => teardown("failed"));
-      client.on("startup_error", () => teardown("failed"));
+        const reconnect = () => {
+          if (cancelledRef.current) return;
+          if (statusRef.current !== "ready") return;
+          stopClient();
+          startedRef.current = false;
+          setStatus("connecting");
+          void startSession();
+        };
+        client.on("error", reconnect);
+        client.on("startup_error", reconnect);
 
-      await client.start();
+        await client.start();
+        void video.play().catch(() => {});
 
-      // A late teardown (e.g. browser-voice flip) may have nulled the ref.
-      if (clientRef.current !== client) {
-        void client.stop().catch(() => {});
+        if (clientRef.current !== client) {
+          void client.stop().catch(() => {});
+          return;
+        }
+        setStatus("ready");
         return;
+      } catch (err) {
+        console.warn("Realtime avatar connecting — retrying", err);
+        stopClient();
+        if (cancelledRef.current || usingBrowserVoiceRef.current) break;
+        await new Promise((r) => setTimeout(r, delay));
+        delay = Math.min(delay + 1000, CONNECT_RETRY_MAX_MS);
       }
-      setStatus("ready");
-    } catch (err) {
-      console.warn("Realtime avatar unavailable — using static portrait", err);
-      teardown("failed");
     }
-  }, [teardown]);
+    startedRef.current = false;
+  }, [stopClient]);
 
-  // Start one session on the first user gesture (satisfies autoplay policy and
-  // avoids billing before the user actually engages with the interview).
   useEffect(() => {
+    cancelledRef.current = false;
+    void startSession();
     const onGesture = () => {
       void startSession();
     };
     window.addEventListener("pointerdown", onGesture, { once: true });
     window.addEventListener("keydown", onGesture, { once: true });
     return () => {
+      cancelledRef.current = true;
       window.removeEventListener("pointerdown", onGesture);
       window.removeEventListener("keydown", onGesture);
     };
   }, [startSession]);
 
-  // Expose the sink so useAudioPlayback can feed us decoded PCM. Methods read
-  // refs (not state) so they never see stale values.
   useEffect(() => {
     const sink: RealtimeAvatarSink = {
       isReady: () =>
         statusRef.current === "ready" && !!clientRef.current && !usingBrowserVoiceRef.current,
-      isFailed: () => statusRef.current === "failed" || !!usingBrowserVoiceRef.current,
+      isFailed: () => !!usingBrowserVoiceRef.current,
       speak: async (pcm: Int16Array) => {
         const client = clientRef.current;
         if (!client || statusRef.current !== "ready") throw new Error("Avatar not ready");
-        const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
-        for (let i = 0; i < bytes.length; i += SIMLI_CHUNK_BYTES) {
+        const trimmed = trimPcmLeadingSilence(pcm);
+        const bytes = new Uint8Array(trimmed.buffer, trimmed.byteOffset, trimmed.byteLength);
+        let offset = 0;
+        const immediate = (client as SimliClient & { sendAudioDataImmediate?: (data: Uint8Array) => void })
+          .sendAudioDataImmediate;
+        if (typeof immediate === "function" && bytes.length) {
+          const first = Math.min(SIMLI_CHUNK_BYTES, bytes.length);
+          immediate.call(client, bytes.slice(0, first));
+          offset = first;
+        }
+        for (let i = offset; i < bytes.length; i += SIMLI_CHUNK_BYTES) {
           client.sendAudioData(bytes.slice(i, i + SIMLI_CHUNK_BYTES));
         }
       },
@@ -189,10 +189,6 @@ function RealtimeAvatarImpl(props: Props) {
     };
   }, []);
 
-  // Reveal the live video only once it has genuinely painted a frame. We prefer
-  // requestVideoFrameCallback (fires when a frame is actually presented) and
-  // fall back to the "playing"/"loadeddata" media events on browsers without it.
-  // This is what makes the still→live handoff a clean crossfade instead of a pop.
   useEffect(() => {
     if (status !== "ready") return;
     const video = videoRef.current;
@@ -223,15 +219,14 @@ function RealtimeAvatarImpl(props: Props) {
     };
   }, [status]);
 
-  // If TTS falls back to the browser voice mid-session, there's no PCM to feed
-  // Simli — tear the session down and revert to the portrait.
   useEffect(() => {
-    if (usingBrowserVoice && clientRef.current) {
-      teardown("failed");
+    if (usingBrowserVoice) {
+      stopClient();
+      startedRef.current = false;
+      setStatus("connecting");
     }
-  }, [usingBrowserVoice, teardown]);
+  }, [usingBrowserVoice, stopClient]);
 
-  // Close the session on unmount (one session per interview; billed per second).
   useEffect(() => {
     return () => {
       const client = clientRef.current;
@@ -240,42 +235,52 @@ function RealtimeAvatarImpl(props: Props) {
     };
   }, []);
 
-  return (
-    <div className="relative inline-block" style={{ width: size, height: size }}>
-      {/* Base portrait: always present, so we have a face while connecting and a
-          graceful fallback on failure. It also keeps the listening/speaking rings. */}
-      <TalkingPhoto {...props} />
+  const live = status === "ready" && videoReady;
 
-      {/* Streamed Simli video, crossfading in over the portrait only once it has
-          actually presented a frame (status "ready" alone isn't enough). */}
+  return (
+    <div className="relative inline-block" style={{ width, height }}>
       <div
-        className="absolute inset-0 rounded-full overflow-hidden"
+        className="absolute inset-0 overflow-hidden"
         style={{
-          opacity: status === "ready" && videoReady ? 1 : 0,
+          borderRadius: frameRadius,
+          opacity: live ? 1 : 0,
           transition: "opacity 450ms ease-in-out",
           pointerEvents: "none",
         }}
-        aria-hidden={!(status === "ready" && videoReady)}
+        aria-hidden={!live}
       >
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top" }}
+          style={{
+            ...cropInner,
+            objectFit: "cover",
+            objectPosition: "top",
+          }}
         />
       </div>
 
-      {/* Simli attaches the remote AUDIO track here — the single source of truth
-          for Susan's voice in this mode (the existing <audio> stays silent). */}
+      <div
+        className="absolute inset-0 overflow-hidden ring-1 ring-border/50 bg-[#14110e]"
+        style={{
+          borderRadius: frameRadius,
+          opacity: live ? 0 : 1,
+          transition: "opacity 280ms ease-out",
+          pointerEvents: live ? "none" : undefined,
+        }}
+        aria-hidden={live}
+      >
+        <ConnectingHold radius={frameRadius} />
+      </div>
+
       <audio ref={audioRef} autoPlay className="hidden" />
     </div>
   );
 }
 
 export function RealtimeAvatar(props: Props) {
-  // Flag OFF (default): behave exactly like <TalkingPhoto>. The Simli component
-  // never mounts, so no session, no token fetch, no extra hooks run.
   if (!REALTIME_AVATAR_ENABLED) {
     return <TalkingPhoto {...props} />;
   }
