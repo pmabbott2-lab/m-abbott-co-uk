@@ -1,13 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 52" role="img" aria-label="MortgageEasy">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 72" role="img" aria-label="MortgageEasy">
   <defs>
-    <linearGradient id="me-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1a2f4f"/>
-      <stop offset="100%" stop-color="#3d9e47"/>
+    <linearGradient id="me-g" x1="4" y1="8" x2="62" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#8FD43A"/>
+      <stop offset="55%" stop-color="#22C55E"/>
+      <stop offset="100%" stop-color="#0F3D46"/>
     </linearGradient>
   </defs>
-  <rect x="0" y="4" width="44" height="44" rx="11" fill="url(#me-grad)"/>
-  <path d="M22 14 L32 22 V34 H14 V22 Z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/>
-  <path d="M18 34 V28 H26 V34" fill="#fff"/>
-  <text x="54" y="22" font-family="Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="17" font-weight="800" fill="#1a2f4f">Mortgage</text>
-  <text x="54" y="40" font-family="Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="17" font-weight="800" fill="#3d9e47">Easy</text>
+  <g fill="none" stroke="url(#me-g)" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 34 L32 12 L50 28"/>
+    <path d="M14 38 V54 H48 V32"/>
+    <path d="M10 58 C22 52, 34 52, 54 58"/>
+    <path d="M14 64 C26 58, 38 58, 52 64"/>
+  </g>
+  <path d="M48 12 V22" fill="none" stroke="#0D1B2A" stroke-width="5.2" stroke-linecap="round"/>
+  <rect x="27" y="36" width="10" height="10" rx="1" fill="#0D1B2A"/>
+  <path d="M32 36 V46 M27 41 H37" stroke="#fff" stroke-width="1.1"/>
+  <text x="72" y="42" font-family="Poppins, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="28" font-weight="700">
+    <tspan fill="#0D1B2A">Mortgage</tspan><tspan fill="#22C55E">Easy</tspan>
+  </text>
+  <text x="72" y="60" font-family="Poppins, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="8.5" font-weight="600" letter-spacing="1.6" fill="#0D1B2A">SIMPLE STEPS. BRIGHTER TOMORROWS.</text>
 </svg>
