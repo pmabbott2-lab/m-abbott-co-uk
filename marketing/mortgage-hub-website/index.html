@@ -16,8 +16,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=13" />
-  <link rel="stylesheet" href="home-pro.css?v=13" />
+  <link rel="stylesheet" href="styles.css?v=16" />
+  <link rel="stylesheet" href="home-pro.css?v=16" />
   <script src="site-config.js"></script>
 </head>
 <body>
@@ -31,22 +31,35 @@
   <header class="site-header">
     <div class="container header-inner">
       <a class="logo-link" href="index.html" data-ref-link>
-        <img class="logo-img" src="assets/logo.svg" width="660" height="156" alt="MortgageEasy" />
+        <img class="logo-img" src="assets/logo.png" width="480" height="104" alt="MortgageEasy" />
       </a>
       <nav class="nav" aria-label="Main">
         <a href="index.html" class="active" data-ref-link>Home</a>
-        <a href="#first-time-buyers">First-time buyers</a>
-        <a href="#home-movers">Home movers</a>
-        <a href="#remortgage">Remortgage</a>
-        <a href="#protect">Protect</a>
+        <a class="nav-journey" href="#first-time-buyers">First-time buyers</a>
+        <a class="nav-journey" href="#home-movers">Home movers</a>
+        <a class="nav-journey" href="#remortgage">Remortgage</a>
+        <a class="nav-journey" href="#protect">Protect</a>
         <a href="about.html" data-ref-link>About us</a>
-        <a href="index.html#your-journey" data-ref-link>Start here</a>
         <a href="calculator.html" data-ref-link>Calculator</a>
         <a href="disclosures.html" data-ref-link>Disclosures</a>
       </nav>
       <div class="header-actions">
         <a class="btn btn-outline btn-sm" href="/auth" data-hub-auth data-hub-path="/auth">Sign in</a>
         <a class="btn btn-primary btn-sm" href="#your-journey">Get started</a>
+      </div>
+    </div>
+    <div class="journey-bar" aria-label="Mortgage journey">
+      <div class="container journey-bar-inner">
+        <p class="journey-bar-label">
+          <span class="journey-bar-kicker">Mortgage journey</span>
+          <span class="journey-bar-sub">From first home to protecting what matters</span>
+        </p>
+        <nav class="journey-nav">
+          <a href="#first-time-buyers"><span class="journey-step" aria-hidden="true">🔑</span><span class="journey-name">First-time buyers</span></a>
+          <a href="#home-movers"><span class="journey-step" aria-hidden="true">🏡</span><span class="journey-name">Home movers</span></a>
+          <a href="#remortgage"><span class="journey-step" aria-hidden="true">🔄</span><span class="journey-name">Remortgage</span></a>
+          <a href="#protect"><span class="journey-step" aria-hidden="true">🛡</span><span class="journey-name">Protect</span></a>
+        </nav>
       </div>
     </div>
   </header>
@@ -66,13 +79,6 @@
             <a class="btn btn-primary" href="#your-journey">Start your journey</a>
             <a class="btn btn-outline" href="calculator.html" data-ref-link>Mortgage calculator</a>
           </div>
-          <a class="hero-callback-card" href="calculator.html#callback" data-ref-link>
-            <span class="hero-callback-icon" aria-hidden="true">✆</span>
-            <span>
-              <strong>Arrange a callback</strong>
-              Leave your details and a MortgageEasy advisor will call you back.
-            </span>
-          </a>
         </div>
         <aside class="hero-pro-aside" aria-label="At a glance">
           <div class="hero-stat-card">
@@ -359,7 +365,7 @@
     <div class="container">
       <div class="footer-grid">
         <div>
-          <img class="logo-img footer-logo" src="assets/logo-on-dark.svg" width="180" height="44" alt="MortgageEasy" />
+          <img class="logo-img footer-logo" src="assets/logo-on-dark.png" width="220" height="48" alt="MortgageEasy" />
           <p>Advisor-led mortgage advice with modern technology behind the scenes.</p>
         </div>
         <div>

@@ -64,7 +64,7 @@ a:hover { color: var(--green); }
 }
 .logo-link { display: flex; align-items: center; gap: 0.75rem; text-decoration: none; color: inherit; }
 .logo-link img.logo-img { height: 48px; width: auto; }
-.footer-logo { margin-bottom: 0.75rem; filter: brightness(0) invert(1); opacity: 0.92; }
+.footer-logo { margin-bottom: 0.75rem; opacity: 0.96; }
 .logo-mark {
   display: inline-flex; align-items: center; justify-content: center;
   width: 52px; height: 52px; border-radius: 12px; flex: none;
@@ -85,70 +85,166 @@ a:hover { color: var(--green); }
 .nav a:hover, .nav a.active { color: var(--navy); }
 @media (min-width: 768px) { .nav { display: flex; } }
 
-/* Desktop only — larger brand + two-row boxed nav (tablet/mobile unchanged above) */
+/* Journey strip — desktop only; tablet/mobile keep journey links in main nav */
+.journey-bar { display: none; }
+
+/* Desktop only — brand + main nav bar, then distinct journey sub-bar */
 @media (min-width: 1100px) {
+  .site-header {
+    border-bottom: none;
+  }
   .site-header .container { max-width: 1280px; }
   .header-inner {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "logo actions"
-      "nav nav";
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "logo nav actions";
     align-items: center;
-    gap: 0.85rem 1.5rem;
-    padding: 1.15rem 0 1.25rem;
+    gap: 0.75rem 1rem;
+    padding: 0.7rem 0 0.65rem;
   }
   .logo-link {
     grid-area: logo;
     justify-self: start;
   }
   .logo-link img.logo-img {
-    height: 144px !important;
+    height: 78px !important;
     width: auto !important;
     max-width: none !important;
   }
   .header-actions {
     grid-area: actions;
     align-self: center;
+    gap: 0.4rem;
   }
   .nav {
     grid-area: nav;
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 0.55rem 0.65rem;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    justify-content: stretch;
+    gap: 0.3rem;
     width: 100%;
     max-width: none;
     justify-self: stretch;
+    min-width: 0;
+    padding: 0.28rem;
+    border-radius: 12px;
+    border: 1px solid rgba(26, 47, 79, 0.1);
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(244,247,251,0.98) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.9),
+      0 8px 18px rgba(26, 47, 79, 0.045);
   }
+  .nav .nav-journey { display: none; }
   .nav a {
     display: flex;
+    flex: 1 1 0;
     align-items: center;
     justify-content: center;
     text-align: center;
-    min-height: 3rem;
-    padding: 0.55rem 0.7rem;
-    border: 1px solid rgba(26, 47, 79, 0.12);
-    border-radius: 12px;
-    background: linear-gradient(180deg, #ffffff 0%, #f4f7fb 100%);
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.95) inset, 0 8px 18px rgba(26, 47, 79, 0.06);
+    min-height: 2.35rem;
+    min-width: 0;
+    padding: 0.4rem 0.55rem;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    box-shadow: none;
     color: var(--navy);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     font-weight: 600;
-    letter-spacing: 0.01em;
-    line-height: 1.25;
+    letter-spacing: 0.015em;
+    line-height: 1.15;
     white-space: nowrap;
     transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   }
   .nav a:hover,
   .nav a.active {
-    border-color: rgba(61, 158, 71, 0.5);
+    border-color: rgba(61, 158, 71, 0.35);
     background: linear-gradient(180deg, #ffffff 0%, var(--green-soft) 100%);
     color: var(--navy);
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.95) inset, 0 10px 22px rgba(61, 158, 71, 0.12);
+    box-shadow: 0 3px 10px rgba(61, 158, 71, 0.1);
   }
   .header-actions .btn-sm {
-    padding: 0.75rem 1.15rem;
-    font-size: 0.9rem;
+    padding: 0.45rem 0.75rem;
+    font-size: 0.75rem;
+    border-radius: 7px;
+    white-space: nowrap;
+  }
+
+  .journey-bar {
+    display: block;
+    background: linear-gradient(90deg, #13243d 0%, #1a2f4f 45%, #1f3a5c 100%);
+    border-top: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid rgba(13, 27, 42, 0.35);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+  }
+  .journey-bar-inner {
+    display: grid;
+    grid-template-columns: minmax(10rem, 15rem) minmax(0, 1fr);
+    gap: 1rem 1.5rem;
+    align-items: center;
+    padding: 0.7rem 1.5rem;
+  }
+  .journey-bar-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin: 0;
+  }
+  .journey-bar-kicker {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #8fd43a;
+  }
+  .journey-bar-sub {
+    font-size: 0.78rem;
+    color: rgba(255,255,255,0.72);
+    line-height: 1.3;
+  }
+  .journey-nav {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+  .journey-nav a {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-height: 2.55rem;
+    padding: 0.45rem 0.7rem;
+    border-radius: 10px;
+    text-decoration: none;
+    color: #fff;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  }
+  .journey-nav a:hover {
+    background: rgba(143, 212, 58, 0.14);
+    border-color: rgba(143, 212, 58, 0.45);
+  }
+  .journey-step {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.7rem;
+    height: 1.7rem;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    line-height: 1;
+    color: #13243d;
+    background: linear-gradient(180deg, #b7ef6a 0%, #8fd43a 100%);
+  }
+  .journey-name {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    line-height: 1.2;
   }
 }
 
