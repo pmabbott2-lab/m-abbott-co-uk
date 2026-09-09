@@ -1,61 +1,58 @@
 ---
 description: MortgageEasy customer-journey marketing videos (first-time buyer, remortgage, protect what matters). Apply whenever generating, composing, voicing, or embedding these films.
 alwaysApply: false
-globs: scripts/compose-mortgageeasy*.sh,scripts/generate-runway*.mjs,scripts/render-remortgage-gfx.py,marketing/mortgage-hub-website/**
+globs: scripts/compose-mortgageeasy*.sh,scripts/generate-runway*.mjs,scripts/render-remortgage-gfx.py,marketing/mortgage-hub-website/**,marketing/mortgageeasy-film-hold/**
 ---
 
 # MortgageEasy marketing videos
 
-Locked signed-off cuts. **Do not overwrite.** If picture or VO must change, duplicate to V2 and keep V1 bytes identical.
+Locked signed-off cuts. **Do not overwrite.** If picture or VO must change, duplicate to a new version and keep prior bytes identical.
+
+Amendable components and previous drafts: `marketing/mortgageeasy-film-hold/`.
 
 ## Locked restore points
 
-### First-time buyers — draft V1
+### First-time buyers — V2 (live)
 
-- Canonical: `assets/mortgageeasy-first-time-buyer-draft-v1.mp4`
-- Site: `marketing/mortgage-hub-website/assets/video/first-time-buyer-draft-v1.mp4`
-- Captions: `marketing/mortgage-hub-website/assets/video/first-time-buyer-draft-v1.vtt`
+- Canonical: `assets/mortgageeasy-first-time-buyer-draft-v2.mp4`
+- Site: `marketing/mortgage-hub-website/assets/video/first-time-buyer-draft-v2.mp4`
+- Captions: `marketing/mortgage-hub-website/assets/video/first-time-buyer-draft-v2.vtt`
 - Compose: `scripts/compose-mortgageeasy-final.sh`
+- Previous V1 held in `marketing/mortgageeasy-film-hold/previous-drafts/` and site `first-time-buyer-draft-v1.*`
 
-### Remortgage — draft V1
+### Remortgage — V2 (live)
 
-- Canonical: `assets/mortgageeasy-remortgage-draft-v1.mp4`
-- Site: `marketing/mortgage-hub-website/assets/video/remortgage-draft-v1.mp4`
-- Captions: `marketing/mortgage-hub-website/assets/video/remortgage-draft-v1.vtt`
-- Compose: `scripts/compose-mortgageeasy-remortgage.sh`
-- Graphics helper: `scripts/render-remortgage-gfx.py`
+- Canonical: `assets/mortgageeasy-remortgage-draft-v2.mp4`
+- Site: `marketing/mortgage-hub-website/assets/video/remortgage-draft-v2.mp4`
+- Captions: `marketing/mortgage-hub-website/assets/video/remortgage-draft-v2.vtt`
+- Compose: `scripts/compose-mortgageeasy-remortgage-v2.sh`
+- Previous V1: site `remortgage-draft-v1.*` and film-hold previous-drafts
+- Graphics: `marketing/mortgageeasy-film-hold/remortgage-gfx/` and `scripts/render-remortgage-gfx.py`
 
-### Protect what matters — draft V1 (in progress until signed off)
+### Protect what matters — V1 (live)
 
 - Canonical: `assets/mortgageeasy-protect-draft-v1.mp4`
 - Site: `marketing/mortgage-hub-website/assets/video/protect-draft-v1.mp4`
-- Compose: `scripts/compose-mortgageeasy-protect.sh`
+- Graphics: `marketing/mortgageeasy-film-hold/protect-gfx/`
 
 ## Voice
 
-- OpenAI `gpt-4o-mini-tts`, voice **coral**. British English, contemporary Southern, warm/professional. No American pronunciation or vocabulary.
+- Prefer Azure Neural TTS `en-GB-SoniaNeural` (uksouth) for current cuts. Coral OpenAI remains on older V1 archives.
 - Say **adviser**, not advisor. Say **Agreement in Principle** in full, never “AIP”.
 - Say **Mortgage Easy** in VO (two words). On-screen brand is **MortgageEasy**.
-- Do not stretch with `atempo`. Lock picture to transcribed speech, then still-frame QC at named times.
+- Do not stretch with `atempo` to fit picture. Lock picture to transcribed speech.
 - Do not burn captions into the MP4. Site captions are HTML/VTT, shown only while muted.
 
 ## Picture
 
-- Native speed only. Never freeze or slow-mo (`setpts` looked frozen). Do not loop talking-head clips.
-- Do not dissolve two similar over-the-shoulder laptop shots — that ghosts. Change **camera angle**, or keep the same frame and change only the screen.
-- Runway often washes laptop screens white. Prefer a held still of a known-good login frame, or overlay UI. Do not trust a “login” filename.
-- **Family lock:** husband = olive-brown skin, short dark curls, olive shirt over white tee, no blazer. Wife = cream knit, shoulder-length brown hair. Two children in family scenes. Adviser (when used) = ~50, greying, navy blazer, light blue shirt.
-- MortgageEasy **white tablet badge** top-left on branded live shots and graphic cards. No ME branding on generic property websites.
-- Final export must be QuickTime/Safari-safe: Constrained Baseline, no B-frames, `setpts=N/24/TB`, stereo AAC, `+faststart`. Sparse High-profile keyframes caused the remortgage player to jump to the end.
-
-## ffmpeg (this machine)
-
-- Old binary: no `xfade`. Dissolves via trim + alpha overlay + concat.
-- `ffmpeg -i` exits 1; duration parsing must not use `set -o pipefail` blindly.
-- `apad` is flaky. Write decimals as `0.7`, not `.7`. Do not use `-shortest` if it truncates the logo/end.
+- Native speed only. Never freeze or slow-mo talking heads. Do not loop talking-head clips.
+- Still → image-to-video invents new people. For reverse angles of an existing take, use **Aleph video-to-video** from the locked clip, with face keyframes when faces were not in frame.
+- **Family lock:** husband = olive-brown skin, short dark curls, olive shirt over white tee. Wife = cream knit, shoulder-length brown hair. Two children in family scenes. Adviser = ~50, greying, navy blazer, light blue shirt.
+- MortgageEasy **white tablet badge** (`protect-gfx/badge-protect.png`, native size at 20:16) on branded live shots. Navy open/close credit uses `open-logo.png` centred — no corner badge.
+- Final export: Constrained Baseline, no B-frames, `setpts=N/24/TB`, stereo AAC, `+faststart`.
 
 ## Site player
 
 - Muted autoplay on scroll into view. Captions along the bottom while muted; hide them when unmuted.
 - End card: **Start your journey** → `#your-journey`.
-- Later products: reuse this player pattern (`[data-ftb-player]`) and these production rules; start from a duplicate of the last approved draft.
+- Do not show a Draft badge on live films.

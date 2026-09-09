@@ -1,5 +1,5 @@
 /**
- * First-time buyer draft player: muted autoplay on scroll,
+ * Marketing journey players: muted autoplay on scroll,
  * captions only while muted, end card back to #your-journey.
  */
 (function () {
