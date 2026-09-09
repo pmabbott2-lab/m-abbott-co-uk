@@ -2,9 +2,21 @@ import holdScene from "@/assets/consultation-hold.jpg";
 
 export const CONNECTING_HEADLINE = "Waiting for your adviser";
 export const CONNECTING_LINE = "Susan is joining you now.";
+export const WAITING_ROOM_HEADLINE = "Your consultation room";
+export const WAITING_ROOM_LINE = "Agree below, then tap Start when you're ready.";
 
-/** Susan 2.0 connecting tile: consultation room + hold copy, no still of Susan. */
-export function ConnectingHold({ radius }: { radius: string }) {
+type Props = {
+  radius: string;
+  headline?: string;
+  line?: string;
+};
+
+/** Susan connecting / pre-start tile: consultation room + hold copy, no still of Susan. */
+export function ConnectingHold({
+  radius,
+  headline = CONNECTING_HEADLINE,
+  line = CONNECTING_LINE,
+}: Props) {
   return (
     <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: radius }}>
       <img
@@ -23,8 +35,8 @@ export function ConnectingHold({ radius }: { radius: string }) {
         <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.2em] text-[#c9a36a]">
           MortgageEasy
         </p>
-        <h2 className="text-lg font-semibold leading-tight sm:text-xl">{CONNECTING_HEADLINE}</h2>
-        <p className="mt-1.5 text-sm text-[#f4efe6]/85">{CONNECTING_LINE}</p>
+        <h2 className="text-lg font-semibold leading-tight sm:text-xl">{headline}</h2>
+        <p className="mt-1.5 text-sm text-[#f4efe6]/85">{line}</p>
       </div>
     </div>
   );

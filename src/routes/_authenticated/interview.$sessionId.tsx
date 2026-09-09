@@ -1242,6 +1242,7 @@ function InterviewPage() {
               listening={listening}
               getAmplitude={getAmplitude}
               usingBrowserVoice={usingBrowserVoice}
+              enabled={started && !needsGesture}
             />
           )}
           {done ? (

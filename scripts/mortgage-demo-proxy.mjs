@@ -37,6 +37,15 @@ function isHubAppPath(pathname) {
   );
 }
 
+/** Hashed build assets can be cached; HTML/shell must not, or phones keep stale chunk URLs after rebuilds. */
+function shouldBypassCache(pathname, contentType) {
+  const ct = String(contentType || "").toLowerCase();
+  if (ct.includes("text/html")) return true;
+  if (pathname.startsWith("/_serverFn")) return true;
+  if (pathname.startsWith("/assets/")) return false;
+  return !/\.[a-z0-9]+$/i.test(pathname) || pathname.endsWith(".html");
+}
+
 function proxy(targetBase, req, res, rewritePath, locationPrefix = "") {
   const url = new URL(req.url || "/", "http://localhost");
   const path = rewritePath ?? url.pathname;
@@ -56,6 +65,12 @@ function proxy(targetBase, req, res, rewritePath, locationPrefix = "") {
           outHeaders.location =
             locationPrefix + (loc.startsWith("/") ? loc : `/${loc}`);
         }
+      }
+      if (shouldBypassCache(path, outHeaders["content-type"])) {
+        outHeaders["cache-control"] = "no-store, no-cache, must-revalidate";
+        outHeaders.pragma = "no-cache";
+        delete outHeaders.etag;
+        delete outHeaders["last-modified"];
       }
       res.writeHead(status, outHeaders);
       proxyRes.pipe(res);

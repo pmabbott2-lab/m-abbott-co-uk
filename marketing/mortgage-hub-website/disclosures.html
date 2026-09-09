@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Regulatory disclosures — MortgageEasy</title>
   <meta name="description" content="MortgageEasy initial disclosure information, regulatory status, complaints procedure and privacy — FCA MCOB disclosures." />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=24" />
   <script src="site-config.js"></script>
 </head>
 <body>
@@ -16,17 +16,31 @@
     </div>
   </div>
 
-  <header class="site-header">
+      <header class="site-header">
     <div class="container header-inner">
       <a class="logo-link" href="index.html">
         <img class="logo-img" src="assets/logo.png" width="200" height="48" alt="MortgageEasy" />
       </a>
-      <nav class="nav" aria-label="Main">
-        <a href="index.html">Home</a>
+      <div class="header-actions">
+        <a class="btn btn-outline btn-sm" href="/auth" data-hub-auth data-hub-path="/auth">Sign in</a>
+        <button
+          type="button"
+          class="nav-toggle"
+          data-nav-toggle
+          aria-expanded="false"
+          aria-controls="site-menu"
+          aria-label="Open site menu"
+        >
+          <span class="nav-toggle-bars" aria-hidden="true"></span>
+        </button>
+      </div>
+      <nav id="site-menu" class="site-menu" data-site-menu hidden>
         <a href="about.html">About us</a>
-        <a href="partnerships.html">Partnerships</a>
+        <a href="calculator.html">Calculator</a>
         <a href="careers.html">Careers</a>
         <a href="disclosures.html" class="active">Disclosures</a>
+        <a href="index.html#mortgage-journey">Mortgage journey</a>
+        <a href="partnerships.html">Partnerships</a>
       </nav>
     </div>
   </header>
@@ -115,5 +129,6 @@
     </div>
   </footer>
   <script>document.getElementById("y").textContent = new Date().getFullYear();</script>
+  <script src="site-menu.js"></script>
 </body>
 </html>

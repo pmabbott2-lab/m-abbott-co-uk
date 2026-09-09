@@ -16,352 +16,365 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=16" />
-  <link rel="stylesheet" href="home-pro.css?v=16" />
+  <link rel="stylesheet" href="styles.css?v=24" />
+  <link rel="stylesheet" href="home-pro.css?v=24" />
   <script src="site-config.js"></script>
 </head>
 <body>
-  <div class="reg-strip">
-    <div class="container">
-      <span><strong>MortgageEasy</strong> is a trading name of [Legal entity name Ltd].</span>
-      <span>Authorised &amp; regulated by the <strong>Financial Conduct Authority</strong> (FRN: [000000]).</span>
-    </div>
-  </div>
-
   <header class="site-header">
     <div class="container header-inner">
       <a class="logo-link" href="index.html" data-ref-link>
         <img class="logo-img" src="assets/logo.png" width="480" height="104" alt="MortgageEasy" />
       </a>
-      <nav class="nav" aria-label="Main">
-        <a href="index.html" class="active" data-ref-link>Home</a>
-        <a class="nav-journey" href="#first-time-buyers">First-time buyers</a>
-        <a class="nav-journey" href="#home-movers">Home movers</a>
-        <a class="nav-journey" href="#remortgage">Remortgage</a>
-        <a class="nav-journey" href="#protect">Protect</a>
-        <a href="about.html" data-ref-link>About us</a>
-        <a href="calculator.html" data-ref-link>Calculator</a>
-        <a href="disclosures.html" data-ref-link>Disclosures</a>
-      </nav>
       <div class="header-actions">
         <a class="btn btn-outline btn-sm" href="/auth" data-hub-auth data-hub-path="/auth">Sign in</a>
-        <a class="btn btn-primary btn-sm" href="#your-journey">Get started</a>
+        <button
+          type="button"
+          class="nav-toggle"
+          data-nav-toggle
+          aria-expanded="false"
+          aria-controls="site-menu"
+          aria-label="Open site menu"
+        >
+          <span class="nav-toggle-bars" aria-hidden="true"></span>
+        </button>
       </div>
-    </div>
-    <div class="journey-bar" aria-label="Mortgage journey">
-      <div class="container journey-bar-inner">
-        <p class="journey-bar-label">
-          <span class="journey-bar-kicker">Mortgage journey</span>
-          <span class="journey-bar-sub">From first home to protecting what matters</span>
-        </p>
-        <nav class="journey-nav">
-          <a href="#first-time-buyers"><span class="journey-step" aria-hidden="true">🔑</span><span class="journey-name">First-time buyers</span></a>
-          <a href="#home-movers"><span class="journey-step" aria-hidden="true">🏡</span><span class="journey-name">Home movers</span></a>
-          <a href="#remortgage"><span class="journey-step" aria-hidden="true">🔄</span><span class="journey-name">Remortgage</span></a>
-          <a href="#protect"><span class="journey-step" aria-hidden="true">🛡</span><span class="journey-name">Protect</span></a>
-        </nav>
-      </div>
+      <nav id="site-menu" class="site-menu" data-site-menu hidden>
+        <a href="about.html" data-ref-link>About us</a>
+        <a href="calculator.html" data-ref-link>Calculator</a>
+        <a href="careers.html" data-ref-link>Careers</a>
+        <a href="disclosures.html" data-ref-link>Disclosures</a>
+        <a href="#mortgage-journey">Mortgage journey</a>
+        <a href="partnerships.html" data-ref-link>Partnerships</a>
+      </nav>
     </div>
   </header>
 
   <main>
-  <section class="hero-pro">
-    <div class="container">
-      <div class="hero-pro-grid">
-        <div class="hero-pro-copy">
-          <h1>Make a house your home with <em>MortgageEasy</em></h1>
-          <p class="hero-pro-lead">
-            Qualified mortgage advice with modern tools — start with a calculator illustration,
-            a quick fact-find by voice or chat, or book time with your advisor first.
+    <section class="hero-pro">
+        <div class="container">
+          <div class="hero-pro-grid">
+            <div class="hero-pro-copy">
+              <h1>Make a house your home with <em>MortgageEasy</em></h1>
+              <p class="hero-pro-lead">
+                Qualified mortgage advice with modern tools — start with a calculator illustration,
+                a quick fact-find by voice or chat, or book time with your advisor first.
+              </p>
+              <p id="introducer-banner" class="introducer-banner" hidden></p>
+              <div class="hero-pro-actions">
+                <a class="btn btn-primary" href="#your-journey">Start your journey</a>
+                <a class="btn btn-outline" href="calculator.html" data-ref-link>Mortgage calculator</a>
+              </div>
+            </div>
+            <aside class="hero-pro-aside" aria-label="At a glance">
+              <div class="hero-stat-card">
+                <span class="hero-stat-label">Bank of England Bank Rate</span>
+                <strong class="hero-stat-value" id="rate-base-value-inline">—</strong>
+                <span class="hero-stat-meta" id="rate-base-source-inline"></span>
+                <a class="hero-stat-link" id="rate-base-source-inline-link" href="#" target="_blank" rel="noopener noreferrer" hidden>View BoE source</a>
+              </div>
+              <div class="susan-chip">
+                <img src="assets/susan.png" width="52" height="52" alt="" class="susan-chip-img" />
+                <p><strong>Susan</strong> supports voice and chat fact-finds. Your advisor reviews everything before any recommendation.</p>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+    <section id="mortgage-journey" class="journey-bar" aria-label="About your mortgage journey">
+        <div class="container journey-bar-inner">
+          <p class="journey-bar-label">
+            <span class="journey-bar-kicker">About your mortgage journey</span>
+            <span class="journey-bar-sub">From first home to protecting what matters</span>
           </p>
-          <p id="introducer-banner" class="introducer-banner" hidden></p>
-          <div class="hero-pro-actions">
-            <a class="btn btn-primary" href="#your-journey">Start your journey</a>
-            <a class="btn btn-outline" href="calculator.html" data-ref-link>Mortgage calculator</a>
+          <nav class="journey-nav">
+            <a href="#first-time-buyers"><span class="journey-step" aria-hidden="true">🔑</span><span class="journey-name">First-time buyers</span></a>
+            <a href="#home-movers"><span class="journey-step" aria-hidden="true">🏡</span><span class="journey-name">Home movers</span></a>
+            <a href="#remortgage"><span class="journey-step" aria-hidden="true">🔄</span><span class="journey-name">Remortgage</span></a>
+            <a href="#protect"><span class="journey-step" aria-hidden="true">🛡</span><span class="journey-name">Protect</span></a>
+          </nav>
+        </div>
+      </section>
+
+    <section id="your-journey" class="journeys-pro">
+        <div class="container">
+          <div class="section-head">
+            <div class="bar"></div>
+            <h2>Choose how you want to start</h2>
+            <p>Four clear paths — pick the one that suits you. Each route captures your details for your MortgageEasy advisor.</p>
+          </div>
+          <div class="journey-grid journey-grid-pro">
+            <a class="journey-card journey-card-pro" href="/auth?from=broker&amp;join=1&amp;start=voice" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=voice">
+              <span class="journey-icon" aria-hidden="true">🎙</span>
+              <h3>Verbal interview</h3>
+              <p>Create your account, then talk through your details with Susan. Ideal if you prefer speaking.</p>
+              <span class="journey-cta">Create account →</span>
+            </a>
+            <a class="journey-card journey-card-pro" href="/auth?from=broker&amp;join=1&amp;start=chat" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=chat">
+              <span class="journey-icon" aria-hidden="true">💬</span>
+              <h3>Text interview</h3>
+              <p>Same fact-find, typed quietly at your pace — no phone call required.</p>
+              <span class="journey-cta">Create account →</span>
+            </a>
+            <a class="journey-card journey-card-pro journey-card-featured" href="/auth?from=broker&amp;join=1&amp;start=book" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=book">
+              <span class="journey-icon" aria-hidden="true">📅</span>
+              <h3>Book an appointment</h3>
+              <p>Pick a time with your advisor first. We'll confirm by text.</p>
+              <span class="journey-cta">Book appointment →</span>
+            </a>
+            <a class="journey-card journey-card-pro" href="calculator.html#callback" data-ref-link>
+              <span class="journey-icon" aria-hidden="true">✆</span>
+              <h3>Request a callback</h3>
+              <p>Leave your details and a qualified advisor will call you back.</p>
+              <span class="journey-cta">Request callback →</span>
+            </a>
+          </div>
+          <p class="journeys-footnote">Digital tools gather information — they do not recommend products. Mortgage advice comes from your advisor only.</p>
+        </div>
+      </section>
+
+    <section class="why-pro">
+        <div class="container">
+          <div class="section-head section-head-center">
+            <div class="bar"></div>
+            <h2>Why choose MortgageEasy?</h2>
+            <p>Advisor-led advice with technology that saves you time — not pressure to pick the wrong deal.</p>
+          </div>
+          <ul class="why-list">
+            <li><span class="why-tick" aria-hidden="true">✔</span><div><strong>Impartial advice</strong><span>Recommendations tailored to your circumstances after a proper fact-find.</span></div></li>
+            <li><span class="why-tick" aria-hidden="true">✔</span><div><strong>Fast, responsive</strong><span>Digital fact-find and booking so your advisor is prepared before you speak.</span></div></li>
+            <li><span class="why-tick" aria-hidden="true">✔</span><div><strong>Personal service</strong><span>A dedicated advisor journey — voice, chat, or appointment-first.</span></div></li>
+            <li><span class="why-tick" aria-hidden="true">✔</span><div><strong>Clear illustrations</strong><span>Calculator and Bank Rate reference with plain-language disclaimers.</span></div></li>
+          </ul>
+        </div>
+      </section>
+
+    <section class="steps-pro alt" id="how">
+        <div class="container">
+          <div class="section-head">
+            <div class="bar"></div>
+            <h2>Get mortgage-ready in three steps</h2>
+          </div>
+          <ol class="steps-inline">
+            <li>
+              <span class="steps-inline-num">1</span>
+              <div>
+                <h3>Choose your starting point</h3>
+                <p>Calculator, verbal fact-find, text chat, or book your appointment.</p>
+              </div>
+            </li>
+            <li>
+              <span class="steps-inline-num">2</span>
+              <div>
+                <h3>Share your details</h3>
+                <p>We organise your answers into a clear file for your advisor.</p>
+              </div>
+            </li>
+            <li>
+              <span class="steps-inline-num">3</span>
+              <div>
+                <h3>Meet your advisor prepared</h3>
+                <p>Human mortgage advice with the admin already done.</p>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+    <section id="first-time-buyers" class="ftb-video-section">
+        <div class="container">
+          <div class="section-head">
+            <div class="bar"></div>
+            <p class="ftb-kicker">
+              <span class="ftb-badge">First-time buyers</span>
+            </p>
+            <h2>Your first home, made easier</h2>
+            <p>A short look at how MortgageEasy supports you from first questions through to moving in.</p>
+          </div>
+          <div
+            class="ftb-player"
+            data-ftb-player
+            data-captions-src="assets/video/first-time-buyer-draft-v2.vtt?v=1"
+          >
+            <video
+              data-ftb-video
+              muted
+              playsinline
+              preload="metadata"
+              width="1280"
+              height="720"
+            >
+              <source src="assets/video/first-time-buyer-draft-v2.mp4?v=1" type="video/mp4" />
+            </video>
+            <div class="ftb-captions" data-ftb-captions hidden></div>
+            <button type="button" class="ftb-mute" data-ftb-mute aria-pressed="true">Unmute</button>
+            <div class="ftb-end" data-ftb-end hidden>
+              <a class="ftb-end-link" href="#your-journey">Start your journey</a>
+            </div>
           </div>
         </div>
-        <aside class="hero-pro-aside" aria-label="At a glance">
-          <div class="hero-stat-card">
-            <span class="hero-stat-label">Bank of England Bank Rate</span>
-            <strong class="hero-stat-value" id="rate-base-value-inline">—</strong>
-            <span class="hero-stat-meta" id="rate-base-source-inline"></span>
-            <a class="hero-stat-link" id="rate-base-source-inline-link" href="#" target="_blank" rel="noopener noreferrer" hidden>View BoE source</a>
+      </section>
+
+    <section id="home-movers" class="ftb-video-section">
+        <div class="container">
+          <div class="section-head">
+            <div class="bar"></div>
+            <p class="ftb-kicker">
+              <span class="ftb-badge">Home movers</span>
+            </p>
+            <h2>Life moves on</h2>
+            <p>A short look at reviewing your mortgage when your next home becomes the next chapter.</p>
           </div>
-          <div class="susan-chip">
-            <img src="assets/susan.png" width="52" height="52" alt="" class="susan-chip-img" />
-            <p><strong>Susan</strong> supports voice and chat fact-finds. Your advisor reviews everything before any recommendation.</p>
+          <div
+            class="ftb-player"
+            data-ftb-player
+            data-captions-src="assets/video/home-mover-v1.vtt?v=1"
+          >
+            <video
+              data-ftb-video
+              muted
+              playsinline
+              preload="metadata"
+              width="1280"
+              height="720"
+            >
+              <source src="assets/video/home-mover-v1.mp4?v=1" type="video/mp4" />
+            </video>
+            <div class="ftb-captions" data-ftb-captions hidden></div>
+            <button type="button" class="ftb-mute" data-ftb-mute aria-pressed="true">Unmute</button>
+            <div class="ftb-end" data-ftb-end hidden>
+              <a class="ftb-end-link" href="#your-journey">Start your journey</a>
+            </div>
           </div>
-        </aside>
-      </div>
-    </div>
-  </section>
-
-  <section id="your-journey" class="journeys-pro">
-    <div class="container">
-      <div class="section-head">
-        <div class="bar"></div>
-        <h2>Choose how you want to start</h2>
-        <p>Three clear paths — pick the one that suits you. Each route captures your details for your MortgageEasy advisor.</p>
-      </div>
-      <div class="journey-grid journey-grid-pro">
-        <a class="journey-card journey-card-pro" href="/auth?from=broker&amp;join=1&amp;start=voice" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=voice">
-          <span class="journey-icon" aria-hidden="true">🎙</span>
-          <h3>Verbal interview</h3>
-          <p>Create your account, then talk through your details with Susan. Ideal if you prefer speaking.</p>
-          <span class="journey-cta">Create account →</span>
-        </a>
-        <a class="journey-card journey-card-pro" href="/auth?from=broker&amp;join=1&amp;start=chat" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=chat">
-          <span class="journey-icon" aria-hidden="true">💬</span>
-          <h3>Text interview</h3>
-          <p>Same fact-find, typed quietly at your pace — no phone call required.</p>
-          <span class="journey-cta">Create account →</span>
-        </a>
-        <a class="journey-card journey-card-pro journey-card-featured" href="/auth?from=broker&amp;join=1&amp;start=book" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=book">
-          <span class="journey-icon" aria-hidden="true">📅</span>
-          <h3>Book an appointment</h3>
-          <p>Pick a time with your advisor first. We'll confirm by text.</p>
-          <span class="journey-cta">Book appointment →</span>
-        </a>
-      </div>
-      <p class="journeys-footnote">Digital tools gather information — they do not recommend products. Mortgage advice comes from your advisor only.</p>
-    </div>
-  </section>
-
-
-  <section id="first-time-buyers" class="ftb-video-section">
-    <div class="container">
-      <div class="section-head">
-        <div class="bar"></div>
-        <p class="ftb-kicker">
-          <span class="ftb-badge">First-time buyers</span>
-        </p>
-        <h2>Your first home, made easier</h2>
-        <p>A short look at how MortgageEasy supports you from first questions through to moving in.</p>
-      </div>
-      <div
-        class="ftb-player"
-        data-ftb-player
-        data-captions-src="assets/video/first-time-buyer-draft-v2.vtt?v=1"
-      >
-        <video
-          data-ftb-video
-          muted
-          playsinline
-          preload="metadata"
-          width="1280"
-          height="720"
-        >
-          <source src="assets/video/first-time-buyer-draft-v2.mp4?v=1" type="video/mp4" />
-        </video>
-        <div class="ftb-captions" data-ftb-captions hidden></div>
-        <button type="button" class="ftb-mute" data-ftb-mute aria-pressed="true">Unmute</button>
-        <div class="ftb-end" data-ftb-end hidden>
-          <a class="ftb-end-link" href="#your-journey">Start your journey</a>
         </div>
-      </div>
-    </div>
-  </section>
+      </section>
 
-  <section id="home-movers" class="ftb-video-section">
-    <div class="container">
-      <div class="section-head">
-        <div class="bar"></div>
-        <p class="ftb-kicker">
-          <span class="ftb-badge">Home movers</span>
-        </p>
-        <h2>Life moves on</h2>
-        <p>A short look at reviewing your mortgage when your next home becomes the next chapter.</p>
-      </div>
-      <div
-        class="ftb-player"
-        data-ftb-player
-        data-captions-src="assets/video/home-mover-v1.vtt?v=1"
-      >
-        <video
-          data-ftb-video
-          muted
-          playsinline
-          preload="metadata"
-          width="1280"
-          height="720"
-        >
-          <source src="assets/video/home-mover-v1.mp4?v=1" type="video/mp4" />
-        </video>
-        <div class="ftb-captions" data-ftb-captions hidden></div>
-        <button type="button" class="ftb-mute" data-ftb-mute aria-pressed="true">Unmute</button>
-        <div class="ftb-end" data-ftb-end hidden>
-          <a class="ftb-end-link" href="#your-journey">Start your journey</a>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section id="remortgage" class="ftb-video-section">
-    <div class="container">
-      <div class="section-head">
-        <div class="bar"></div>
-        <p class="ftb-kicker">
-          <span class="ftb-badge">Remortgage</span>
-        </p>
-        <h2>Don't just renew. Review.</h2>
-        <p>A short look at how MortgageEasy helps you review your mortgage when your deal comes to an end.</p>
-      </div>
-      <div
-        class="ftb-player"
-        data-ftb-player
-        data-captions-src="assets/video/remortgage-draft-v2.vtt?v=9"
-      >
-        <video
-          data-ftb-video
-          muted
-          playsinline
-          preload="metadata"
-          width="1280"
-          height="720"
-        >
-          <source src="assets/video/remortgage-draft-v2.mp4?v=9" type="video/mp4" />
-        </video>
-        <div class="ftb-captions" data-ftb-captions hidden></div>
-        <button type="button" class="ftb-mute" data-ftb-mute aria-pressed="true">Unmute</button>
-        <div class="ftb-end" data-ftb-end hidden>
-          <a class="ftb-end-link" href="#your-journey">Start your journey</a>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section id="protect" class="ftb-video-section">
-    <div class="container">
-      <div class="section-head">
-        <div class="bar"></div>
-        <p class="ftb-kicker">
-          <span class="ftb-badge">Protect</span>
-        </p>
-        <h2>Protected for what matters</h2>
-        <p>A short look at how MortgageEasy helps you think about protection alongside your mortgage.</p>
-      </div>
-      <div
-        class="ftb-player"
-        data-ftb-player
-        data-captions-src="assets/video/protect-draft-v1.vtt?v=1"
-      >
-        <video
-          data-ftb-video
-          muted
-          playsinline
-          preload="metadata"
-          width="1280"
-          height="720"
-        >
-          <source src="assets/video/protect-draft-v1.mp4?v=1" type="video/mp4" />
-        </video>
-        <div class="ftb-captions" data-ftb-captions hidden></div>
-        <button type="button" class="ftb-mute" data-ftb-mute aria-pressed="true">Unmute</button>
-        <div class="ftb-end" data-ftb-end hidden>
-          <a class="ftb-end-link" href="#your-journey">Start your journey</a>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="tools-pro alt" id="tools">
-    <div class="container">
-      <div class="section-head">
-        <div class="bar"></div>
-        <h2>Mortgage tools, all in one place</h2>
-        <p>Estimate repayments or request a callback — then continue into your journey when you're ready.</p>
-      </div>
-      <div class="tools-grid">
-        <a class="tool-card" href="calculator.html" data-ref-link>
-          <span class="tool-card-icon">£</span>
-          <h3>Repayment calculator</h3>
-          <p>Enter property value and deposit to see loan amount, LTV, and an illustrative monthly payment.</p>
-          <span class="tool-card-cta">Open calculator →</span>
-        </a>
-        <a class="tool-card" href="calculator.html#callback" data-ref-link>
-          <span class="tool-card-icon">✆</span>
-          <h3>Request a callback</h3>
-          <p>Leave your name and contact details. A qualified advisor will call to discuss your options.</p>
-          <span class="tool-card-cta">Request callback →</span>
-        </a>
-      </div>
-    </div>
-  </section>
-
-  <section class="why-pro">
-    <div class="container">
-      <div class="section-head section-head-center">
-        <div class="bar"></div>
-        <h2>Why choose MortgageEasy?</h2>
-        <p>Advisor-led advice with technology that saves you time — not pressure to pick the wrong deal.</p>
-      </div>
-      <ul class="why-list">
-        <li><span class="why-tick" aria-hidden="true">✔</span><div><strong>Impartial advice</strong><span>Recommendations tailored to your circumstances after a proper fact-find.</span></div></li>
-        <li><span class="why-tick" aria-hidden="true">✔</span><div><strong>Fast, responsive</strong><span>Digital fact-find and booking so your advisor is prepared before you speak.</span></div></li>
-        <li><span class="why-tick" aria-hidden="true">✔</span><div><strong>Personal service</strong><span>A dedicated advisor journey — voice, chat, or appointment-first.</span></div></li>
-        <li><span class="why-tick" aria-hidden="true">✔</span><div><strong>Clear illustrations</strong><span>Calculator and Bank Rate reference with plain-language disclaimers.</span></div></li>
-      </ul>
-    </div>
-  </section>
-
-  <section class="steps-pro alt" id="how">
-    <div class="container">
-      <div class="section-head">
-        <div class="bar"></div>
-        <h2>Get mortgage-ready in three steps</h2>
-      </div>
-      <ol class="steps-inline">
-        <li>
-          <span class="steps-inline-num">1</span>
-          <div>
-            <h3>Choose your starting point</h3>
-            <p>Calculator, verbal fact-find, text chat, or book your appointment.</p>
+    <section id="remortgage" class="ftb-video-section">
+        <div class="container">
+          <div class="section-head">
+            <div class="bar"></div>
+            <p class="ftb-kicker">
+              <span class="ftb-badge">Remortgage</span>
+            </p>
+            <h2>Don't just renew. Review.</h2>
+            <p>A short look at how MortgageEasy helps you review your mortgage when your deal comes to an end.</p>
           </div>
-        </li>
-        <li>
-          <span class="steps-inline-num">2</span>
-          <div>
-            <h3>Share your details</h3>
-            <p>We organise your answers into a clear file for your advisor.</p>
+          <div
+            class="ftb-player"
+            data-ftb-player
+            data-captions-src="assets/video/remortgage-draft-v2.vtt?v=9"
+          >
+            <video
+              data-ftb-video
+              muted
+              playsinline
+              preload="metadata"
+              width="1280"
+              height="720"
+            >
+              <source src="assets/video/remortgage-draft-v2.mp4?v=9" type="video/mp4" />
+            </video>
+            <div class="ftb-captions" data-ftb-captions hidden></div>
+            <button type="button" class="ftb-mute" data-ftb-mute aria-pressed="true">Unmute</button>
+            <div class="ftb-end" data-ftb-end hidden>
+              <a class="ftb-end-link" href="#your-journey">Start your journey</a>
+            </div>
           </div>
-        </li>
-        <li>
-          <span class="steps-inline-num">3</span>
-          <div>
-            <h3>Meet your advisor prepared</h3>
-            <p>Human mortgage advice with the admin already done.</p>
+        </div>
+      </section>
+
+    <section id="protect" class="ftb-video-section">
+        <div class="container">
+          <div class="section-head">
+            <div class="bar"></div>
+            <p class="ftb-kicker">
+              <span class="ftb-badge">Protect</span>
+            </p>
+            <h2>Protected for what matters</h2>
+            <p>A short look at how MortgageEasy helps you think about protection alongside your mortgage.</p>
           </div>
-        </li>
-      </ol>
-    </div>
-  </section>
+          <div
+            class="ftb-player"
+            data-ftb-player
+            data-captions-src="assets/video/protect-draft-v1.vtt?v=1"
+          >
+            <video
+              data-ftb-video
+              muted
+              playsinline
+              preload="metadata"
+              width="1280"
+              height="720"
+            >
+              <source src="assets/video/protect-draft-v1.mp4?v=1" type="video/mp4" />
+            </video>
+            <div class="ftb-captions" data-ftb-captions hidden></div>
+            <button type="button" class="ftb-mute" data-ftb-mute aria-pressed="true">Unmute</button>
+            <div class="ftb-end" data-ftb-end hidden>
+              <a class="ftb-end-link" href="#your-journey">Start your journey</a>
+            </div>
+          </div>
+        </div>
+      </section>
 
-  <section class="reg-panel">
-    <div class="container">
-      <div class="disclosure-inline" role="note">
-        <h3>Important information</h3>
-        <p>
-          Your home may be repossessed if you do not keep up repayments on your mortgage.
-          MortgageEasy offers mortgage advice and arranges mortgages. Initial disclosures are on our
-          <a href="disclosures.html" data-ref-link>Disclosures</a> page. Bank Rate shown for reference only — not a mortgage quote.
-        </p>
-        <p class="rates-disclaimer-light" id="rates-disclaimer"></p>
-      </div>
-    </div>
-  </section>
+    <section class="tools-pro alt" id="tools">
+        <div class="container">
+          <div class="section-head">
+            <div class="bar"></div>
+            <h2>Mortgage tools, all in one place</h2>
+            <p>Estimate repayments or request a callback — then continue into your journey when you're ready.</p>
+          </div>
+          <div class="tools-grid">
+            <a class="tool-card" href="calculator.html" data-ref-link>
+              <span class="tool-card-icon">£</span>
+              <h3>Repayment calculator</h3>
+              <p>Enter property value and deposit to see loan amount, LTV, and an illustrative monthly payment.</p>
+              <span class="tool-card-cta">Open calculator →</span>
+            </a>
+            <a class="tool-card" href="calculator.html#callback" data-ref-link>
+              <span class="tool-card-icon">✆</span>
+              <h3>Request a callback</h3>
+              <p>Leave your name and contact details. A qualified advisor will call to discuss your options.</p>
+              <span class="tool-card-cta">Request callback →</span>
+            </a>
+          </div>
+        </div>
+      </section>
 
-  <section class="cta-band">
-    <div class="container inner">
-      <h2>Ready to <span>start</span>?</h2>
-      <div class="cta-band-actions">
-        <a class="btn btn-primary" href="#your-journey">Your journey</a>
-        <a class="btn btn-outline btn-on-dark" href="calculator.html" data-ref-link>Calculator</a>
-      </div>
-    </div>
-  </section>
+    <section class="reg-panel">
+        <div class="container">
+          <div class="disclosure-inline" role="note">
+            <h3>Important information</h3>
+            <p>
+              Your home may be repossessed if you do not keep up repayments on your mortgage.
+              MortgageEasy offers mortgage advice and arranges mortgages. Initial disclosures are on our
+              <a href="disclosures.html" data-ref-link>Disclosures</a> page. Bank Rate shown for reference only — not a mortgage quote.
+            </p>
+            <p class="rates-disclaimer-light" id="rates-disclaimer"></p>
+          </div>
+        </div>
+      </section>
+
+    <section class="cta-band">
+        <div class="container inner">
+          <h2>Ready to <span>start</span>?</h2>
+          <div class="cta-band-actions">
+            <a class="btn btn-primary" href="#your-journey">Your journey</a>
+            <a class="btn btn-outline btn-on-dark" href="calculator.html" data-ref-link>Calculator</a>
+          </div>
+        </div>
+      </section>
   </main>
 
-  <footer class="site-footer">
+  <div class="reg-strip reg-strip-footer">
+    <div class="container">
+      <span><strong>MortgageEasy</strong> is a trading name of [Legal entity name Ltd].</span>
+      <span>Authorised &amp; regulated by the <strong>Financial Conduct Authority</strong> (FRN: [000000]). See <a href="disclosures.html" data-ref-link>Disclosures</a>.</span>
+    </div>
+  </div>
+
+<footer class="site-footer">
     <div class="container">
       <div class="footer-grid">
         <div>
@@ -399,6 +412,7 @@
     </div>
   </footer>
   <script>document.getElementById("y").textContent = new Date().getFullYear();</script>
+  <script src="site-menu.js"></script>
   <script src="market-rates-strip.js"></script>
   <script src="home.js"></script>
   <script src="journey-video.js"></script>

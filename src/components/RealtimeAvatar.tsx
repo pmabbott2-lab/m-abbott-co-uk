@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SimliClient } from "simli-client";
-import { ConnectingHold } from "@/components/ConnectingHold";
+import {
+  ConnectingHold,
+  CONNECTING_HEADLINE,
+  CONNECTING_LINE,
+  WAITING_ROOM_HEADLINE,
+  WAITING_ROOM_LINE,
+} from "@/components/ConnectingHold";
 import { TalkingPhoto } from "@/components/TalkingPhoto";
 import { AVATAR_STAGE, avatarCropInnerStyle, avatarStageFrameHeight } from "@/lib/avatar-frame";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,8 +22,11 @@ import {
  * (https://docs.simli.com), wired behind the `VITE_REALTIME_AVATAR` flag.
  *
  * When the flag is OFF, this renders <TalkingPhoto> verbatim.
- * When the flag is ON, the connecting tile is the consultation-room hold until
- * live video has painted. We never put a still of Susan in that slot.
+ * When the flag is ON:
+ *   - Before `enabled` (consent + Start): show the waiting-room hold only.
+ *     Do not open Simli — that was the frozen-Susan flash on the consent screen.
+ *   - After `enabled`: connect Simli, keep the hold until live video has painted,
+ *     then fade Susan in. We never put a still of Susan in the connecting slot.
  */
 
 type Props = {
@@ -25,6 +34,8 @@ type Props = {
   listening?: boolean;
   getAmplitude?: () => number;
   usingBrowserVoice?: boolean;
+  /** When false, keep the waiting room and do not start Simli. */
+  enabled?: boolean;
   size?: number;
   layout?: "circle" | "stage";
 };
@@ -36,7 +47,12 @@ const CONNECT_RETRY_MAX_MS = 10000;
 type SessionStatus = "idle" | "connecting" | "ready";
 
 function RealtimeAvatarImpl(props: Props) {
-  const { size = 240, usingBrowserVoice, layout = "stage" } = props;
+  const {
+    size = 240,
+    usingBrowserVoice,
+    enabled = false,
+    layout = "stage",
+  } = props;
   const stage = layout === "stage";
   const width = stage ? AVATAR_STAGE.width : size;
   const height = stage ? avatarStageFrameHeight() : size;
@@ -58,6 +74,8 @@ function RealtimeAvatarImpl(props: Props) {
 
   const usingBrowserVoiceRef = useRef(usingBrowserVoice);
   usingBrowserVoiceRef.current = usingBrowserVoice;
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
 
   const stopClient = useCallback(() => {
     const client = clientRef.current;
@@ -72,12 +90,13 @@ function RealtimeAvatarImpl(props: Props) {
 
   const startSession = useCallback(async () => {
     if (startedRef.current) return;
+    if (!enabledRef.current) return;
     if (usingBrowserVoiceRef.current) return;
     startedRef.current = true;
     setStatus("connecting");
 
     let delay = CONNECT_RETRY_MS;
-    while (!cancelledRef.current && !usingBrowserVoiceRef.current) {
+    while (!cancelledRef.current && enabledRef.current && !usingBrowserVoiceRef.current) {
       try {
         const { data } = await supabase.auth.getSession();
         const accessToken = data.session?.access_token ?? null;
@@ -106,7 +125,7 @@ function RealtimeAvatarImpl(props: Props) {
         clientRef.current = client;
 
         const reconnect = () => {
-          if (cancelledRef.current) return;
+          if (cancelledRef.current || !enabledRef.current) return;
           if (statusRef.current !== "ready") return;
           stopClient();
           startedRef.current = false;
@@ -128,7 +147,7 @@ function RealtimeAvatarImpl(props: Props) {
       } catch (err) {
         console.warn("Realtime avatar connecting — retrying", err);
         stopClient();
-        if (cancelledRef.current || usingBrowserVoiceRef.current) break;
+        if (cancelledRef.current || !enabledRef.current || usingBrowserVoiceRef.current) break;
         await new Promise((r) => setTimeout(r, delay));
         delay = Math.min(delay + 1000, CONNECT_RETRY_MAX_MS);
       }
@@ -138,23 +157,29 @@ function RealtimeAvatarImpl(props: Props) {
 
   useEffect(() => {
     cancelledRef.current = false;
+    if (!enabled || usingBrowserVoice) {
+      stopClient();
+      startedRef.current = false;
+      setStatus("idle");
+      setVideoReady(false);
+      return () => {
+        cancelledRef.current = true;
+      };
+    }
+
     void startSession();
-    const onGesture = () => {
-      void startSession();
-    };
-    window.addEventListener("pointerdown", onGesture, { once: true });
-    window.addEventListener("keydown", onGesture, { once: true });
     return () => {
       cancelledRef.current = true;
-      window.removeEventListener("pointerdown", onGesture);
-      window.removeEventListener("keydown", onGesture);
     };
-  }, [startSession]);
+  }, [enabled, usingBrowserVoice, startSession, stopClient]);
 
   useEffect(() => {
     const sink: RealtimeAvatarSink = {
       isReady: () =>
-        statusRef.current === "ready" && !!clientRef.current && !usingBrowserVoiceRef.current,
+        enabledRef.current &&
+        statusRef.current === "ready" &&
+        !!clientRef.current &&
+        !usingBrowserVoiceRef.current,
       isFailed: () => !!usingBrowserVoiceRef.current,
       speak: async (pcm: Int16Array) => {
         const client = clientRef.current;
@@ -190,7 +215,10 @@ function RealtimeAvatarImpl(props: Props) {
   }, []);
 
   useEffect(() => {
-    if (status !== "ready") return;
+    if (status !== "ready") {
+      setVideoReady(false);
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
 
@@ -220,14 +248,6 @@ function RealtimeAvatarImpl(props: Props) {
   }, [status]);
 
   useEffect(() => {
-    if (usingBrowserVoice) {
-      stopClient();
-      startedRef.current = false;
-      setStatus("connecting");
-    }
-  }, [usingBrowserVoice, stopClient]);
-
-  useEffect(() => {
     return () => {
       const client = clientRef.current;
       clientRef.current = null;
@@ -235,7 +255,9 @@ function RealtimeAvatarImpl(props: Props) {
     };
   }, []);
 
-  const live = status === "ready" && videoReady;
+  const live = enabled && status === "ready" && videoReady;
+  const holdHeadline = enabled ? CONNECTING_HEADLINE : WAITING_ROOM_HEADLINE;
+  const holdLine = enabled ? CONNECTING_LINE : WAITING_ROOM_LINE;
 
   return (
     <div className="relative inline-block" style={{ width, height }}>
@@ -272,7 +294,7 @@ function RealtimeAvatarImpl(props: Props) {
         }}
         aria-hidden={live}
       >
-        <ConnectingHold radius={frameRadius} />
+        <ConnectingHold radius={frameRadius} headline={holdHeadline} line={holdLine} />
       </div>
 
       <audio ref={audioRef} autoPlay className="hidden" />

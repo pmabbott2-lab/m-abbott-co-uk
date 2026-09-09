@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Mortgage calculator — MortgageEasy</title>
   <meta name="description" content="Estimate your monthly mortgage payment and illustrative market rate by LTV, then request a callback or continue your advisor-led journey." />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=24" />
   <script src="site-config.js"></script>
 </head>
 <body>
@@ -17,23 +17,32 @@
     </div>
   </div>
 
-  <header class="site-header">
+      <header class="site-header">
     <div class="container header-inner">
       <a class="logo-link" href="index.html" data-ref-link>
         <img class="logo-img" src="assets/logo.png" width="200" height="48" alt="MortgageEasy" />
       </a>
-      <nav class="nav" aria-label="Main">
-        <a href="index.html" data-ref-link>Home</a>
-        <a href="about.html" data-ref-link>About us</a>
-        <a href="calculator.html" class="active" data-ref-link>Calculator</a>
-        <a href="index.html#your-journey" data-ref-link>Your journey</a>
-        <a href="index.html#rates" data-ref-link>Rates</a>
-        <a href="disclosures.html" data-ref-link>Disclosures</a>
-      </nav>
       <div class="header-actions">
-        <a class="btn btn-outline" href="/auth" data-hub-auth data-hub-path="/auth">Sign in</a>
-        <a class="btn btn-primary" href="/auth?from=broker&amp;join=1&amp;start=voice" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=voice">Get started</a>
+        <a class="btn btn-outline btn-sm" href="/auth" data-hub-auth data-hub-path="/auth">Sign in</a>
+        <button
+          type="button"
+          class="nav-toggle"
+          data-nav-toggle
+          aria-expanded="false"
+          aria-controls="site-menu"
+          aria-label="Open site menu"
+        >
+          <span class="nav-toggle-bars" aria-hidden="true"></span>
+        </button>
       </div>
+      <nav id="site-menu" class="site-menu" data-site-menu hidden>
+        <a href="about.html" data-ref-link>About us</a>
+        <a href="calculator.html" data-ref-link class="active">Calculator</a>
+        <a href="careers.html" data-ref-link>Careers</a>
+        <a href="disclosures.html" data-ref-link>Disclosures</a>
+        <a href="index.html#mortgage-journey" data-ref-link>Mortgage journey</a>
+        <a href="partnerships.html" data-ref-link>Partnerships</a>
+      </nav>
     </div>
   </header>
 
@@ -317,6 +326,7 @@
   </footer>
 
   <script>document.getElementById("y").textContent = new Date().getFullYear();</script>
+  <script src="site-menu.js"></script>
   <script src="market-rates-strip.js"></script>
   <script src="calculator.js"></script>
 </body>
