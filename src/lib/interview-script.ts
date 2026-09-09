@@ -44,7 +44,7 @@ export function firstGreeting(firstName: string | undefined, firstPrompt: string
   const intro = firstName
     ? `Hi ${firstName}, I'm Susan, your virtual assistant.`
     : "Hi, I'm Susan, your virtual assistant.";
-  return `${intro} I'm here to help get your mortgage advisor up to speed before you meet. ${firstPrompt}`;
+  return `${intro} I'm here to help get your mortgage adviser up to speed before you meet. ${firstPrompt}`;
 }
 
 export type AnswersMap = Record<string, string>;

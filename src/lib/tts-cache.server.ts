@@ -2,7 +2,7 @@ const MAX_ENTRIES = 80;
 const cache = new Map<string, ArrayBuffer>();
 
 /** Bump when voice/model changes so old cached audio is not reused. */
-const CACHE_VERSION = "v3-sage";
+const CACHE_VERSION = "v5-sonia";
 
 function cacheKey(text: string): string {
   return `${CACHE_VERSION}:${text.trim().slice(0, 4000)}`;

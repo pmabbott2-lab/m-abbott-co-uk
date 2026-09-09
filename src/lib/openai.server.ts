@@ -8,15 +8,15 @@ export const OPENAI_TTS_MODEL = "gpt-4o-mini-tts";
 export const OPENAI_STT_MODEL = "gpt-4o-mini-transcribe";
 export const OPENAI_STT_FALLBACK_MODEL = "whisper-1";
 
-/** Warm British English female guide — OpenAI voices: coral, sage, nova are female-optimised. */
+/**
+ * Legacy OpenAI TTS — Susan interview speech now uses Azure Sonia via
+ * `azure.server.ts` / `/api/tts`. Keep these only as reference for older clips.
+ */
 export const SUSAN_TTS_VOICE = "sage";
 export const SUSAN_TTS_INSTRUCTIONS =
   "You are Susan, a warm, friendly British woman with a natural UK accent, guiding someone " +
   "through their mortgage fact-find. Speak conversationally and personally — like a real adviser " +
-  "having a relaxed, encouraging chat with a client you genuinely want to help. Sound human and " +
-  "spontaneous, never robotic, flat or like you're reading a script. Use natural rhythm and gentle, " +
-  "expressive intonation: a little warmth and lift on key words, small natural pauses at commas and " +
-  "full stops, and an upbeat, reassuring tone. Keep it clear and professional at a calm, natural pace.";
+  "having a relaxed, encouraging chat with a client you genuinely want to help.";
 
 export function getOpenAIKey(): string {
   const key = process.env.OPENAI_API_KEY;
@@ -62,6 +62,7 @@ export async function chatCompletion(opts: {
   return json.choices[0]?.message?.content ?? "";
 }
 
+/** @deprecated Prefer `@/lib/azure.server` synthesizeSpeech for Susan. */
 export async function synthesizeSpeech(text: string): Promise<ArrayBuffer> {
   const res = await openAIFetch("/audio/speech", {
     method: "POST",

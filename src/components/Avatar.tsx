@@ -54,9 +54,11 @@ export function Avatar({ speaking, listening, size = 220 }: { speaking?: boolean
 
 const blobCache = new Map<string, Blob>();
 const MAX_BLOB_CACHE = 40;
+/** Bump with server TTS cache so browsers do not replay old sage/marin blobs. */
+const CLIENT_TTS_CACHE_VERSION = "v5-sonia";
 
 function cacheBlob(text: string, blob: Blob) {
-  const key = text.trim();
+  const key = `${CLIENT_TTS_CACHE_VERSION}:${text.trim()}`;
   if (blobCache.has(key)) blobCache.delete(key);
   blobCache.set(key, blob);
   while (blobCache.size > MAX_BLOB_CACHE) {
@@ -66,7 +68,7 @@ function cacheBlob(text: string, blob: Blob) {
 }
 
 async function fetchTtsBlob(text: string, authToken: string | null): Promise<Blob> {
-  const key = text.trim();
+  const key = `${CLIENT_TTS_CACHE_VERSION}:${text.trim()}`;
   const cached = blobCache.get(key);
   if (cached) return cached;
 
@@ -83,7 +85,7 @@ async function fetchTtsBlob(text: string, authToken: string | null): Promise<Blo
     throw new Error(msg);
   }
   const blob = await res.blob();
-  cacheBlob(key, blob);
+  cacheBlob(text, blob);
   return blob;
 }
 
@@ -121,7 +123,7 @@ export function useAudioPlayback(getAuthToken?: () => Promise<string | null>) {
       setTtsMode("openai");
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      console.warn("OpenAI TTS probe failed — locking browser voice for session", msg);
+      console.warn("Susan TTS probe failed — locking browser voice for session", msg);
       setTtsMode("browser");
     }
   };
@@ -419,7 +421,7 @@ export function useAudioPlayback(getAuthToken?: () => Promise<string | null>) {
     await runTtsProbe(token);
     if (ttsModeRef.current === "browser") return;
     await Promise.allSettled(
-      texts.filter((t) => t.trim() && !blobCache.has(t.trim())).map((t) => fetchTtsBlob(t, token)),
+      texts.filter((t) => t.trim() && !blobCache.has(`${CLIENT_TTS_CACHE_VERSION}:${t.trim()}`)).map((t) => fetchTtsBlob(t, token)),
     );
   };
 
@@ -440,10 +442,10 @@ export function useAudioPlayback(getAuthToken?: () => Promise<string | null>) {
       if (!ttsModeRef.current) setTtsMode("openai");
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      console.warn("OpenAI TTS unavailable, locking browser voice for session", msg);
+      console.warn("Susan TTS unavailable, locking browser voice for session", msg);
       setTtsMode("browser");
       if (isOpenAIQuotaError(msg)) {
-        console.info("OpenAI quota exceeded — using British English browser voice for Susan");
+        console.info("TTS quota exceeded — using British English browser voice for Susan");
       }
       await playWithBrowser(text, opts);
     }
