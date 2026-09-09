@@ -16,8 +16,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
-  <link rel="stylesheet" href="home-pro.css" />
+  <link rel="stylesheet" href="styles.css?v=13" />
+  <link rel="stylesheet" href="home-pro.css?v=13" />
   <script src="site-config.js"></script>
 </head>
 <body>
@@ -31,11 +31,12 @@
   <header class="site-header">
     <div class="container header-inner">
       <a class="logo-link" href="index.html" data-ref-link>
-        <img class="logo-img" src="assets/logo.svg" width="220" height="52" alt="MortgageEasy" />
+        <img class="logo-img" src="assets/logo.svg" width="660" height="156" alt="MortgageEasy" />
       </a>
       <nav class="nav" aria-label="Main">
         <a href="index.html" class="active" data-ref-link>Home</a>
         <a href="#first-time-buyers">First-time buyers</a>
+        <a href="#home-movers">Home movers</a>
         <a href="#remortgage">Remortgage</a>
         <a href="#protect">Protect</a>
         <a href="about.html" data-ref-link>About us</a>
@@ -145,6 +146,40 @@
           height="720"
         >
           <source src="assets/video/first-time-buyer-draft-v2.mp4?v=1" type="video/mp4" />
+        </video>
+        <div class="ftb-captions" data-ftb-captions hidden></div>
+        <button type="button" class="ftb-mute" data-ftb-mute aria-pressed="true">Unmute</button>
+        <div class="ftb-end" data-ftb-end hidden>
+          <a class="ftb-end-link" href="#your-journey">Start your journey</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="home-movers" class="ftb-video-section">
+    <div class="container">
+      <div class="section-head">
+        <div class="bar"></div>
+        <p class="ftb-kicker">
+          <span class="ftb-badge">Home movers</span>
+        </p>
+        <h2>Life moves on</h2>
+        <p>A short look at reviewing your mortgage when your next home becomes the next chapter.</p>
+      </div>
+      <div
+        class="ftb-player"
+        data-ftb-player
+        data-captions-src="assets/video/home-mover-v1.vtt?v=1"
+      >
+        <video
+          data-ftb-video
+          muted
+          playsinline
+          preload="metadata"
+          width="1280"
+          height="720"
+        >
+          <source src="assets/video/home-mover-v1.mp4?v=1" type="video/mp4" />
         </video>
         <div class="ftb-captions" data-ftb-captions hidden></div>
         <button type="button" class="ftb-mute" data-ftb-mute aria-pressed="true">Unmute</button>
@@ -332,6 +367,7 @@
           <ul>
             <li><a href="index.html#your-journey" data-ref-link>Your journey</a></li>
             <li><a href="index.html#first-time-buyers">First-time buyers</a></li>
+            <li><a href="index.html#home-movers">Home movers</a></li>
             <li><a href="index.html#remortgage">Remortgage</a></li>
             <li><a href="index.html#protect">Protect</a></li>
             <li><a href="calculator.html" data-ref-link>Mortgage calculator</a></li>
@@ -342,8 +378,7 @@
         <div>
           <h4>Company</h4>
           <ul>
-            <li><a href="#first-time-buyers">First-time buyers</a>
-        <a href="about.html" data-ref-link>About us</a></li>
+            <li><a href="about.html" data-ref-link>About us</a></li>
             <li><a href="partnerships.html" data-ref-link>Introducer partnerships</a></li>
             <li><a href="careers.html" data-ref-link>Careers</a></li>
             <li><a href="disclosures.html" data-ref-link>Complaints &amp; privacy</a></li>

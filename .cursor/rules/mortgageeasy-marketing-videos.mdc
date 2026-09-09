@@ -1,7 +1,7 @@
 ---
-description: MortgageEasy customer-journey marketing videos (first-time buyer, remortgage, protect what matters). Apply whenever generating, composing, voicing, or embedding these films.
+description: MortgageEasy customer-journey marketing videos (first-time buyer, home movers, remortgage, protect what matters). Apply whenever generating, composing, voicing, or embedding these films.
 alwaysApply: false
-globs: scripts/compose-mortgageeasy*.sh,scripts/generate-runway*.mjs,scripts/render-remortgage-gfx.py,marketing/mortgage-hub-website/**,marketing/mortgageeasy-film-hold/**
+globs: scripts/compose-mortgageeasy*.sh,scripts/generate-runway*.mjs,scripts/generate-home-mover*.py,scripts/render-*-gfx.py,marketing/mortgage-hub-website/**,marketing/mortgageeasy-film-hold/**
 ---
 
 # MortgageEasy marketing videos
@@ -35,6 +35,14 @@ Amendable components and previous drafts: `marketing/mortgageeasy-film-hold/`.
 - Site: `marketing/mortgage-hub-website/assets/video/protect-draft-v1.mp4`
 - Graphics: `marketing/mortgageeasy-film-hold/protect-gfx/`
 
+### Home movers — V1 (live)
+
+- Canonical: `assets/mortgageeasy-home-mover-v1.mp4`
+- Site: `marketing/mortgage-hub-website/assets/video/home-mover-v1.mp4`
+- Captions: `marketing/mortgage-hub-website/assets/video/home-mover-v1.vtt`
+- Compose: `scripts/compose-mortgageeasy-home-mover-v1.sh`
+- VO: `scripts/generate-home-mover-sonia-vo.py`
+- On-film repossession disclaimer via `smallprint-on-dark.png` on the end hold.
 ## Voice
 
 - Prefer Azure Neural TTS `en-GB-SoniaNeural` (uksouth) for current cuts. Coral OpenAI remains on older V1 archives.
