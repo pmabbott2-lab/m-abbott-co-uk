@@ -35,21 +35,21 @@ SECTIONS = [
     ),
     (
         3,
-        "Moving home is also a natural time to review.\n"
-        "Your equity. Your existing mortgage. What your next mortgage could look like.\n"
-        "Because what worked when you bought your first home may not be right for you now.",
+        "Moving home is also a natural time to review what your next mortgage could look like.\n"
+        "Because what suited a first purchase may not suit a later move.",
     ),
     (
         4,
+        "An adviser can help you review the options.\n"
         "You can have that conversation from home, at a time that works for you.\n"
         "We'll look at it together and help you understand your options.",
     ),
     (
         5,
-        "Because life is busy enough. Good mortgage advice should fit around it.\n"
+        "Because life is busy enough. Mortgage advice that fits around your life can help.\n"
         "Your first home was about getting started.\n"
         "Your next home is about moving forward.\n"
-        "And when life moves on, your mortgage should move with it.",
+        "And when life moves on, it can help to review your mortgage as you go.",
     ),
 ]
 

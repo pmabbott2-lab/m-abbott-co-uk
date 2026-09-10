@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MortgageEasy — film review</title>
+  <style>
+    :root {
+      --bg: #0f1720;
+      --panel: #17212b;
+      --text: #e8eef4;
+      --muted: #9aacbc;
+      --accent: #3d9e47;
+      --line: #2a3846;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      background: rgba(15, 23, 32, 0.96);
+      z-index: 2;
+    }
+    header h1 {
+      margin: 0 0 0.35rem;
+      font-size: 1.15rem;
+      font-weight: 650;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.9rem;
+    }
+    nav a {
+      color: var(--text);
+      text-decoration: none;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.35rem 0.8rem;
+      font-size: 0.85rem;
+    }
+    nav a:hover { border-color: var(--accent); }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 1.25rem 1.25rem 3rem;
+      display: grid;
+      gap: 1.5rem;
+    }
+    article {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    article header {
+      position: static;
+      background: transparent;
+      border: 0;
+      padding: 1rem 1rem 0.6rem;
+    }
+    article h2 {
+      margin: 0;
+      font-size: 1rem;
+    }
+    article .meta {
+      margin: 0.35rem 0 0;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+    video {
+      width: 100%;
+      display: block;
+      background: #000;
+      vertical-align: top;
+    }
+    .note {
+      padding: 0.75rem 1rem 1rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Film review pane</h1>
+    <p>Native controls — pause, scrub, unmute. Does not auto-restart on scroll. Same files as the live site.</p>
+    <nav>
+      <a href="#ftb">First-time buyers</a>
+      <a href="#home">Home movers</a>
+      <a href="#remortgage">Remortgage</a>
+      <a href="#protect">Protect</a>
+      <a href="index.html#first-time-buyers">Open site section</a>
+    </nav>
+  </header>
+  <main>
+    <article id="ftb">
+      <header>
+        <h2>First-time buyers — Your first home, made easier</h2>
+        <p class="meta">first-time-buyer-draft-v5 · stairs freeze + timed journey points</p>
+      </header>
+      <video controls playsinline preload="metadata" controlslist="nodownload">
+        <source src="assets/video/first-time-buyer-draft-v5.mp4?v=2" type="video/mp4" />
+        <track kind="captions" src="assets/video/first-time-buyer-draft-v5.vtt?v=2" srclang="en" label="English" default />
+      </video>
+      <p class="note">Pause and scrub freely. Captions available via the player menu.</p>
+    </article>
+
+    <article id="home">
+      <header>
+        <h2>Home movers — Life moves on</h2>
+        <p class="meta">home-mover-v8 · signed-off candidate · LIFE MOVES ON slide ~3s earlier</p>
+      </header>
+      <video controls playsinline preload="metadata" controlslist="nodownload">
+        <source src="assets/video/home-mover-v8.mp4?v=3" type="video/mp4" />
+        <track kind="captions" src="assets/video/home-mover-v8.vtt?v=2" srclang="en" label="English" default />
+      </video>
+    </article>
+
+    <article id="remortgage">
+      <header>
+        <h2>Remortgage — Don't just renew. Review.</h2>
+        <p class="meta">remortgage-draft-v4</p>
+      </header>
+      <video controls playsinline preload="metadata" controlslist="nodownload">
+        <source src="assets/video/remortgage-draft-v4.mp4?v=2" type="video/mp4" />
+        <track kind="captions" src="assets/video/remortgage-draft-v4.vtt?v=2" srclang="en" label="English" default />
+      </video>
+    </article>
+
+    <article id="protect">
+      <header>
+        <h2>Protect — Protected for what matters</h2>
+        <p class="meta">protect-draft-v9 · end slide through VO · fade to Mortgage Easy hold</p>
+      </header>
+      <video controls playsinline preload="metadata" controlslist="nodownload">
+        <source src="assets/video/protect-draft-v9.mp4?v=1" type="video/mp4" />
+        <track kind="captions" src="assets/video/protect-draft-v9.vtt?v=1" srclang="en" label="English" default />
+      </video>
+    </article>
+  </main>
+</body>
+</html>

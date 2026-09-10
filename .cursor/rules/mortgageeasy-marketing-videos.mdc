@@ -1,7 +1,7 @@
 ---
 description: MortgageEasy customer-journey marketing videos (first-time buyer, home movers, remortgage, protect what matters). Apply whenever generating, composing, voicing, or embedding these films.
 alwaysApply: false
-globs: scripts/compose-mortgageeasy*.sh,scripts/generate-runway*.mjs,scripts/generate-home-mover*.py,scripts/render-*-gfx.py,marketing/mortgage-hub-website/**,marketing/mortgageeasy-film-hold/**
+globs: scripts/compose-mortgageeasy*.sh,scripts/generate-runway*.mjs,scripts/generate-home-mover*.py,scripts/generate-journey-compliant-sonia-vo.py,scripts/rebuild-ftb-end-and-home-mover.py,scripts/render-*-gfx.py,marketing/mortgage-hub-website/**,marketing/mortgageeasy-film-hold/**
 ---
 
 # MortgageEasy marketing videos
@@ -12,37 +12,44 @@ Amendable components and previous drafts: `marketing/mortgageeasy-film-hold/`.
 
 ## Locked restore points
 
-### First-time buyers — V2 (live)
+### First-time buyers — V5 (live, stairs freeze + timed journey points)
 
-- Canonical: `assets/mortgageeasy-first-time-buyer-draft-v2.mp4`
-- Site: `marketing/mortgage-hub-website/assets/video/first-time-buyer-draft-v2.mp4`
-- Captions: `marketing/mortgage-hub-website/assets/video/first-time-buyer-draft-v2.vtt`
-- Compose: `scripts/compose-mortgageeasy-final.sh`
-- Previous V1 held in `marketing/mortgageeasy-film-hold/previous-drafts/` and site `first-time-buyer-draft-v1.*`
+- Site: `marketing/mortgage-hub-website/assets/video/first-time-buyer-draft-v5.mp4`
+- Captions: `marketing/mortgage-hub-website/assets/video/first-time-buyer-draft-v5.vtt`
+- VO regen: `scripts/generate-journey-compliant-sonia-vo.py`
+- Picture: `scripts/rebuild-ftb-end-and-home-mover.py`
+- Previous: site `first-time-buyer-draft-v4.*` / `v3.*` / `v2.*`
 
-### Remortgage — V2 (live)
+### Remortgage — V4 (live)
 
-- Canonical: `assets/mortgageeasy-remortgage-draft-v2.mp4`
-- Site: `marketing/mortgage-hub-website/assets/video/remortgage-draft-v2.mp4`
-- Captions: `marketing/mortgage-hub-website/assets/video/remortgage-draft-v2.vtt`
-- Compose: `scripts/compose-mortgageeasy-remortgage-v2.sh`
-- Previous V1: site `remortgage-draft-v1.*` and film-hold previous-drafts
+- Site: `marketing/mortgage-hub-website/assets/video/remortgage-draft-v4.mp4`
+- Captions: `marketing/mortgage-hub-website/assets/video/remortgage-draft-v4.vtt`
+- VO regen: `scripts/generate-journey-compliant-sonia-vo.py`
+- Previous: site `remortgage-draft-v3.*` / `v2.*` and film-hold previous-drafts
 - Graphics: `marketing/mortgageeasy-film-hold/remortgage-gfx/` and `scripts/render-remortgage-gfx.py`
 
-### Protect what matters — V1 (live)
+### Protect what matters — V9 (live, shortened script, line-paced compliance)
 
-- Canonical: `assets/mortgageeasy-protect-draft-v1.mp4`
-- Site: `marketing/mortgage-hub-website/assets/video/protect-draft-v1.mp4`
+- Canonical: `assets/mortgageeasy-protect-draft-v9.mp4`
+- Site: `marketing/mortgage-hub-website/assets/video/protect-draft-v9.mp4`
+- Captions: `marketing/mortgage-hub-website/assets/video/protect-draft-v9.vtt`
+- VO: `scripts/generate-journey-compliant-sonia-vo.py protect` (tempo 1.1025; compliance block 1.05 + longer breaks)
+- Picture: `scripts/rebuild-ftb-end-and-home-mover.py protect`
 - Graphics: `marketing/mortgageeasy-film-hold/protect-gfx/`
+- Locks: birthday on “Where birthdays…”; titles on Protect house/family; self on “Because others rely on you”; adviser on “An adviser can discuss this…”; end card through last VO then fade to Mortgage Easy hold
+- Adviser continuity: matching laptop call → in-person advice (no second adviser face)
+- Previous: site `protect-draft-v8.*` … `v1.*`
 
-### Home movers — V1 (live)
+### Home movers — V8 (live, faster VO, one review sentence, no garden freeze)
 
-- Canonical: `assets/mortgageeasy-home-mover-v1.mp4`
-- Site: `marketing/mortgage-hub-website/assets/video/home-mover-v1.mp4`
-- Captions: `marketing/mortgage-hub-website/assets/video/home-mover-v1.vtt`
-- Compose: `scripts/compose-mortgageeasy-home-mover-v1.sh`
-- VO: `scripts/generate-home-mover-sonia-vo.py`
+- Canonical: `assets/mortgageeasy-home-mover-v8.mp4`
+- Site: `marketing/mortgage-hub-website/assets/video/home-mover-v8.mp4`
+- Captions: `marketing/mortgage-hub-website/assets/video/home-mover-v8.vtt`
+- VO tempo ~1.158; picture: `scripts/rebuild-ftb-end-and-home-mover.py home`
+- Review line: “Moving home is also a natural time to review what your next mortgage could look like.”
+- Previous V7: site `home-mover-v7.*`
 - On-film repossession disclaimer via `smallprint-on-dark.png` on the end hold.
+
 ## Voice
 
 - Prefer Azure Neural TTS `en-GB-SoniaNeural` (uksouth) for current cuts. Coral OpenAI remains on older V1 archives.
