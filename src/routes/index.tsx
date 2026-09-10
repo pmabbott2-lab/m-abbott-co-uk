@@ -18,7 +18,7 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Create your account and complete a spoken or typed fact-find with Susan — or book an appointment first with our diary.",
+          "Create your account with Susan — talk or type your fact-find, or book an appointment. You only need your name, email, phone and a password.",
       },
     ],
   }),
@@ -74,14 +74,13 @@ function Landing() {
               clean summary to your advisor.
             </p>
             <div className="flex flex-wrap gap-3">
-              <a href="/auth?join=1&start=voice"><Button size="lg">Get started</Button></a>
+              <a href="/auth?join=1"><Button size="lg">Get started</Button></a>
             </div>
             <p className="text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">Voice</span> and{" "}
-              <span className="font-medium text-foreground">chat</span> use create account, then your
-              fact-find — not appointment booking.{" "}
-              <span className="font-medium text-foreground">Book appointment</span> picks your time
-              first.
+              To get started we only need your <span className="font-medium text-foreground">name</span>,{" "}
+              <span className="font-medium text-foreground">email address</span>,{" "}
+              <span className="font-medium text-foreground">telephone number</span> and a{" "}
+              <span className="font-medium text-foreground">password</span> to set up your account.
             </p>
           </div>
           <div className="flex items-center justify-center">
@@ -95,8 +94,7 @@ function Landing() {
         <section>
           <h2 className="text-xl font-semibold mb-1">Choose how you'd like to get started</h2>
           <p className="text-sm text-muted-foreground mb-4">
-            Voice and chat start with create account, then your fact-find. Booking starts by choosing
-            an appointment.
+            Talk or type with Susan after you create your account — or book an appointment first.
           </p>
           <div className="grid sm:grid-cols-3 gap-4">
             <a href="/auth?join=1&start=voice" className="rounded-2xl border bg-card p-5 transition hover:border-accent hover:shadow-sm no-underline text-foreground">

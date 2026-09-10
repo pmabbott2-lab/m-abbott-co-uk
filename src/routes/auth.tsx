@@ -820,7 +820,7 @@ function AuthPage() {
               ? "Create your account — then chat with Susan"
               : journeyStart === "book"
                 ? "Book your appointment"
-                : "Create your Mortgage Hub account"
+                : "Start your journey with Susan"
           : "Get started with Mortgage Hub";
 
   const subtitle =
@@ -850,6 +850,8 @@ function AuthPage() {
             ? "A quiet typed fact-find with Susan — create your account to begin."
             : mode === "signup" && journeyStart === "book"
               ? "Pick a time with your advisor — we'll confirm by text."
+              : mode === "signup"
+                ? "To get started we only need your name, email address, telephone number and a password."
               : mode === "signin"
                 ? "Sign in to your Mortgage Hub account."
                 : "Create your account to get started with Mortgage Hub.";

@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Mortgage calculator — MortgageEasy</title>
   <meta name="description" content="Estimate your monthly mortgage payment and illustrative market rate by LTV, then request a callback or continue your advisor-led journey." />
-  <link rel="stylesheet" href="styles.css?v=24" />
+  <link rel="stylesheet" href="styles.css?v=25" />
   <script src="site-config.js"></script>
 </head>
 <body>
@@ -205,25 +205,28 @@
 
           <div id="journey-section" class="journey-continue-card">
             <h2>Or continue your journey</h2>
-            <p>Create your account on Mortgage Hub and start voice, chat, or book an appointment with your advisor.</p>
-            <div class="journey-grid journey-grid-compact">
-              <a class="journey-card" href="/auth?from=broker&amp;join=1&amp;start=voice" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=voice">
-                <span class="journey-num">01</span>
-                <h3>Verbal interview</h3>
-                <p>Spoken fact-find with Susan after you create your account.</p>
-                <span class="journey-cta">Get started →</span>
-              </a>
-              <a class="journey-card" href="/auth?from=broker&amp;join=1&amp;start=chat" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=chat">
-                <span class="journey-num">02</span>
-                <h3>Text interview</h3>
-                <p>Quiet typed chat — same questions, your pace.</p>
-                <span class="journey-cta">Create account →</span>
+            <p>Create your Mortgage Hub account with Susan, or book an appointment with your advisor.</p>
+            <div class="journey-grid journey-grid-compact journey-grid-three">
+              <a class="journey-card journey-card-susan" href="/auth?from=broker&amp;join=1" data-hub-auth data-hub-path="/auth?from=broker&join=1">
+                <span class="journey-susan-media" aria-hidden="true">
+                  <img src="assets/susan.png" width="56" height="56" alt="" class="journey-susan-photo" />
+                  <img src="assets/icon.svg" width="18" height="18" alt="" class="journey-susan-badge" />
+                </span>
+                <h3>Start with Susan</h3>
+                <p>She helps set up your account, gather basics and get your advisor prepared — talk or type on Mortgage Hub.</p>
+                <span class="journey-cta">Meet Susan →</span>
               </a>
               <a class="journey-card" href="/auth?from=broker&amp;join=1&amp;start=book" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=book">
-                <span class="journey-num green">03</span>
+                <span class="journey-num green">02</span>
                 <h3>Book appointment</h3>
                 <p>Pick a time first — appointment-first signup.</p>
                 <span class="journey-cta">Book appointment →</span>
+              </a>
+              <a class="journey-card" href="#callback">
+                <span class="journey-num">03</span>
+                <h3>Arrange a callback</h3>
+                <p>Prefer a call? Request a callback above.</p>
+                <span class="journey-cta">Request callback →</span>
               </a>
             </div>
           </div>

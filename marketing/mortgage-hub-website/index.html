@@ -11,13 +11,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MortgageEasy — Advisor-led mortgage advice</title>
-  <meta name="description" content="Start your mortgage journey with MortgageEasy — calculator, verbal or text fact-find, or book your advisor appointment." />
+  <meta name="description" content="Start your mortgage journey with MortgageEasy — Susan helps get your advisor up to speed, or book an appointment or callback." />
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=24" />
-  <link rel="stylesheet" href="home-pro.css?v=24" />
+  <link rel="stylesheet" href="styles.css?v=27" />
+  <link rel="stylesheet" href="home-pro.css?v=27" />
   <script src="site-config.js"></script>
 </head>
 <body>
@@ -57,8 +57,8 @@
             <div class="hero-pro-copy">
               <h1>Make a house your home with <em>MortgageEasy</em></h1>
               <p class="hero-pro-lead">
-                Qualified mortgage advice with modern tools — start with a calculator illustration,
-                a quick fact-find by voice or chat, or book time with your advisor first.
+                Qualified mortgage advice with modern tools — start with Susan to get your advisor
+                prepared, use the calculator, or book time with your advisor first.
               </p>
               <p id="introducer-banner" class="introducer-banner" hidden></p>
               <div class="hero-pro-actions">
@@ -75,7 +75,7 @@
               </div>
               <div class="susan-chip">
                 <img src="assets/susan.png" width="52" height="52" alt="" class="susan-chip-img" />
-                <p><strong>Susan</strong> supports voice and chat fact-finds. Your advisor reviews everything before any recommendation.</p>
+                <p><strong>Susan</strong> helps set up your account, gather basics and track your journey — leaving regulated advice to your advisor.</p>
               </div>
             </aside>
           </div>
@@ -102,22 +102,23 @@
           <div class="section-head">
             <div class="bar"></div>
             <h2>Choose how you want to start</h2>
-            <p>Four clear paths — pick the one that suits you. Each route captures your details for your MortgageEasy advisor.</p>
+            <p>Three clear paths — start with Susan, book time with your advisor, or arrange a callback.</p>
           </div>
-          <div class="journey-grid journey-grid-pro">
-            <a class="journey-card journey-card-pro" href="/auth?from=broker&amp;join=1&amp;start=voice" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=voice">
-              <span class="journey-icon" aria-hidden="true">🎙</span>
-              <h3>Verbal interview</h3>
-              <p>Create your account, then talk through your details with Susan. Ideal if you prefer speaking.</p>
-              <span class="journey-cta">Create account →</span>
+          <div class="journey-grid journey-grid-pro journey-grid-three">
+            <a class="journey-card journey-card-pro journey-card-susan journey-card-featured" href="/auth?from=broker&amp;join=1" data-hub-auth data-hub-path="/auth?from=broker&join=1">
+              <span class="journey-susan-media" aria-hidden="true">
+                <img src="assets/susan.png" width="72" height="72" alt="" class="journey-susan-photo" />
+                <img src="assets/icon.svg" width="22" height="22" alt="" class="journey-susan-badge" />
+              </span>
+              <h3>Start your journey with Susan</h3>
+              <p>
+                Susan helps get your advisor up and running — set up your account, share basic information,
+                use the diary, and track your mortgage journey. She leaves regulated advice to your advisor,
+                so your first meeting starts prepared and saves time.
+              </p>
+              <span class="journey-cta">Meet Susan →</span>
             </a>
-            <a class="journey-card journey-card-pro" href="/auth?from=broker&amp;join=1&amp;start=chat" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=chat">
-              <span class="journey-icon" aria-hidden="true">💬</span>
-              <h3>Text interview</h3>
-              <p>Same fact-find, typed quietly at your pace — no phone call required.</p>
-              <span class="journey-cta">Create account →</span>
-            </a>
-            <a class="journey-card journey-card-pro journey-card-featured" href="/auth?from=broker&amp;join=1&amp;start=book" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=book">
+            <a class="journey-card journey-card-pro" href="/auth?from=broker&amp;join=1&amp;start=book" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=book">
               <span class="journey-icon" aria-hidden="true">📅</span>
               <h3>Book an appointment</h3>
               <p>Pick a time with your advisor first. We'll confirm by text.</p>
@@ -125,7 +126,7 @@
             </a>
             <a class="journey-card journey-card-pro" href="calculator.html#callback" data-ref-link>
               <span class="journey-icon" aria-hidden="true">✆</span>
-              <h3>Request a callback</h3>
+              <h3>Arrange a callback</h3>
               <p>Leave your details and a qualified advisor will call you back.</p>
               <span class="journey-cta">Request callback →</span>
             </a>
@@ -144,7 +145,7 @@
           <ul class="why-list">
             <li><span class="why-tick" aria-hidden="true">✔</span><div><strong>Impartial advice</strong><span>Recommendations tailored to your circumstances after a proper fact-find.</span></div></li>
             <li><span class="why-tick" aria-hidden="true">✔</span><div><strong>Fast, responsive</strong><span>Digital fact-find and booking so your advisor is prepared before you speak.</span></div></li>
-            <li><span class="why-tick" aria-hidden="true">✔</span><div><strong>Personal service</strong><span>A dedicated advisor journey — voice, chat, or appointment-first.</span></div></li>
+            <li><span class="why-tick" aria-hidden="true">✔</span><div><strong>Personal service</strong><span>A dedicated advisor journey — start with Susan, book, or arrange a callback.</span></div></li>
             <li><span class="why-tick" aria-hidden="true">✔</span><div><strong>Clear illustrations</strong><span>Calculator and Bank Rate reference with plain-language disclaimers.</span></div></li>
           </ul>
         </div>
@@ -161,7 +162,7 @@
               <span class="steps-inline-num">1</span>
               <div>
                 <h3>Choose your starting point</h3>
-                <p>Calculator, verbal fact-find, text chat, or book your appointment.</p>
+                <p>Start with Susan, book an appointment, arrange a callback, or try the calculator.</p>
               </div>
             </li>
             <li>
