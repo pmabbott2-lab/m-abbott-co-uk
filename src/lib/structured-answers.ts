@@ -236,8 +236,21 @@ export function extractStructuredFields(fieldKey: string, value: string): Json {
     }
     case "deposit": {
       const n = parseMoneyFromText(text);
-      const pct = text.match(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent|per\s+cent)/i);
-      return { ...(n ? { deposit_gbp: n } : {}), ...(pct ? { deposit_pct: parseFloat(pct[1]) } : {}) };
+      const pctDigit = text.match(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent|per\s+cent)/i);
+      let deposit_pct: number | undefined = pctDigit ? parseFloat(pctDigit[1]) : undefined;
+      if (deposit_pct == null) {
+        const pctWords = text.match(
+          new RegExp(
+            `\\b((?:(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[\\s-]+){0,3}(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety))\\s+(?:percent|per\\s+cent)\\b`,
+            "i",
+          ),
+        );
+        if (pctWords) {
+          const words = wordsToNumber(pctWords[1]);
+          if (words != null && words > 0 && words <= 100) deposit_pct = words;
+        }
+      }
+      return { ...(n ? { deposit_gbp: n } : {}), ...(deposit_pct != null ? { deposit_pct } : {}) };
     }
     case "amount_owed": {
       const n = parseMoneyFromText(text);

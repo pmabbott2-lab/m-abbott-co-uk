@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Mortgage calculator — MortgageEasy</title>
   <meta name="description" content="Estimate your monthly mortgage payment and illustrative market rate by LTV, then request a callback or continue your advisor-led journey." />
-  <link rel="stylesheet" href="styles.css?v=25" />
+  <link rel="stylesheet" href="styles.css?v=26" />
   <script src="site-config.js"></script>
 </head>
 <body>
@@ -53,6 +53,7 @@
         <h1>See what your mortgage might cost — then choose your next step.</h1>
         <p>Estimate repayments for a purchase or remortgage, then request a callback or continue your advisor-led journey.</p>
         <p id="introducer-banner" class="introducer-banner" hidden></p>
+        <!-- Partner-code prompt kept in DOM for referral links later; hidden for public calculator. -->
         <p id="slug-missing" class="slug-warning" hidden>
           Add your partner code to attribute a callback (e.g. <code>?ref=your-partner-slug</code>).
           You can still use the calculator and journey links below.
@@ -329,8 +330,8 @@
   </footer>
 
   <script>document.getElementById("y").textContent = new Date().getFullYear();</script>
-  <script src="site-menu.js"></script>
-  <script src="market-rates-strip.js"></script>
-  <script src="calculator.js"></script>
+  <script src="site-menu.js?v=26"></script>
+  <script src="market-rates-strip.js?v=26"></script>
+  <script src="calculator.js?v=26"></script>
 </body>
 </html>

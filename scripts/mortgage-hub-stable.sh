@@ -59,9 +59,13 @@ stop_demo_proxy() {
   [[ -f "$LOG/proxy.pid" ]] && kill "$(cat "$LOG/proxy.pid")" 2>/dev/null || true
   pkill -f "mortgage-demo-proxy.mjs" 2>/dev/null || true
   lsof -iTCP:"$PROXY_PORT" -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null || true
-  for _ in $(seq 1 15); do
-    proxy_running || return 0
-    sleep 1
+  sleep 0.5
+  # Hard-kill leftovers — soft kill often left :8090 wedged and ngrok serving 502.
+  pkill -9 -f "mortgage-demo-proxy.mjs" 2>/dev/null || true
+  lsof -iTCP:"$PROXY_PORT" -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    proxy_running || { rm -f "$LOG/proxy.pid"; return 0; }
+    sleep 0.25
   done
   echo "port :$PROXY_PORT still in use after stop_demo_proxy" >>"$LOG/stable.err"
 }
@@ -74,6 +78,20 @@ start_demo_proxy() {
     echo "demo proxy script missing at $PROJECT/scripts/mortgage-demo-proxy.mjs" >>"$LOG/stable.err"
     return 1
   fi
+  # Serialize starts (mkdir lock — macOS has no flock by default).
+  local lockdir="$LOG/proxy.start.lock"
+  local waited=0
+  while ! mkdir "$lockdir" 2>/dev/null; do
+    waited=$((waited + 1))
+    if [[ "$waited" -gt 40 ]]; then
+      echo "$(date '+%F %T') demo proxy lock stale — clearing" >>"$LOG/stable.log"
+      rmdir "$lockdir" 2>/dev/null || true
+      mkdir "$lockdir" 2>/dev/null || true
+      break
+    fi
+    sleep 0.25
+  done
+  trap 'rmdir "$lockdir" 2>/dev/null || true' RETURN
   load_node
   # Proxy forwards to the hub — don't start until the app is listening.
   for _ in $(seq 1 30); do
@@ -264,10 +282,12 @@ case "${1:-start}" in
       start_demo_proxy || true
     fi
     start_ngrok || true
-    # If ngrok points at proxy but proxy is down, fall back to hub.
-    if [[ -f "$LOG/ngrok.target" ]] && [[ "$(cat "$LOG/ngrok.target")" == "127.0.0.1:${PROXY_PORT}" ]] && ! proxy_running; then
-      echo "$(date '+%F %T') proxy missing — switching ngrok to hub" >>"$LOG/stable.err"
-      start_ngrok
+    # Keep ngrok on the demo proxy. If proxy is down, retry it — do not silently
+    # point ngrok at hub-only (that makes /mortgageeasy/ look like an ngrok/Hub miss).
+    if [[ "$USE_DEMO_PROXY" == "1" ]] && ! proxy_running; then
+      echo "$(date '+%F %T') proxy missing after ensure — retrying proxy" >>"$LOG/stable.err"
+      start_demo_proxy || true
+      start_ngrok || true
     fi
     ;;
   stop)

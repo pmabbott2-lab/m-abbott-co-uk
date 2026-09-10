@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { chatCompletion } from "@/lib/ai-gateway.server";
-import { extractStructuredFields } from "@/lib/structured-answers";
+import { extractStructuredFields, mergeKeyFacts, parseMoneyFromText } from "@/lib/structured-answers";
 import { generateUniqueCompanyCode } from "@/lib/introducer.functions";
 import {
   normaliseUkPhone,
@@ -201,28 +201,9 @@ function wordsToNumber(s: string): number | null {
 }
 
 function parseMoney(v: string | undefined | null): number | null {
-  if (!v) return null;
-  const s = v.trim().toLowerCase();
-  if (!s) return null;
-  // Shorthand: "250k", "1.5m", "£300k"
-  const short = s.replace(/[£$,\s]/g, "").match(/^([0-9]*\.?[0-9]+)\s*(k|m|mil|million|thousand)?$/);
-  if (short) {
-    const n = parseFloat(short[1]);
-    if (!isNaN(n)) {
-      const suf = short[2];
-      if (suf === "k" || suf === "thousand") return n * 1000;
-      if (suf === "m" || suf === "mil" || suf === "million") return n * 1_000_000;
-      return n;
-    }
-  }
-  // Plain digits anywhere
-  const cleaned = s.replace(/[^0-9.]/g, "");
-  if (cleaned) {
-    const n = parseFloat(cleaned);
-    if (!isNaN(n) && n > 0) return n;
-  }
-  // Spelled out
-  return wordsToNumber(s);
+  // Prefer the shared spoken/digit parser used by Key Facts so illustration
+  // and other session tools don't reject answers like "three hundred thousand pounds".
+  return parseMoneyFromText(v ?? "");
 }
 
 const MONEY_WORD_PATTERN = "zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|and";
@@ -317,21 +298,30 @@ export const generateLenderExample = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { data: answers, error } = await context.supabase
       .from("interview_answers")
-      .select("section, field_key, value")
+      .select("section, field_key, value, structured_value")
       .eq("session_id", data.sessionId);
     if (error) throw new Error(error.message);
 
     const map = new Map((answers ?? []).map((a) => [`${a.section}:${a.field_key}`, a.value]));
+    // Use the same extraction as Key Facts so spoken amounts ("three hundred
+    // thousand pounds") and percentage deposits match what advisers already see.
+    const facts = mergeKeyFacts(answers ?? []);
+
     // Legacy single-question fact-find used "property:mortgage_need"; newer flow
     // splits it into discrete fields. Support both.
     const mortgageNeed = map.get("property:mortgage_need") ?? "";
 
     const purposeRaw =
       map.get("property:mortgage_purpose") ?? map.get("property:purpose") ?? mortgageNeed;
-    const purpose = parsePurpose(purposeRaw) || parsePurpose(mortgageNeed) || "Purchase";
+    const purpose =
+      parsePurpose(facts.purpose ?? "") ||
+      parsePurpose(purposeRaw) ||
+      parsePurpose(mortgageNeed) ||
+      "Purchase";
     const isRemortgage = /remortgage/i.test(purpose);
 
     const price =
+      facts.property_price_gbp ??
       parseMoney(map.get("property:property_price")) ??
       parseMoney(map.get("property:property_value")) ??
       parseMoney(map.get("property:home_price")) ??
@@ -339,6 +329,7 @@ export const generateLenderExample = createServerFn({ method: "POST" })
       null;
 
     const term =
+      facts.mortgage_term_years ??
       parseYears(map.get("property:mortgage_term_remaining")) ??
       parseYears(map.get("property:mortgage_term")) ??
       parseYears(map.get("property:term_years")) ??
@@ -348,11 +339,12 @@ export const generateLenderExample = createServerFn({ method: "POST" })
     const incomeText = map.get("employment:income") ?? "";
     const work = map.get("employment:work") ?? "";
     const income =
+      facts.annual_income_gbp ??
       parseMoney(map.get("employment:annual_income")) ??
       parseMoney(incomeText) ??
       parseContextMoney(incomeText, ["income", "salary", "earn", "annual", "year", "gross"], []) ??
       parseContextMoney(work, ["income", "salary", "earn", "annual", "year", "gross"], []);
-    const employment = map.get("employment:employment_status") ?? work;
+    const employment = facts.employment_status ?? map.get("employment:employment_status") ?? work;
 
     let deposit: number | null = null;
     let owed: number | null = null;
@@ -361,18 +353,20 @@ export const generateLenderExample = createServerFn({ method: "POST" })
 
     if (isRemortgage) {
       owed =
+        facts.amount_owed_gbp ??
         parseMoney(map.get("property:amount_owed")) ??
         parseContextMoney(mortgageNeed, ["owe", "owed", "balance", "outstanding", "remaining"], ["value", "worth", "property"]);
       if (price == null || owed == null) {
         throw new Error("Need the property value and the balance owed captured in the fact-find to calculate this remortgage.");
       }
-      loan = owed;
-      equity = Math.max(price - owed, 0);
+      loan = facts.loan_amount_gbp ?? owed;
+      equity = facts.equity_gbp ?? Math.max(price - owed, 0);
       deposit = equity; // displayed as equity for remortgages
     } else {
       const moneyCandidates = extractMoneyCandidates(mortgageNeed);
-      const depositPercent = parsePercentage(mortgageNeed, "deposit");
+      const depositPercent = facts.deposit_pct ?? parsePercentage(mortgageNeed, "deposit");
       deposit =
+        facts.deposit_gbp ??
         parseMoney(map.get("property:deposit")) ??
         parseContextMoney(mortgageNeed, ["deposit", "putting down", "put down", "saved"], ["price", "value", "worth", "purchase", "buying", "property"]) ??
         (price != null && depositPercent != null ? (price * depositPercent) / 100 : null) ??
@@ -385,7 +379,7 @@ export const generateLenderExample = createServerFn({ method: "POST" })
       if (price == null || deposit == null) {
         throw new Error("Need property price and deposit captured in the fact-find to calculate.");
       }
-      loan = Math.max(price - deposit, 0);
+      loan = facts.loan_amount_gbp ?? Math.max(price - deposit, 0);
     }
 
     const ltv = price > 0 ? (loan / price) * 100 : 0;

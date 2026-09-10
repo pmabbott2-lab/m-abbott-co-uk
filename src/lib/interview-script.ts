@@ -176,14 +176,14 @@ export const SECTIONS: SectionDef[] = [
         label: "Current postcode",
         prompt: "What's the postcode of the home you live in now, {firstName}?",
         expects: "A full UK postcode.",
-        silenceMs: 1400,
+        silenceMs: 1000,
       },
       {
         key: "home_house",
         label: "House number or name",
         prompt: "And the house number or name?",
         expects: "A house number or house name.",
-        silenceMs: 1300,
+        silenceMs: 900,
       },
       {
         key: "home_confirm",
@@ -194,14 +194,14 @@ export const SECTIONS: SectionDef[] = [
           { value: "Yes", label: "Yes" },
           { value: "No", label: "No" },
         ],
-        silenceMs: 1100,
+        silenceMs: 750,
       },
       {
         key: "home_duration",
         label: "Time at address",
         prompt: "How long have you lived there?",
         expects: "Roughly how long they have lived at the address.",
-        silenceMs: 1300,
+        silenceMs: 900,
       },
       {
         key: "date_of_birth",
@@ -209,7 +209,7 @@ export const SECTIONS: SectionDef[] = [
         prompt: "What's your date of birth? You can tap the day, month and year below, or you can just say it — for example, 15 March 1980.",
         expects: "A complete date of birth: day, month, and year.",
         wizard: "dob",
-        silenceMs: 2000,
+        silenceMs: 1000,
       },
       {
         key: "marital_status",
@@ -227,7 +227,7 @@ export const SECTIONS: SectionDef[] = [
         ],
         allowOther: true,
         otherPrompt: "No problem — please describe your relationship status in your own words.",
-        silenceMs: 1100,
+        silenceMs: 750,
       },
       {
         key: "dependants",
@@ -235,7 +235,7 @@ export const SECTIONS: SectionDef[] = [
         prompt: "Do you have any children or other dependants? Tap how many below.",
         expects: "How many dependants, and for each one their name and age.",
         wizard: "dependants",
-        silenceMs: 1300,
+        silenceMs: 900,
       },
     ],
   },
@@ -257,7 +257,7 @@ export const SECTIONS: SectionDef[] = [
         ],
         allowOther: true,
         otherPrompt: "No problem — please describe your employment situation in your own words.",
-        silenceMs: 1100,
+        silenceMs: 750,
       },
       {
         key: "employer",
@@ -265,7 +265,7 @@ export const SECTIONS: SectionDef[] = [
         prompt: "Who is your employer?",
         expects: "The employer name.",
         skipWhen: (answers) => !needsEmployer(answers),
-        silenceMs: 1300,
+        silenceMs: 900,
       },
       {
         key: "business_name",
@@ -273,7 +273,7 @@ export const SECTIONS: SectionDef[] = [
         prompt: "What's your business called?",
         expects: "The business or trading name.",
         skipWhen: (answers) => !needsBusinessName(answers),
-        silenceMs: 1300,
+        silenceMs: 900,
       },
       {
         key: "job_title",
@@ -281,7 +281,7 @@ export const SECTIONS: SectionDef[] = [
         prompt: "And what's your job title?",
         expects: "The customer's job title or role.",
         skipWhen: (answers) => !needsJobTitle(answers),
-        silenceMs: 1300,
+        silenceMs: 900,
       },
       {
         key: "income",
@@ -289,7 +289,7 @@ export const SECTIONS: SectionDef[] = [
         prompt: "And what's your annual income before tax, including any regular bonus or overtime?",
         expects: "Annual gross income in GBP, including any regular bonus or overtime.",
         skipWhen: isRetired,
-        silenceMs: 1300,
+        silenceMs: 900,
       },
       {
         key: "retirement_income",
@@ -297,7 +297,7 @@ export const SECTIONS: SectionDef[] = [
         prompt: "Can you tell me about your retirement income each year, {firstName}?",
         expects: "Total annual pension income in GBP, ideally noting state vs private/workplace pensions.",
         skipWhen: isNotRetired,
-        silenceMs: 1300,
+        silenceMs: 900,
       },
     ],
   },
@@ -312,7 +312,7 @@ export const SECTIONS: SectionDef[] = [
         prompt: "Now, which of these credit commitments will you still be paying after the mortgage completes? Tap each one that applies below — or tap None of these.",
         expects: "Each ongoing credit commitment (credit cards, loans, hire purchase, car finance, store cards, overdrafts or other), with how many of each and the monthly payment and balance for each — or a clear 'none'.",
         wizard: "credit",
-        silenceMs: 1400,
+        silenceMs: 1000,
       },
       {
         key: "adverse_credit",
@@ -324,7 +324,7 @@ export const SECTIONS: SectionDef[] = [
         otherLabel: "Yes",
         otherPrompt:
           "Okay, no problem. Please tell me what it was — for example a CCJ, default, or bankruptcy — roughly when it happened, and the amount involved.",
-        silenceMs: 1400,
+        silenceMs: 1000,
       },
     ],
   },
@@ -346,7 +346,7 @@ export const SECTIONS: SectionDef[] = [
         ],
         allowOther: true,
         otherPrompt: "Please describe the mortgage you need in your own words.",
-        silenceMs: 1300,
+        silenceMs: 900,
       },
       {
         key: "property_type",
@@ -362,14 +362,14 @@ export const SECTIONS: SectionDef[] = [
         ],
         allowOther: true,
         otherPrompt: "Please describe the type of property.",
-        silenceMs: 1300,
+        silenceMs: 900,
       },
       {
         key: "property_price",
         label: "Property price / value",
         prompt: "What's the price or current value of the property?",
         expects: "The property purchase price or current value in GBP.",
-        silenceMs: 1300,
+        silenceMs: 900,
       },
       {
         key: "deposit",
@@ -377,7 +377,7 @@ export const SECTIONS: SectionDef[] = [
         prompt: "And how much deposit will you be putting in?",
         expects: "The deposit amount in GBP.",
         skipWhen: isRemortgage,
-        silenceMs: 1300,
+        silenceMs: 900,
       },
       {
         key: "amount_owed",
@@ -385,7 +385,7 @@ export const SECTIONS: SectionDef[] = [
         prompt: "And how much do you currently owe on the mortgage?",
         expects: "The outstanding mortgage balance still owed, in GBP.",
         skipWhen: isNotRemortgage,
-        silenceMs: 1300,
+        silenceMs: 900,
       },
       {
         key: "equity_confirm",
@@ -393,7 +393,7 @@ export const SECTIONS: SectionDef[] = [
         prompt: "Let me work out your equity.",
         expects: "A simple yes or no confirming the equity figure, or a corrected balance.",
         skipWhen: isNotRemortgage,
-        silenceMs: 1100,
+        silenceMs: 750,
       },
       {
         key: "mortgage_term_remaining",
@@ -401,7 +401,7 @@ export const SECTIONS: SectionDef[] = [
         prompt: "How many years are left on your current mortgage?",
         expects: "How many years remain on the current mortgage.",
         skipWhen: isNotMovingOrRemortgage,
-        silenceMs: 1300,
+        silenceMs: 900,
       },
       {
         key: "mortgage_term",
@@ -409,7 +409,7 @@ export const SECTIONS: SectionDef[] = [
         prompt: "Over how many years would you like the mortgage?",
         expects: "The mortgage term in years.",
         skipWhen: isMovingOrRemortgage,
-        silenceMs: 1300,
+        silenceMs: 900,
       },
     ],
   },

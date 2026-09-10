@@ -56,6 +56,12 @@ export async function classifyTurn(
   const fallback = classifyUtterance(text, opts);
   if (!process.env.OPENAI_API_KEY || !text.trim()) return fallback;
 
+  // Mid fact-find: trust heuristics for ordinary answers. Calling the LLM on
+  // every turn was adding ~1–3s of dead air after each reply.
+  const onFloor = Boolean(opts?.holding || opts?.openFloor || opts?.awaitingContinue);
+  if (!onFloor && fallback === "scripted") return fallback;
+  if (fallback === "continue" || fallback === "hold" || fallback === "clarify") return fallback;
+
   try {
     const raw = await chatCompletion({
       temperature: 0,

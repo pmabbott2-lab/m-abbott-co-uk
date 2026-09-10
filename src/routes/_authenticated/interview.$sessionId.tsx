@@ -61,7 +61,7 @@ interface StepResp {
 const CLOSING_MAX_MS = 12000;
 
 // Voice-activity detection thresholds (tuned for snappier turn-taking)
-const SILENCE_MS = 1100;
+const SILENCE_MS = 750;
 const MAX_TURN_MS = 45000; // hard cap per answer
 const NO_SPEECH_TIMEOUT_MS = 12000; // if nothing detected at all, stop
 const MAX_SILENT_RETRIES = 4; // silently re-listen this many times before prompting
@@ -611,19 +611,23 @@ function InterviewPage() {
       const opts = getStepOptions(data);
         if (data.sayText) {
         setStatus("Susan is speaking…");
-        if (!pausedRef.current && !doneRef.current) {
-          // Kick off generating the question audio now so it's ready by the time
-          // the (instant, pre-cached) acknowledgement finishes playing.
-          void prefetch([data.sayText]);
-        }
         listenArmedRef.current = false;
-        // Speak a short acknowledgement immediately to remove the silent gap
-        // while the next question's speech is being synthesised.
+        // Prefetch the next question while the short ack plays so she can
+        // continue immediately instead of pausing after "Thank you".
+        const warmNext =
+          !pausedRef.current && !doneRef.current
+            ? prefetch([data.sayText]).catch(() => {})
+            : Promise.resolve();
         if (data.ack && !pausedRef.current && !doneRef.current) {
-          await play(data.ack, { noReveal: true }).catch(() => {});
+          await Promise.all([
+            play(data.ack, { noReveal: true }).catch(() => {}),
+            warmNext,
+          ]);
+        } else {
+          await warmNext;
         }
         if (gen !== flowGenRef.current) return;
-        const spoke = await play(data.sayText, { onNearEnd: () => armListenEarly(data), leadMs: 1000 })
+        const spoke = await play(data.sayText, { onNearEnd: () => armListenEarly(data), leadMs: 700 })
           .then(() => true)
           .catch((e) => {
             console.error("TTS play failed", e);
@@ -733,7 +737,7 @@ function InterviewPage() {
       let silenceTimer: ReturnType<typeof setTimeout> | null = null;
       const fieldKey = currentRef.current?.fieldKey;
       // Dates need a touch more cushion (people pause between day/month/year).
-      const silenceMs = fieldKey === "date_of_birth" ? 2000 : 1200;
+      const silenceMs = fieldKey === "date_of_birth" ? 1400 : 800;
 
       const clearSilence = () => {
         if (silenceTimer) window.clearTimeout(silenceTimer);

@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   TEST_ACCOUNTS,
@@ -29,13 +30,92 @@ async function listAllAuthUsers() {
   return all;
 }
 
+
+async function ensureGeneralAdmin(
+  userId: string,
+  grantedBy?: string,
+): Promise<void> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const now = new Date().toISOString();
+
+  await supabaseAdmin
+    .from("user_roles")
+    .upsert({ user_id: userId, role: "admin" }, { onConflict: "user_id,role" });
+
+  const { error: profileErr } = await supabaseAdmin.from("admin_profiles").upsert(
+    {
+      user_id: userId,
+      level: "general",
+      granted_by: grantedBy ?? null,
+      updated_at: now,
+    },
+    { onConflict: "user_id" },
+  );
+  if (profileErr) throw new Error(profileErr.message);
+
+  const { data: existing, error: existingErr } = await supabaseAdmin
+    .from("admin_permissions")
+    .select("id")
+    .eq("user_id", userId)
+    .limit(1);
+  if (existingErr) throw new Error(existingErr.message);
+  if (!existing?.length) {
+    const rows = PERMISSION_KEYS.map((key) => ({
+      user_id: userId,
+      permission_key: key,
+      access: DEFAULT_GENERAL_PERMISSIONS[key],
+    }));
+    const { error: insErr } = await supabaseAdmin.from("admin_permissions").insert(rows);
+    if (insErr) throw new Error(insErr.message);
+  }
+}
+
+async function wipeTestAccountActivity(userId: string, email: string): Promise<void> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+  const { data: sessions } = await supabaseAdmin
+    .from("interview_sessions")
+    .select("id")
+    .eq("customer_id", userId);
+  const sessionIds = (sessions ?? []).map((s) => s.id);
+
+  if (sessionIds.length) {
+    await supabaseAdmin.from("appointments").delete().in("session_id", sessionIds);
+    await supabaseAdmin.from("callback_requests").delete().in("session_id", sessionIds);
+    await supabaseAdmin.from("interview_sessions").delete().in("id", sessionIds);
+  }
+
+  await supabaseAdmin.from("callback_requests").delete().eq("customer_id", userId);
+  await supabaseAdmin.from("appointments").delete().ilike("customer_email", email);
+  await supabaseAdmin.from("appointments").delete().eq("advisor_id", userId);
+
+  const { data: introducer } = await supabaseAdmin
+    .from("introducers")
+    .select("id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (introducer?.id) {
+    await supabaseAdmin.from("introducer_leads").delete().eq("introducer_id", introducer.id);
+    await supabaseAdmin.from("appointments").delete().eq("introducer_id", introducer.id);
+  }
+
+  await supabaseAdmin.from("customer_introducer_links").delete().eq("customer_id", userId);
+
+  try {
+    await supabaseAdmin.auth.admin.signOut(userId, "global");
+  } catch {
+    /* older API — fall through */
+  }
+}
+
 async function upsertTestUser(
   spec: TestAccountSpec,
+  opts?: { grantedBy?: string; existingUsers?: Awaited<ReturnType<typeof listAllAuthUsers>> },
 ): Promise<{ email: string; userId: string; created: boolean }> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const email = spec.email.toLowerCase();
 
-  const existingUsers = await listAllAuthUsers();
+  const existingUsers = opts?.existingUsers ?? (await listAllAuthUsers());
   const existing = existingUsers.find((u) => u.email?.toLowerCase() === email);
 
   let userId: string;
@@ -44,6 +124,7 @@ async function upsertTestUser(
   if (existing) {
     userId = existing.id;
     await supabaseAdmin.auth.admin.updateUserById(userId, {
+      password: TEST_ACCOUNT_PASSWORD,
       email_confirm: true,
       user_metadata: { full_name: spec.fullName, phone: TEST_ACCOUNT_PHONE, test_account: true },
       app_metadata: { test_account: true, test_email_bypass: true },
@@ -83,32 +164,10 @@ async function upsertTestUser(
   }
 
   if (spec.role === "admin" && spec.adminLevel === "general") {
-    const now = new Date().toISOString();
-    const { error: profileErr } = await supabaseAdmin.from("admin_profiles").upsert(
-      {
-        user_id: userId,
-        level: "general",
-        updated_at: now,
-      },
-      { onConflict: "user_id" },
-    );
-    if (profileErr) throw new Error(`${email}: ${profileErr.message}`);
-
-    // Seed default permissions only on first provision — owner allocates via Admin access after that.
-    const { data: existing, error: existingErr } = await supabaseAdmin
-      .from("admin_permissions")
-      .select("id")
-      .eq("user_id", userId)
-      .limit(1);
-    if (existingErr) throw new Error(`${email}: ${existingErr.message}`);
-    if (!existing?.length) {
-      const rows = PERMISSION_KEYS.map((key) => ({
-        user_id: userId,
-        permission_key: key,
-        access: DEFAULT_GENERAL_PERMISSIONS[key],
-      }));
-      const { error: insErr } = await supabaseAdmin.from("admin_permissions").insert(rows);
-      if (insErr) throw new Error(`${email}: ${insErr.message}`);
+    try {
+      await ensureGeneralAdmin(userId, opts?.grantedBy);
+    } catch (e) {
+      throw new Error(`${email}: ${e instanceof Error ? e.message : "Could not create admin profile"}`);
     }
   }
 
@@ -121,9 +180,22 @@ export const provisionTestAccounts = createServerFn({ method: "POST" })
     const email = (context.claims as { email?: string }).email;
     await requireOwner(context.userId, email);
 
+    const users = await listAllAuthUsers();
     const results = [];
+    const errors: { email: string; error: string }[] = [];
     for (const spec of TEST_ACCOUNTS) {
-      results.push(await upsertTestUser(spec));
+      try {
+        results.push(await upsertTestUser(spec, { grantedBy: context.userId, existingUsers: users }));
+      } catch (e) {
+        errors.push({
+          email: spec.email,
+          error: e instanceof Error ? e.message : "Unknown error",
+        });
+      }
+    }
+
+    if (!results.length) {
+      throw new Error(errors[0]?.error ?? "Could not provision test accounts");
     }
 
     return {
@@ -131,6 +203,7 @@ export const provisionTestAccounts = createServerFn({ method: "POST" })
       password: TEST_ACCOUNT_PASSWORD,
       phone: TEST_ACCOUNT_PHONE,
       results,
+      errors,
     };
   });
 
@@ -157,6 +230,32 @@ export const revokeTestAccounts = createServerFn({ method: "POST" })
     }
 
     return { ok: true as const, revoked };
+  });
+
+
+export const resetTestAccount = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ email: z.string().email() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const ownerEmail = (context.claims as { email?: string }).email;
+    await requireOwner(context.userId, ownerEmail);
+
+    const email = data.email.trim().toLowerCase();
+    const spec = TEST_ACCOUNTS.find((a) => a.email === email);
+    if (!spec) throw new Error("Not a provisioned test account");
+
+    const users = await listAllAuthUsers();
+    const existing = users.find((u) => u.email?.toLowerCase() === email);
+    if (existing) {
+      await wipeTestAccountActivity(existing.id, email);
+    }
+
+    const restored = await upsertTestUser(spec, {
+      grantedBy: context.userId,
+      existingUsers: existing ? users : await listAllAuthUsers(),
+    });
+
+    return { ok: true as const, email: restored.email, userId: restored.userId };
   });
 
 export const listTestAccountStatus = createServerFn({ method: "GET" })

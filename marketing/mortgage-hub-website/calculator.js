@@ -277,12 +277,12 @@
     var messageEl = document.getElementById("form-message");
     var submitBtn = document.getElementById("submit-btn");
 
-    if (slug) {
+    // Only show partner attribution when a referral slug is present.
+    // Do not show the yellow "add your partner code" prompt on the public calculator.
+    if (slugMissing) slugMissing.hidden = true;
+    if (slug && slugBanner) {
       slugBanner.textContent = "Referred by partner: " + slug;
       slugBanner.hidden = false;
-      slugMissing.hidden = true;
-    } else {
-      slugMissing.hidden = false;
     }
 
     document.querySelectorAll(".calc-mode-btn").forEach(function (btn) {

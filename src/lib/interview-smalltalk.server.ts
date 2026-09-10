@@ -99,7 +99,8 @@ export async function generateAside(opts: {
     .map((t) => TOPIC_LABEL[t]);
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 2500);
+  // Keep asides snappy — if the model is slow, skip rather than stall the journey.
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 900);
   try {
     const res = await openAIFetch("/chat/completions", {
       method: "POST",
