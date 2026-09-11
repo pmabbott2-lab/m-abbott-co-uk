@@ -10,64 +10,60 @@ Locked signed-off cuts. **Do not overwrite.** If picture or VO must change, dupl
 
 Amendable components and previous drafts: `marketing/mortgageeasy-film-hold/`.
 
-## Locked restore points
+## Locked restore points (2026-09-11)
 
-### First-time buyers — V5 (live, stairs freeze + timed journey points)
+### First-time buyers — V9 (live)
 
-- Site: `marketing/mortgage-hub-website/assets/video/first-time-buyer-draft-v5.mp4`
-- Captions: `marketing/mortgage-hub-website/assets/video/first-time-buyer-draft-v5.vtt`
-- VO regen: `scripts/generate-journey-compliant-sonia-vo.py`
-- Picture: `scripts/rebuild-ftb-end-and-home-mover.py`
-- Previous: site `first-time-buyer-draft-v4.*` / `v3.*` / `v2.*`
+- Site: `marketing/mortgage-hub-website/assets/video/first-time-buyer-draft-v9.mp4`
+- Captions: `.../first-time-buyer-draft-v9.vtt`
+- VO: `scripts/generate-journey-compliant-sonia-vo.py ftb` (tempo 1.10)
+- Picture: `scripts/rebuild-ftb-end-and-home-mover.py ftb`
+- Previous amend cut: site `first-time-buyer-draft-v8.*`
+
+### Home movers — V8 (live)
+
+- Site: `.../home-mover-v8.mp4` + `.vtt`
+- VO tempo ~1.158; picture: `scripts/rebuild-ftb-end-and-home-mover.py home`
+- Previous: `home-mover-v7.*`
 
 ### Remortgage — V4 (live)
 
-- Site: `marketing/mortgage-hub-website/assets/video/remortgage-draft-v4.mp4`
-- Captions: `marketing/mortgage-hub-website/assets/video/remortgage-draft-v4.vtt`
-- VO regen: `scripts/generate-journey-compliant-sonia-vo.py`
-- Previous: site `remortgage-draft-v3.*` / `v2.*` and film-hold previous-drafts
-- Graphics: `marketing/mortgageeasy-film-hold/remortgage-gfx/` and `scripts/render-remortgage-gfx.py`
+- Site: `.../remortgage-draft-v4.mp4` + `.vtt`
+- Previous: `remortgage-draft-v3.*`
+- Graphics: `marketing/mortgageeasy-film-hold/remortgage-gfx/`
 
-### Protect what matters — V9 (live, shortened script, line-paced compliance)
+### Protect what matters — V9 (live)
 
-- Canonical: `assets/mortgageeasy-protect-draft-v9.mp4`
-- Site: `marketing/mortgage-hub-website/assets/video/protect-draft-v9.mp4`
-- Captions: `marketing/mortgage-hub-website/assets/video/protect-draft-v9.vtt`
-- VO: `scripts/generate-journey-compliant-sonia-vo.py protect` (tempo 1.1025; compliance block 1.05 + longer breaks)
-- Picture: `scripts/rebuild-ftb-end-and-home-mover.py protect`
+- Site: `.../protect-draft-v9.mp4` + `.vtt`
+- VO/picture: journey Sonia VO + `rebuild … protect`
+- Previous: `protect-draft-v8.*`
 - Graphics: `marketing/mortgageeasy-film-hold/protect-gfx/`
-- Locks: birthday on “Where birthdays…”; titles on Protect house/family; self on “Because others rely on you”; adviser on “An adviser can discuss this…”; end card through last VO then fade to Mortgage Easy hold
-- Adviser continuity: matching laptop call → in-person advice (no second adviser face)
-- Previous: site `protect-draft-v8.*` … `v1.*`
 
-### Home movers — V8 (live, faster VO, one review sentence, no garden freeze)
+## Keep for amendments
 
-- Canonical: `assets/mortgageeasy-home-mover-v8.mp4`
-- Site: `marketing/mortgage-hub-website/assets/video/home-mover-v8.mp4`
-- Captions: `marketing/mortgage-hub-website/assets/video/home-mover-v8.vtt`
-- VO tempo ~1.158; picture: `scripts/rebuild-ftb-end-and-home-mover.py home`
-- Review line: “Moving home is also a natural time to review what your next mortgage could look like.”
-- Previous V7: site `home-mover-v7.*`
-- On-film repossession disclaimer via `smallprint-on-dark.png` on the end hold.
+- Live + previous site cuts (above)
+- Runway / seq source clips used by rebuild scripts (`protect-runway-*`, `mortgageeasy-runway-*`, `mortgageeasy-seq-*`, home-mover runway)
+- Film-hold gfx + `previous-drafts/`
+- Current Sonia compliant VO full + words JSON + block mp3s
+
+Do **not** keep intermediate site drafts, `*-nosm` exports, CapCut/review packages, or superseded full-film renders once live+previous are locked.
 
 ## Voice
 
-- Prefer Azure Neural TTS `en-GB-SoniaNeural` (uksouth) for current cuts. Coral OpenAI remains on older V1 archives.
+- Prefer Azure Neural TTS `en-GB-SoniaNeural` (uksouth).
 - Say **adviser**, not advisor. Say **Agreement in Principle** in full, never “AIP”.
-- Say **Mortgage Easy** in VO (two words). On-screen brand is **MortgageEasy**.
+- On-screen brand **MortgageEasy**; VO may use one-word brand pronunciation where locked.
 - Do not stretch with `atempo` to fit picture. Lock picture to transcribed speech.
 - Do not burn captions into the MP4. Site captions are HTML/VTT, shown only while muted.
 
 ## Picture
 
-- Native speed only. Never freeze or slow-mo talking heads. Do not loop talking-head clips.
-- Still → image-to-video invents new people. For reverse angles of an existing take, use **Aleph video-to-video** from the locked clip, with face keyframes when faces were not in frame.
-- **Family lock:** husband = olive-brown skin, short dark curls, olive shirt over white tee. Wife = cream knit, shoulder-length brown hair. Two children in family scenes. Adviser = ~50, greying, navy blazer, light blue shirt.
-- MortgageEasy **white tablet badge** (`protect-gfx/badge-protect.png`, native size at 20:16) on branded live shots. Navy open/close credit uses `open-logo.png` centred — no corner badge.
-- Final export: Constrained Baseline, no B-frames, `setpts=N/24/TB`, stereo AAC, `+faststart`.
+- Native speed only. Never freeze or slow-mo talking heads.
+- **Family lock:** husband = olive-brown skin, short dark curls, olive shirt over white tee. Wife = cream knit, shoulder-length brown hair. Two children in family scenes.
+- MortgageEasy white tablet badge on branded live shots. Navy open/close credit uses `open-logo.png`.
+- Final export: Constrained Baseline, no B-frames, stereo AAC, `+faststart`.
 
 ## Site player
 
-- Muted autoplay on scroll into view. Captions along the bottom while muted; hide them when unmuted.
+- Muted autoplay on scroll into view. Captions while muted; hide when unmuted.
 - End card: **Start your journey** → `#your-journey`.
-- Do not show a Draft badge on live films.

@@ -420,9 +420,11 @@ def render_point_overlay(base: Image.Image, title: str, points: list[str], activ
 
 
 def rebuild_ftb() -> None:
-    """FTB v8 — VO-locked runway rebuild + stairs summary end."""
-    print("=== FTB v8 VO-locked rebuild ===")
-    work = Path("/tmp/ftb-v8-cut")
+    """FTB v9 — VO-locked runway rebuild + stairs summary end.
+    Last live beat is the featured family (two children), not open-door adviser.
+    """
+    print("=== FTB v9 VO-locked rebuild ===")
+    work = Path("/tmp/ftb-v9-cut")
     if work.exists():
         for p in work.glob("*"):
             if p.is_file():
@@ -529,10 +531,10 @@ def rebuild_ftb() -> None:
     app = ASSETS / "mortgageeasy-runway-matching-adviser-call.mp4"
     brand_clip(app, work / "05-app.mp4", d_app, min_rate=1.0, allow_freeze_tail=True)
 
-    door = ASSETS / "mortgageeasy-runway-scene-08-open-door.mp4"
-    if not door.exists():
-        door = ASSETS / "mortgageeasy-seq-08-door.mp4"
-    brand_clip(door, work / "06-door.mp4", d_door, min_rate=1.0, allow_freeze_tail=True)
+    family = ASSETS / "mortgageeasy-runway-family-two-children.mp4"
+    if not family.exists():
+        family = HOLD / "ftb-gfx" / "family-two-children-runway.mp4"
+    brand_clip(family, work / "06-family.mp4", d_door, min_rate=1.0, allow_freeze_tail=True)
 
     body = work / "body.mp4"
     concat(
@@ -542,7 +544,7 @@ def rebuild_ftb() -> None:
             work / "03-choose.mp4",
             work / "04-aip.mp4",
             work / "05-app.mp4",
-            work / "06-door.mp4",
+            work / "06-family.mp4",
         ],
         body,
     )
@@ -555,7 +557,7 @@ def rebuild_ftb() -> None:
             "-sseof",
             "-0.20",
             "-i",
-            str(work / "06-door.mp4"),
+            str(work / "06-family.mp4"),
             "-frames:v",
             "1",
             str(freeze_frame),
@@ -662,11 +664,16 @@ def rebuild_ftb() -> None:
         still_image(OPEN_LOGO, work / "logo.mp4", max(2.8, LOGO_HOLD + END_FADE + delta), brand=False)
         concat([body] + segs[:-1] + [work / "logo.mp4"], picture)
 
-    out = SITE / "first-time-buyer-draft-v8.mp4"
+    out = SITE / "first-time-buyer-draft-v9.mp4"
     mux(picture, voice, out, smallprint_at=summary_end)
-    (ASSETS / "mortgageeasy-first-time-buyer-draft-v8.mp4").write_bytes(out.read_bytes())
+    (ASSETS / "mortgageeasy-first-time-buyer-draft-v9.mp4").write_bytes(out.read_bytes())
 
+    # Always land captions beside the site mp4 (generator may have written them earlier)
     vtt_src = SITE / "first-time-buyer-draft-v8.vtt"
+    vtt_out = SITE / "first-time-buyer-draft-v9.vtt"
+    if vtt_src.exists():
+        vtt_out.write_text(vtt_src.read_text())
+    vtt_src = vtt_out
     if vtt_src.exists():
         text = vtt_src.read_text()
         blocks = text.replace("\r", "").strip().split("\n\n")
