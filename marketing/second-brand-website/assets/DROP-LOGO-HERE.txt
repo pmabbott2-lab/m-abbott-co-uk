@@ -1,0 +1,11 @@
+Drop the new brand logo in this folder.
+
+Preferred:
+  logo.svg  (best)
+  logo.png
+
+Optional:
+  favicon.svg / favicon.png
+  hero.jpg
+
+This site is partitioned from MortgageEasy — no Susan / mortgage journey links.

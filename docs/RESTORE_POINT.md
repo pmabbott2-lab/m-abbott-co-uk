@@ -6,15 +6,19 @@ Tagged snapshots let you roll back application code safely. Database rows create
 
 ```bash
 cd ~/Projects/m-abbott-co-uk-main
-git checkout restore-point-2026-09-02-post-branch-rebuild
+git checkout restore-point-2026-09-11-hub-mortgageeasy-trentvalley
 npm run build
 bash ~/bin/mortgage-hub-stable.sh rebuild
 ```
+
+Covers MortgageHub app + MortgageEasy marketing films/site + Trent Valley Financial Services marketing mock-up.
+
 
 ## Tags
 
 | Tag | Purpose |
 |-----|---------|
+| `restore-point-2026-09-11-hub-mortgageeasy-trentvalley` | Whole stack lock: MortgageHub, MortgageEasy (live+previous films), Trent Valley marketing |
 | `restore-point-2026-09-02-post-branch-rebuild` | Staff branch nav rebuild (phases 1–7): Customers/Diary/Management/Finance tabs, team roles, diary grid, view-as audit, commission split, QA script |
 | `restore-point-2026-09-02-post-enhancements` | Journey, finance pipeline, case details, relationship tab, commission summaries, ngrok demo proxy, auth stability |
 | `restore-point-2026-09-01-pre-enhancements` | Before journey/finance/case/relationship build |

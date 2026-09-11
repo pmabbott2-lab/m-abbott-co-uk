@@ -1,0 +1,4 @@
+Drop a portrait photo here as:
+  peter.jpg  or  peter.png
+
+It will appear in the About section on the homepage.
