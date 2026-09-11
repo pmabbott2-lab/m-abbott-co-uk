@@ -420,62 +420,161 @@ def render_point_overlay(base: Image.Image, title: str, points: list[str], activ
 
 
 def rebuild_ftb() -> None:
-    print("=== FTB stairs-end rebuild ===")
-    work = Path("/tmp/ftb-stairs-end")
+    """FTB v8 — VO-locked runway rebuild + stairs summary end."""
+    print("=== FTB v8 VO-locked rebuild ===")
+    work = Path("/tmp/ftb-v8-cut")
+    if work.exists():
+        for p in work.glob("*"):
+            if p.is_file():
+                p.unlink()
     work.mkdir(parents=True, exist_ok=True)
-    src = SITE / "first-time-buyer-draft-v4.mp4"
-    audio = work / "audio.aac"
-    run(
-        [
-            FFMPEG,
-            "-y",
-            "-i",
-            str(src),
-            "-vn",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            str(audio),
-        ]
+
+    vo = ASSETS / "ftb-vo-full-sonia-compliant.mp3"
+    words_path = ASSETS / "ftb-compliant-vo-words.json"
+    words = json.loads(words_path.read_text()) if words_path.exists() else []
+    OPEN = 3.20
+    END_FADE = 0.80
+    LOGO_HOLD = 4.00
+
+    def find_start(phrase: str, after: float = 0.0) -> float:
+        toks = [t for t in re.findall(r"[a-z0-9']+", phrase.lower())]
+        texts: list[str] = []
+        starts: list[float] = []
+        for w in words:
+            raw = w.get("word", "").lower().replace("mortgageeasy", "mortgage easy")
+            for p in re.findall(r"[a-z0-9']+", raw):
+                if p in {"adviser", "advisor"}:
+                    p = "adviser"
+                if p in {"convensor", "conveyensor"}:
+                    p = "conveyancer"
+                texts.append(p)
+                starts.append(float(w["start"]))
+        n = len(toks)
+        for i in range(len(texts) - n + 1):
+            if texts[i : i + n] == toks and starts[i] >= after:
+                return starts[i]
+        if n >= 4:
+            for skip in range(n):
+                reduced = toks[:skip] + toks[skip + 1 :]
+                m = len(reduced)
+                for i in range(len(texts) - m + 1):
+                    if texts[i : i + m] == reduced and starts[i] >= after:
+                        return starts[i]
+        return -1.0
+
+    def abs_t(phrase: str, after: float = 0.0, fallback: float = 0.0) -> float:
+        found = find_start(phrase, after=after) if words else -1.0
+        return OPEN + (found if found >= 0 else fallback)
+
+    vo_dur = duration(vo)
+    speech_end = OPEN + (float(words[-1]["end"]) if words else vo_dur)
+
+    t_portal = abs_t("customer portal", after=15.0, fallback=22.0)
+    t_choose = abs_t("When choosing a mortgage", after=25.0, fallback=36.0)
+    t_aip = abs_t("Agreement in Principle", after=35.0, fallback=45.0)
+    t_aip_pic = max(t_choose + 1.5, t_aip - 1.10)
+    t_app = abs_t("From your initial application", after=45.0, fallback=56.0)
+    if t_app < t_aip + 2:
+        t_app = abs_t("conveyancer", after=45.0, fallback=56.8)
+    if t_app < t_aip + 2:
+        t_app = abs_t("estate agent", after=45.0, fallback=57.5)
+    t_door = abs_t("open the door", after=55.0, fallback=63.5)
+    t_journey = abs_t("Your journey", after=60.0, fallback=68.0)
+    t_borrow = abs_t("Understand what you may be able to borrow", after=65.0, fallback=71.0)
+    t_explore = abs_t("Explore mortgage options", after=68.0, fallback=74.0)
+    t_aip_end = abs_t("Get your Agreement in Principle", after=70.0, fallback=77.0)
+    t_offer = abs_t("Make your offer", after=72.0, fallback=80.0)
+    t_move = abs_t("Move in", after=75.0, fallback=82.0)
+    summary_end = max(speech_end + 0.25, t_move + 2.0)
+
+    d_life = max(4.0, t_portal - OPEN)
+    d_portal = max(3.0, t_choose - t_portal)
+    d_choose = max(3.0, t_aip_pic - t_choose)
+    d_aip = max(3.0, t_app - t_aip_pic)
+    d_app = max(3.0, t_door - t_app)
+    d_door = max(2.5, t_journey - t_door)
+
+    print(
+        f"anchors portal={t_portal:.2f} choose={t_choose:.2f} aip={t_aip:.2f} "
+        f"aip_pic={t_aip_pic:.2f} app={t_app:.2f} door={t_door:.2f} journey={t_journey:.2f}"
     )
-    # Keep picture until just before PowerPoint / "Your journey"
-    cut = 68.70
+    print(
+        f"durs life={d_life:.2f} portal={d_portal:.2f} choose={d_choose:.2f} "
+        f"aip={d_aip:.2f} app={d_app:.2f} door={d_door:.2f}"
+    )
+
+    still_image(OPEN_LOGO, work / "00-open.mp4", OPEN, brand=False)
+
+    houses = ASSETS / "mortgageeasy-seq-01-properties.mp4"
+    if not houses.exists():
+        houses = ASSETS / "mortgageeasy-runway-scene-01-properties.mp4"
+    brand_clip(houses, work / "01-houses.mp4", d_life, min_rate=1.0)
+    dissolve(work / "00-open.mp4", work / "01-houses.mp4", 0.55, work / "d-life.mp4", work)
+
+    portal = ASSETS / "mortgageeasy-runway-side-login.mp4"
+    if not portal.exists():
+        portal = ASSETS / "mortgageeasy-seq-02-login.mp4"
+    brand_clip(portal, work / "02-portal.mp4", d_portal, min_rate=1.0)
+
+    choose = ASSETS / "mortgageeasy-seq-05-advisor.mp4"
+    if not choose.exists():
+        choose = ASSETS / "mortgageeasy-runway-scene-03-advice.mp4"
+    brand_clip(choose, work / "03-choose.mp4", d_choose, min_rate=1.0)
+
+    aip = ASSETS / "mortgageeasy-runway-aip-over-shoulder.mp4"
+    if not aip.exists():
+        aip = ASSETS / "mortgageeasy-seq-06-aip.mp4"
+    brand_clip(aip, work / "04-aip.mp4", d_aip, min_rate=1.0, allow_freeze_tail=True)
+
+    app = ASSETS / "mortgageeasy-runway-matching-adviser-call.mp4"
+    brand_clip(app, work / "05-app.mp4", d_app, min_rate=1.0, allow_freeze_tail=True)
+
+    door = ASSETS / "mortgageeasy-runway-scene-08-open-door.mp4"
+    if not door.exists():
+        door = ASSETS / "mortgageeasy-seq-08-door.mp4"
+    brand_clip(door, work / "06-door.mp4", d_door, min_rate=1.0, allow_freeze_tail=True)
+
     body = work / "body.mp4"
-    run(
+    concat(
         [
-            FFMPEG,
-            "-y",
-            "-i",
-            str(src),
-            "-t",
-            f"{cut:.3f}",
-            "-an",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "fast",
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            "24",
-            str(body),
-        ]
+            work / "d-life.mp4",
+            work / "02-portal.mp4",
+            work / "03-choose.mp4",
+            work / "04-aip.mp4",
+            work / "05-app.mp4",
+            work / "06-door.mp4",
+        ],
+        body,
     )
+
     freeze_frame = work / "stairs.png"
     run(
         [
             FFMPEG,
             "-y",
-            "-ss",
-            f"{cut - 0.15:.3f}",
+            "-sseof",
+            "-0.20",
             "-i",
-            str(src),
+            str(work / "06-door.mp4"),
             "-frames:v",
             "1",
             str(freeze_frame),
         ]
     )
+    if not freeze_frame.exists() or freeze_frame.stat().st_size < 1000:
+        run(
+            [
+                FFMPEG,
+                "-y",
+                "-ss",
+                f"{max(0.0, duration(body) - 0.2):.3f}",
+                "-i",
+                str(body),
+                "-frames:v",
+                "1",
+                str(freeze_frame),
+            ]
+        )
     base = Image.open(freeze_frame).convert("RGB").resize((1280, 720))
     title = "Your journey, made clearer"
     points = [
@@ -485,32 +584,26 @@ def rebuild_ftb() -> None:
         "Make your offer when you are ready",
         "Move in — and talk about protecting what matters",
     ]
-    # Relative to end of body (= cut). Absolute cues from v4 VTT:
+    cut = duration(body)
     abs_cues = [
-        (69.00, 0),  # title only at Your journey / Made clearer
-        (72.30, 1),
-        (75.60, 2),
-        (78.48, 3),
-        (81.30, 4),
-        (83.90, 5),
+        (t_journey, 0),
+        (t_borrow, 1),
+        (t_explore, 2),
+        (t_aip_end, 3),
+        (t_offer, 4),
+        (t_move, 5),
     ]
-    # Hold until VO finish (~86.4) then logo
-    summary_end = 86.60
-    segs = []
-    times = [cut] + [t for t, _ in abs_cues if t > cut] + [summary_end]
-    actives = [0] + [a for _, a in abs_cues if True]
-    # Build segment list: from cut to first cue, then between cues
     timeline = [(cut, 0)]
     for t, a in abs_cues:
-        if t >= cut:
-            timeline.append((t, a))
+        if t >= cut - 0.05:
+            timeline.append((max(t, cut + 0.05), a))
     timeline.append((summary_end, 5))
 
+    segs = []
     for i in range(len(timeline) - 1):
         t0, active = timeline[i]
         t1 = timeline[i + 1]
         dur = max(0.12, t1[0] - t0)
-        # use active count for this segment
         frame = render_point_overlay(base, title, points, active)
         png = work / f"sum-{i}-a{active}.png"
         frame.save(png)
@@ -519,20 +612,94 @@ def rebuild_ftb() -> None:
         segs.append(mp4)
         print(f"  summary seg {i}: {dur:.2f}s active={active}")
 
-    logo_hold = 4.0
-    still_image(OPEN_LOGO, work / "logo.mp4", logo_hold, brand=False)
+    still_image(OPEN_LOGO, work / "logo.mp4", LOGO_HOLD + END_FADE, brand=False)
     segs.append(work / "logo.mp4")
 
     picture = work / "picture.mp4"
     concat([body] + segs, picture)
-    out = SITE / "first-time-buyer-draft-v5.mp4"
-    sp_at = duration(body) + sum(duration(s) for s in segs[:-1])
-    mux(picture, audio, out, smallprint_at=sp_at)
-    (ASSETS / "mortgageeasy-first-time-buyer-draft-v5.mp4").write_bytes(out.read_bytes())
 
-    # Captions: reuse v4 VTT (already matches spoken end points)
-    vtt4 = (SITE / "first-time-buyer-draft-v4.vtt").read_text()
-    (SITE / "first-time-buyer-draft-v5.vtt").write_text(vtt4)
+    voice = work / "voice.mp3"
+    end_hold = LOGO_HOLD + 0.4
+    run(
+        [
+            FFMPEG,
+            "-y",
+            "-f",
+            "lavfi",
+            "-t",
+            f"{OPEN:.2f}",
+            "-i",
+            "anullsrc=channel_layout=stereo:sample_rate=48000",
+            "-i",
+            str(vo),
+            "-f",
+            "lavfi",
+            "-t",
+            f"{end_hold:.2f}",
+            "-i",
+            "anullsrc=channel_layout=stereo:sample_rate=48000",
+            "-filter_complex",
+            "[0:a][1:a][2:a]concat=n=3:v=0:a=1[a]",
+            "-map",
+            "[a]",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "192k",
+            str(voice),
+        ]
+    )
+
+    pic_dur = duration(picture)
+    aud_dur = duration(voice)
+    delta = aud_dur - pic_dur
+    if abs(delta) > 0.12:
+        print(f"adjust logo hold ({pic_dur:.2f} -> {aud_dur:.2f}, delta={delta:+.2f})")
+        still_image(OPEN_LOGO, work / "logo.mp4", max(2.8, LOGO_HOLD + END_FADE + delta), brand=False)
+        concat([body] + segs[:-1] + [work / "logo.mp4"], picture)
+
+    out = SITE / "first-time-buyer-draft-v8.mp4"
+    mux(picture, voice, out, smallprint_at=summary_end)
+    (ASSETS / "mortgageeasy-first-time-buyer-draft-v8.mp4").write_bytes(out.read_bytes())
+
+    vtt_src = SITE / "first-time-buyer-draft-v8.vtt"
+    if vtt_src.exists():
+        text = vtt_src.read_text()
+        blocks = text.replace("\r", "").strip().split("\n\n")
+        cues = []
+        for block in blocks[1:]:
+            lines = [l for l in block.split("\n") if l.strip()]
+            if not lines or "-->" not in lines[0]:
+                continue
+            a, b = [x.strip() for x in lines[0].split("-->")]
+            cues.append([a, b, "\n".join(lines[1:])])
+
+        def sec(t: str) -> float:
+            h, m, s = t.split(":")
+            return int(h) * 3600 + int(m) * 60 + float(s)
+
+        def stamp(seconds: float) -> str:
+            h = int(seconds // 3600)
+            m = int((seconds % 3600) // 60)
+            s = seconds - h * 3600 - m * 60
+            return f"{h:02d}:{m:02d}:{s:06.3f}"
+
+        for i in range(len(cues) - 1):
+            nxt = sec(cues[i + 1][0]) - 0.06
+            if nxt > sec(cues[i][0]) + 0.5:
+                cues[i][1] = stamp(nxt)
+        if cues:
+            cues[-1][1] = stamp(max(sec(cues[-1][1]), speech_end + 0.2))
+        body_txt = ["WEBVTT", ""]
+        for a, b, line in cues:
+            body_txt.append(f"{a} --> {b}")
+            body_txt.append(line)
+            body_txt.append("")
+        vtt_src.write_text("\n".join(body_txt))
     print(f"wrote {out} ({duration(out):.2f}s)")
 
 

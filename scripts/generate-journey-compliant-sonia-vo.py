@@ -32,44 +32,48 @@ ATEMPO = 1.05
 FILMS = {
     "ftb": {
         "label": "first-time-buyer",
-        "src_mp4": SITE / "first-time-buyer-draft-v2.mp4",
-        "out_mp4": SITE / "first-time-buyer-draft-v4.mp4",
-        "out_vtt": SITE / "first-time-buyer-draft-v4.vtt",
+        "src_mp4": SITE / "first-time-buyer-draft-v5.mp4",
+        "out_mp4": SITE / "first-time-buyer-draft-v8.mp4",
+        "out_vtt": SITE / "first-time-buyer-draft-v8.vtt",
         "vo_full": ASSETS / "ftb-vo-full-sonia-compliant.mp3",
-        "canonical": ASSETS / "mortgageeasy-first-time-buyer-draft-v4.mp4",
+        "canonical": ASSETS / "mortgageeasy-first-time-buyer-draft-v8.mp4",
+        "tempo": 1.10,
         "sections": [
             (
                 1,
                 "Buying your first home can feel like a big step.\n"
                 "It often begins before you have even found the right property.\n"
-                "An adviser can help you understand what you may be able to borrow, "
-                "based on your individual circumstances and lender criteria — "
-                "and it helps to know that as you start looking.",
+                "We're here to help you with that journey.",
             ),
             (
                 2,
-                "Mortgage Easy helps you get started.\n"
-                "You can explore in your own time or book a conversation when you are ready.",
+                "An adviser can help you understand what you may be able to borrow, "
+                "based on your individual circumstances and lender criteria.",
             ),
             (
                 3,
-                "That technology means your adviser already understands your situation "
-                "and can focus on what matters most.\n"
+                "You can start your journey in your own time using our customer portal, "
+                "or book a conversation when you're ready.\n"
+                "Our customer portal helps your adviser understand your situation earlier — "
+                "so they can focus on what matters most.",
+            ),
+            (
+                4,
                 "When choosing a mortgage, your adviser will help you explore options "
                 "that may suit your circumstances.\n"
                 "They can also help you prepare for the next steps.",
             ),
             (
-                4,
+                5,
                 "When the time is right, your adviser can provide an Agreement in Principle.\n"
-                "Although this is not a mortgage offer, it can help you move forward with more clarity "
-                "when you are ready to make an offer.\n"
+                "Although this is not a mortgage offer.\n"
+                "It can help you move forward with more clarity when you are ready to make an offer.\n"
                 "From your initial application to completion, "
                 "your adviser works with your conveyancer and estate agent.\n"
                 "And when you finally open the door to your new home, it is your moment.",
             ),
             (
-                5,
+                6,
                 "Your journey.\n"
                 "Made clearer.\n"
                 "Understand what you may be able to borrow.\n"
@@ -282,12 +286,46 @@ def openai_key() -> str:
 
 
 def ssml(text: str, break_ms: int = 350) -> bytes:
+    def enrich(para: str) -> str:
+        para = para.replace("Mortgage Easy", "MortgageEasy")
+        # Brand as one spoken name
+        para = re.sub(
+            r"\bMortgageEasy\b",
+            '§BRAND§',
+            para,
+        )
+        # Clear UK pronunciations
+        para = re.sub(
+            r"\bAgreement in Principle\b",
+            "§AIP§",
+            para,
+        )
+        para = re.sub(r"\bconveyancer\b", "§CONV§", para, flags=re.I)
+
+        parts: list[str] = []
+        for token in re.split(r"(§BRAND§|§AIP§|§CONV§)", para):
+            if token == "§BRAND§":
+                parts.append(
+                    '<phoneme alphabet="ipa" ph="mɔːɡɪdʒiːzi">MortgageEasy</phoneme>'
+                )
+            elif token == "§AIP§":
+                parts.append(
+                    'Agreement in <phoneme alphabet="ipa" ph="ˈprɪnsɪpəl">Principle</phoneme>'
+                )
+            elif token == "§CONV§":
+                parts.append(
+                    '<phoneme alphabet="ipa" ph="kənˈveɪənsə">conveyancer</phoneme>'
+                )
+            elif token:
+                parts.append(escape(token))
+        return "".join(parts)
+
     parts = []
     for para in text.strip().split("\n"):
         para = para.strip()
         if not para:
             continue
-        parts.append(escape(para))
+        parts.append(enrich(para))
         parts.append(f'<break time="{int(break_ms)}ms"/>')
     inner = "\n".join(parts)
     return (
@@ -384,6 +422,9 @@ ALIASES = {
     "wont": "won't",
     "dont": "don't",
     "isnt": "isn't",
+    "conveyancer": "conveyancer",
+    "convensor": "conveyancer",
+    "conveyensor": "conveyancer",
 }
 
 
