@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   addTelephonyMobileNumber,
+  allocateTelephonyNumber,
   getTelephonyControlPanel,
   provisionAdvisorTelephony,
   updateAdvisorTelephony,
@@ -275,6 +276,108 @@ function RoutingRulesEditor({
   );
 }
 
+function NumberAllocatePanel({
+  number,
+  data,
+  onSaved,
+}: {
+  number: TelephonyNumberRow;
+  data: TelephonyControlSnapshot;
+  onSaved: () => void;
+}) {
+  const allocateFn = useServerFn(allocateTelephonyNumber);
+  const [userId, setUserId] = useState(number.allocatedUserId ?? "");
+  const [personal, setPersonal] = useState("");
+
+  const allocate = useMutation({
+    mutationFn: () =>
+      allocateFn({
+        data: {
+          numberId: number.id,
+          userId: userId || null,
+          personalRerouteE164: personal.trim() ? personal : undefined,
+          cloneFromUserId: data.agents[0]?.userId ?? null,
+        },
+      }),
+    onSuccess: (res) => {
+      toast.success(res.allocatedUserId ? "Number allocated" : "Number unallocated");
+      setPersonal("");
+      onSaved();
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Allocate failed"),
+  });
+
+  const agentIds = new Set(data.agents.map((a) => a.userId));
+  const options = useMemo(() => {
+    const byId = new Map<string, { userId: string; label: string; hasProfile: boolean }>();
+    for (const a of data.agents) {
+      byId.set(a.userId, {
+        userId: a.userId,
+        label: `${a.fullName || a.email || "Advisor"} (existing profile)`,
+        hasProfile: true,
+      });
+    }
+    for (const s of data.staffOptions) {
+      if (byId.has(s.userId)) continue;
+      byId.set(s.userId, {
+        userId: s.userId,
+        label: `${s.fullName || s.email || "Advisor"} (new profile)`,
+        hasProfile: false,
+      });
+    }
+    return Array.from(byId.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [data.agents, data.staffOptions]);
+
+  const dirty = userId !== (number.allocatedUserId ?? "");
+
+  return (
+    <div className="rounded-xl border bg-muted/20 p-4 space-y-3">
+      <div>
+        <div className="font-medium text-sm">Allocate this number</div>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Assign to an existing advisor, or a staff member who needs a new telephony profile. Leave
+          blank and save to unallocate.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="text-sm space-y-1 sm:col-span-2">
+          <span className="text-muted-foreground">Advisor</span>
+          <select
+            className="w-full h-9 rounded-md border bg-background px-2"
+            value={userId}
+            onChange={(e) => setUserId(e.target.value)}
+          >
+            <option value="">Unallocated</option>
+            {options.map((o) => (
+              <option key={o.userId} value={o.userId}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {userId && !agentIds.has(userId) && (
+          <label className="text-sm space-y-1 sm:col-span-2">
+            <span className="text-muted-foreground">Personal reroute (optional, for new profile)</span>
+            <input
+              className="w-full h-9 rounded-md border bg-background px-2"
+              value={personal}
+              onChange={(e) => setPersonal(e.target.value)}
+              placeholder="07…"
+            />
+          </label>
+        )}
+      </div>
+      <Button
+        size="sm"
+        disabled={allocate.isPending || (!dirty && !personal.trim())}
+        onClick={() => allocate.mutate()}
+      >
+        {allocate.isPending ? "Saving…" : dirty ? "Save allocation" : "Save"}
+      </Button>
+    </div>
+  );
+}
+
 function ProvisionAgentForm({
   data,
   preferMobileId,
@@ -464,6 +567,14 @@ function NumberAmendDialog({
 
         {view === "agent" && (
           <div className="space-y-4">
+            {number?.kind === "mobile" && (
+              <NumberAllocatePanel
+                key={`${number.id}-${number.allocatedUserId ?? "none"}`}
+                number={number}
+                data={data}
+                onSaved={onSaved}
+              />
+            )}
             {agentForNumber ? (
               <AgentCard
                 key={`${agentForNumber.userId}-${agentForNumber.allocatedMobileNumberId ?? ""}`}
@@ -471,22 +582,22 @@ function NumberAmendDialog({
                 unallocatedMobiles={data.unallocatedMobiles}
                 onSaved={onSaved}
               />
+            ) : number?.kind === "landline" ? (
+              <p className="text-sm text-muted-foreground">
+                No agent telephony profiles yet. Allocate a mobile to an advisor first, or provision
+                one below.
+              </p>
             ) : (
-              <ProvisionAgentForm
-                data={data}
-                preferMobileId={number?.kind === "mobile" ? number.id : null}
-                onSaved={onSaved}
-              />
-            )}
-            {agentForNumber && number?.kind === "mobile" && !number.allocatedUserId && (
-              <p className="text-xs text-muted-foreground">
-                This mobile is not allocated yet — assign it on the agent profile above, or provision a new
-                advisor.
+              <p className="text-sm text-muted-foreground">
+                Choose an advisor above to allocate this number. A telephony profile is created
+                automatically for staff who do not have one yet.
               </p>
             )}
+            {number?.kind === "landline" && !agentForNumber && (
+              <ProvisionAgentForm data={data} preferMobileId={null} onSaved={onSaved} />
+            )}
           </div>
-        )}
-      </DialogContent>
+        )}      </DialogContent>
     </Dialog>
   );
 }

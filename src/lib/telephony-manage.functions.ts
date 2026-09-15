@@ -412,3 +412,150 @@ export const addTelephonyMobileNumber = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true as const, e164 };
   });
+
+/** Assign a Twilio mobile to an advisor (existing or new profile), or clear allocation. */
+export const allocateTelephonyNumber = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        numberId: z.string().uuid(),
+        /** null / empty = unallocate */
+        userId: z.string().uuid().nullable(),
+        personalRerouteE164: z.string().optional().nullable(),
+        cloneFromUserId: z.string().uuid().optional().nullable(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await requireOwner(context.userId, context.claims as { email?: string });
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: mobile, error: mobileErr } = await supabaseAdmin
+      .from("telephony_numbers")
+      .select("id, kind, allocated_user_id, e164")
+      .eq("id", data.numberId)
+      .maybeSingle();
+    if (mobileErr) throw new Error(mobileErr.message);
+    if (!mobile || mobile.kind !== "mobile") throw new Error("Select a mobile number.");
+
+    const now = new Date().toISOString();
+    const previousOwnerId = mobile.allocated_user_id as string | null;
+
+    // Unallocate
+    if (!data.userId) {
+      await supabaseAdmin
+        .from("telephony_numbers")
+        .update({ allocated_user_id: null, updated_at: now })
+        .eq("id", data.numberId);
+
+      if (previousOwnerId) {
+        await supabaseAdmin
+          .from("advisor_telephony")
+          .update({ allocated_mobile_number_id: null, updated_at: now })
+          .eq("user_id", previousOwnerId)
+          .eq("allocated_mobile_number_id", data.numberId);
+      }
+      return { ok: true as const, allocatedUserId: null };
+    }
+
+    const targetUserId = data.userId;
+
+    // Clear this number from any previous owner profile
+    if (previousOwnerId && previousOwnerId !== targetUserId) {
+      await supabaseAdmin
+        .from("advisor_telephony")
+        .update({ allocated_mobile_number_id: null, updated_at: now })
+        .eq("user_id", previousOwnerId)
+        .eq("allocated_mobile_number_id", data.numberId);
+    }
+
+    // Clear any other mobile currently held by the target advisor
+    await supabaseAdmin
+      .from("telephony_numbers")
+      .update({ allocated_user_id: null, updated_at: now })
+      .eq("allocated_user_id", targetUserId)
+      .eq("kind", "mobile")
+      .neq("id", data.numberId);
+
+    await supabaseAdmin
+      .from("advisor_telephony")
+      .update({ allocated_mobile_number_id: null, updated_at: now })
+      .eq("user_id", targetUserId)
+      .neq("allocated_mobile_number_id", data.numberId);
+
+    // Assign number row
+    const { error: assignErr } = await supabaseAdmin
+      .from("telephony_numbers")
+      .update({ allocated_user_id: targetUserId, updated_at: now })
+      .eq("id", data.numberId);
+    if (assignErr) throw new Error(assignErr.message);
+
+    // Ensure advisor telephony profile exists (clone template if new)
+    const { data: existing } = await supabaseAdmin
+      .from("advisor_telephony")
+      .select("user_id")
+      .eq("user_id", targetUserId)
+      .maybeSingle();
+
+    let template: {
+      ring_softphone: boolean;
+      ring_allocated_mobile: boolean;
+      ring_personal_mobile: boolean;
+      use_personal_reroute_as_fallback: boolean;
+      respect_outlook_busy: boolean;
+      respect_hub_appointments: boolean;
+    } = {
+      ring_softphone: true,
+      ring_allocated_mobile: false,
+      ring_personal_mobile: true,
+      use_personal_reroute_as_fallback: true,
+      respect_outlook_busy: true,
+      respect_hub_appointments: true,
+    };
+
+    const cloneFrom = data.cloneFromUserId || previousOwnerId || null;
+    if (!existing && cloneFrom) {
+      const { data: src } = await supabaseAdmin
+        .from("advisor_telephony")
+        .select(
+          "ring_softphone, ring_allocated_mobile, ring_personal_mobile, use_personal_reroute_as_fallback, respect_outlook_busy, respect_hub_appointments",
+        )
+        .eq("user_id", cloneFrom)
+        .maybeSingle();
+      if (src) {
+        template = {
+          ...src,
+          ring_personal_mobile: src.ring_personal_mobile ?? true,
+        };
+      }
+    }
+
+    const personal =
+      data.personalRerouteE164 !== undefined
+        ? data.personalRerouteE164?.trim()
+          ? normaliseUkPhone(data.personalRerouteE164)
+          : null
+        : undefined;
+
+    const upsertRow: Record<string, unknown> = {
+      user_id: targetUserId,
+      allocated_mobile_number_id: data.numberId,
+      enabled: true,
+      updated_at: now,
+    };
+    if (!existing) {
+      Object.assign(upsertRow, template);
+      upsertRow.notes = "Allocated from telephony Amend (number → advisor)";
+    }
+    if (personal !== undefined) {
+      upsertRow.personal_reroute_e164 = personal;
+    }
+
+    const { error: upsertErr } = await supabaseAdmin.from("advisor_telephony").upsert(upsertRow, {
+      onConflict: "user_id",
+    });
+    if (upsertErr) throw new Error(upsertErr.message);
+
+    return { ok: true as const, allocatedUserId: targetUserId };
+  });
