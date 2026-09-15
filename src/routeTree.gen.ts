@@ -38,10 +38,13 @@ import { Route as AuthenticatedInterviewSessionIdRouteImport } from './routes/_a
 import { Route as AuthenticatedCustomersCustomerIdRouteImport } from './routes/_authenticated/customers.$customerId'
 import { Route as AuthenticatedChatSessionIdRouteImport } from './routes/_authenticated/chat.$sessionId'
 import { Route as ApiTwilioVoiceVoicemailDoneRouteImport } from './routes/api/twilio/voice/voicemail-done'
+import { Route as ApiTwilioVoiceSusanPromptRouteImport } from './routes/api/twilio/voice/susan-prompt'
 import { Route as ApiTwilioVoiceStatusRouteImport } from './routes/api/twilio/voice/status'
 import { Route as ApiTwilioVoiceRecordingRouteImport } from './routes/api/twilio/voice/recording'
+import { Route as ApiTwilioVoiceInboundDialDoneRouteImport } from './routes/api/twilio/voice/inbound-dial-done'
 import { Route as ApiTwilioVoiceInboundRouteImport } from './routes/api/twilio/voice/inbound'
 import { Route as ApiTwilioVoiceClientOutboundRouteImport } from './routes/api/twilio/voice/client-outbound'
+import { Route as ApiTwilioVoiceAmdStatusRouteImport } from './routes/api/twilio/voice/amd-status'
 
 const RegisterRoute = RegisterRouteImport.update({
   id: '/register',
@@ -197,6 +200,12 @@ const ApiTwilioVoiceVoicemailDoneRoute =
     path: '/api/twilio/voice/voicemail-done',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiTwilioVoiceSusanPromptRoute =
+  ApiTwilioVoiceSusanPromptRouteImport.update({
+    id: '/api/twilio/voice/susan-prompt',
+    path: '/api/twilio/voice/susan-prompt',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiTwilioVoiceStatusRoute = ApiTwilioVoiceStatusRouteImport.update({
   id: '/api/twilio/voice/status',
   path: '/api/twilio/voice/status',
@@ -207,6 +216,12 @@ const ApiTwilioVoiceRecordingRoute = ApiTwilioVoiceRecordingRouteImport.update({
   path: '/api/twilio/voice/recording',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTwilioVoiceInboundDialDoneRoute =
+  ApiTwilioVoiceInboundDialDoneRouteImport.update({
+    id: '/api/twilio/voice/inbound-dial-done',
+    path: '/api/twilio/voice/inbound-dial-done',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiTwilioVoiceInboundRoute = ApiTwilioVoiceInboundRouteImport.update({
   id: '/api/twilio/voice/inbound',
   path: '/api/twilio/voice/inbound',
@@ -218,6 +233,11 @@ const ApiTwilioVoiceClientOutboundRoute =
     path: '/api/twilio/voice/client-outbound',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiTwilioVoiceAmdStatusRoute = ApiTwilioVoiceAmdStatusRouteImport.update({
+  id: '/api/twilio/voice/amd-status',
+  path: '/api/twilio/voice/amd-status',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -247,10 +267,13 @@ export interface FileRoutesByFullPath {
   '/api/introducer/calculator-lead': typeof ApiIntroducerCalculatorLeadRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
   '/api/teams/callback': typeof ApiTeamsCallbackRoute
+  '/api/twilio/voice/amd-status': typeof ApiTwilioVoiceAmdStatusRoute
   '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
   '/api/twilio/voice/inbound': typeof ApiTwilioVoiceInboundRoute
+  '/api/twilio/voice/inbound-dial-done': typeof ApiTwilioVoiceInboundDialDoneRoute
   '/api/twilio/voice/recording': typeof ApiTwilioVoiceRecordingRoute
   '/api/twilio/voice/status': typeof ApiTwilioVoiceStatusRoute
+  '/api/twilio/voice/susan-prompt': typeof ApiTwilioVoiceSusanPromptRoute
   '/api/twilio/voice/voicemail-done': typeof ApiTwilioVoiceVoicemailDoneRoute
 }
 export interface FileRoutesByTo {
@@ -281,10 +304,13 @@ export interface FileRoutesByTo {
   '/api/introducer/calculator-lead': typeof ApiIntroducerCalculatorLeadRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
   '/api/teams/callback': typeof ApiTeamsCallbackRoute
+  '/api/twilio/voice/amd-status': typeof ApiTwilioVoiceAmdStatusRoute
   '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
   '/api/twilio/voice/inbound': typeof ApiTwilioVoiceInboundRoute
+  '/api/twilio/voice/inbound-dial-done': typeof ApiTwilioVoiceInboundDialDoneRoute
   '/api/twilio/voice/recording': typeof ApiTwilioVoiceRecordingRoute
   '/api/twilio/voice/status': typeof ApiTwilioVoiceStatusRoute
+  '/api/twilio/voice/susan-prompt': typeof ApiTwilioVoiceSusanPromptRoute
   '/api/twilio/voice/voicemail-done': typeof ApiTwilioVoiceVoicemailDoneRoute
 }
 export interface FileRoutesById {
@@ -317,10 +343,13 @@ export interface FileRoutesById {
   '/api/introducer/calculator-lead': typeof ApiIntroducerCalculatorLeadRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
   '/api/teams/callback': typeof ApiTeamsCallbackRoute
+  '/api/twilio/voice/amd-status': typeof ApiTwilioVoiceAmdStatusRoute
   '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
   '/api/twilio/voice/inbound': typeof ApiTwilioVoiceInboundRoute
+  '/api/twilio/voice/inbound-dial-done': typeof ApiTwilioVoiceInboundDialDoneRoute
   '/api/twilio/voice/recording': typeof ApiTwilioVoiceRecordingRoute
   '/api/twilio/voice/status': typeof ApiTwilioVoiceStatusRoute
+  '/api/twilio/voice/susan-prompt': typeof ApiTwilioVoiceSusanPromptRoute
   '/api/twilio/voice/voicemail-done': typeof ApiTwilioVoiceVoicemailDoneRoute
 }
 export interface FileRouteTypes {
@@ -353,10 +382,13 @@ export interface FileRouteTypes {
     | '/api/introducer/calculator-lead'
     | '/api/sms/inbound'
     | '/api/teams/callback'
+    | '/api/twilio/voice/amd-status'
     | '/api/twilio/voice/client-outbound'
     | '/api/twilio/voice/inbound'
+    | '/api/twilio/voice/inbound-dial-done'
     | '/api/twilio/voice/recording'
     | '/api/twilio/voice/status'
+    | '/api/twilio/voice/susan-prompt'
     | '/api/twilio/voice/voicemail-done'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -387,10 +419,13 @@ export interface FileRouteTypes {
     | '/api/introducer/calculator-lead'
     | '/api/sms/inbound'
     | '/api/teams/callback'
+    | '/api/twilio/voice/amd-status'
     | '/api/twilio/voice/client-outbound'
     | '/api/twilio/voice/inbound'
+    | '/api/twilio/voice/inbound-dial-done'
     | '/api/twilio/voice/recording'
     | '/api/twilio/voice/status'
+    | '/api/twilio/voice/susan-prompt'
     | '/api/twilio/voice/voicemail-done'
   id:
     | '__root__'
@@ -422,10 +457,13 @@ export interface FileRouteTypes {
     | '/api/introducer/calculator-lead'
     | '/api/sms/inbound'
     | '/api/teams/callback'
+    | '/api/twilio/voice/amd-status'
     | '/api/twilio/voice/client-outbound'
     | '/api/twilio/voice/inbound'
+    | '/api/twilio/voice/inbound-dial-done'
     | '/api/twilio/voice/recording'
     | '/api/twilio/voice/status'
+    | '/api/twilio/voice/susan-prompt'
     | '/api/twilio/voice/voicemail-done'
   fileRoutesById: FileRoutesById
 }
@@ -447,10 +485,13 @@ export interface RootRouteChildren {
   ApiIntroducerCalculatorLeadRoute: typeof ApiIntroducerCalculatorLeadRoute
   ApiSmsInboundRoute: typeof ApiSmsInboundRoute
   ApiTeamsCallbackRoute: typeof ApiTeamsCallbackRoute
+  ApiTwilioVoiceAmdStatusRoute: typeof ApiTwilioVoiceAmdStatusRoute
   ApiTwilioVoiceClientOutboundRoute: typeof ApiTwilioVoiceClientOutboundRoute
   ApiTwilioVoiceInboundRoute: typeof ApiTwilioVoiceInboundRoute
+  ApiTwilioVoiceInboundDialDoneRoute: typeof ApiTwilioVoiceInboundDialDoneRoute
   ApiTwilioVoiceRecordingRoute: typeof ApiTwilioVoiceRecordingRoute
   ApiTwilioVoiceStatusRoute: typeof ApiTwilioVoiceStatusRoute
+  ApiTwilioVoiceSusanPromptRoute: typeof ApiTwilioVoiceSusanPromptRoute
   ApiTwilioVoiceVoicemailDoneRoute: typeof ApiTwilioVoiceVoicemailDoneRoute
 }
 
@@ -659,6 +700,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTwilioVoiceVoicemailDoneRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/twilio/voice/susan-prompt': {
+      id: '/api/twilio/voice/susan-prompt'
+      path: '/api/twilio/voice/susan-prompt'
+      fullPath: '/api/twilio/voice/susan-prompt'
+      preLoaderRoute: typeof ApiTwilioVoiceSusanPromptRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/twilio/voice/status': {
       id: '/api/twilio/voice/status'
       path: '/api/twilio/voice/status'
@@ -673,6 +721,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTwilioVoiceRecordingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/twilio/voice/inbound-dial-done': {
+      id: '/api/twilio/voice/inbound-dial-done'
+      path: '/api/twilio/voice/inbound-dial-done'
+      fullPath: '/api/twilio/voice/inbound-dial-done'
+      preLoaderRoute: typeof ApiTwilioVoiceInboundDialDoneRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/twilio/voice/inbound': {
       id: '/api/twilio/voice/inbound'
       path: '/api/twilio/voice/inbound'
@@ -685,6 +740,13 @@ declare module '@tanstack/react-router' {
       path: '/api/twilio/voice/client-outbound'
       fullPath: '/api/twilio/voice/client-outbound'
       preLoaderRoute: typeof ApiTwilioVoiceClientOutboundRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/twilio/voice/amd-status': {
+      id: '/api/twilio/voice/amd-status'
+      path: '/api/twilio/voice/amd-status'
+      fullPath: '/api/twilio/voice/amd-status'
+      preLoaderRoute: typeof ApiTwilioVoiceAmdStatusRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -747,10 +809,13 @@ const rootRouteChildren: RootRouteChildren = {
   ApiIntroducerCalculatorLeadRoute: ApiIntroducerCalculatorLeadRoute,
   ApiSmsInboundRoute: ApiSmsInboundRoute,
   ApiTeamsCallbackRoute: ApiTeamsCallbackRoute,
+  ApiTwilioVoiceAmdStatusRoute: ApiTwilioVoiceAmdStatusRoute,
   ApiTwilioVoiceClientOutboundRoute: ApiTwilioVoiceClientOutboundRoute,
   ApiTwilioVoiceInboundRoute: ApiTwilioVoiceInboundRoute,
+  ApiTwilioVoiceInboundDialDoneRoute: ApiTwilioVoiceInboundDialDoneRoute,
   ApiTwilioVoiceRecordingRoute: ApiTwilioVoiceRecordingRoute,
   ApiTwilioVoiceStatusRoute: ApiTwilioVoiceStatusRoute,
+  ApiTwilioVoiceSusanPromptRoute: ApiTwilioVoiceSusanPromptRoute,
   ApiTwilioVoiceVoicemailDoneRoute: ApiTwilioVoiceVoicemailDoneRoute,
 }
 export const routeTree = rootRouteImport

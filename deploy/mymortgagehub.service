@@ -1,0 +1,29 @@
+# Mortgage Hub — systemd unit for mymortgagehub.uk
+#
+# Install on the VPS:
+#   sudo cp deploy/mymortgagehub.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now mymortgagehub
+#
+# Adjust User= and WorkingDirectory= if your paths differ.
+
+[Unit]
+Description=Mortgage Hub (mymortgagehub.uk)
+After=network.target
+
+[Service]
+Type=simple
+# Change User/Group to the Linux account that owns /var/www/mymortgagehub
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/var/www/mymortgagehub
+Environment=NODE_ENV=production
+# vite preview serves the production build; load-env.server.ts reads .env from WorkingDirectory
+ExecStart=/usr/bin/npm run serve:prod
+Restart=always
+RestartSec=5
+# Give Node enough headroom for interviews / builds leftovers
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

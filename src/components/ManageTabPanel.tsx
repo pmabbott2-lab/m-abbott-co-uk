@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { Palette, TestTube2, UserPlus, Users } from "lucide-react";
+import { Palette, Phone, TestTube2, UserPlus, Users } from "lucide-react";
 import { ThemeProfilePicker } from "@/components/ThemeProfilePicker";
 import { TestAccountsCard } from "@/components/TestAccountsCard";
+import { TelephonyManagePanel } from "@/components/TelephonyManagePanel";
 import { HubSubNav } from "@/components/ui/tabs";
 
 /** Stable Manage sub-tab ids under Management → Manage. */
@@ -9,6 +10,7 @@ export const MANAGE_SUB_TABS = {
   TEAM_ROLES: "team-roles",
   COLOUR_SCHEME: "colour-scheme",
   TEST_ACCOUNTS: "test-accounts",
+  TELEPHONY: "telephony",
   INVITES: "invites",
   REFER_A_FRIEND: "refer-a-friend",
 } as const;
@@ -50,6 +52,12 @@ export function ManageTabPanel({
 
   if (isOwner) {
     tabs.push({
+      id: MANAGE_SUB_TABS.TELEPHONY,
+      label: "Telephony",
+      icon: <Phone className="w-4 h-4 shrink-0" />,
+      content: <TelephonyManagePanel />,
+    });
+    tabs.push({
       id: MANAGE_SUB_TABS.COLOUR_SCHEME,
       label: "Colour scheme",
       icon: <Palette className="w-4 h-4 shrink-0" />,
@@ -78,5 +86,11 @@ export function ManageTabPanel({
     return <div className="space-y-6">{tabs[0].content}</div>;
   }
 
-  return <HubSubNav tabs={tabs} defaultValue={tabs[0].id} />;
+  return (
+    <HubSubNav
+      tabs={tabs}
+      defaultValue={tabs[0].id}
+      persistKey="mortgage-hub:staff-manage-sub"
+    />
+  );
 }

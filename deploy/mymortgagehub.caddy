@@ -1,0 +1,18 @@
+# Mortgage Hub — Caddy reverse proxy for mymortgagehub.uk
+#
+# Install on the VPS:
+#   sudo cp deploy/mymortgagehub.caddy /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+#
+# Caddy obtains HTTPS certificates automatically.
+# Hub Node process must be listening on 127.0.0.1:8080 (npm run serve:prod).
+
+mymortgagehub.uk, www.mymortgagehub.uk {
+	encode gzip
+	reverse_proxy 127.0.0.1:8080
+	header {
+		# Basic hardening; adjust if you add other front-ends later
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}

@@ -499,6 +499,35 @@ export async function getTeamsLinkStatus(advisorUserId: string): Promise<{
   }
 }
 
+/** True if Outlook calendar has an event covering `at` (requires linked Teams calendar). */
+export async function isAdvisorBusyInOutlookCalendar(
+  advisorUserId: string,
+  at: Date = new Date(),
+): Promise<boolean> {
+  const token = await ensureAccessToken(advisorUserId);
+  if (!token) return false;
+
+  const start = new Date(at.getTime() - 60_000).toISOString();
+  const end = new Date(at.getTime() + 60_000).toISOString();
+  const path =
+    `/me/calendarView?startDateTime=${encodeURIComponent(start)}&endDateTime=${encodeURIComponent(end)}` +
+    `&$select=id,subject,isCancelled,showAs,start,end&$top=10`;
+
+  try {
+    const page = await graphGet<{
+      value?: Array<{ isCancelled?: boolean; showAs?: string }>;
+    }>(token, path);
+    return (page.value ?? []).some((ev) => {
+      if (ev.isCancelled) return false;
+      const showAs = (ev.showAs ?? "busy").toLowerCase();
+      return showAs === "busy" || showAs === "oof" || showAs === "workingelsewhere";
+    });
+  } catch (e) {
+    console.error("Outlook calendarView busy check failed", e);
+    return false;
+  }
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
