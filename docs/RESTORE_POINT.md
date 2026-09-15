@@ -26,17 +26,18 @@ Also includes everything locked at `restore-point-2026-09-11-hub-mortgageeasy-tr
 | `restore-point-2026-09-02-post-enhancements` | Journey, finance pipeline, case details, relationship tab, commission summaries, ngrok demo proxy, auth stability |
 | `restore-point-2026-09-01-pre-enhancements` | Before journey/finance/case/relationship build |
 
-## Demo URLs (MortgageEasy + Hub on ngrok)
+## Production / demo URLs
 
 | URL | Purpose |
 |-----|---------|
-| `https://another-selector-ranged.ngrok-free.dev/mortgageeasy/` | MortgageEasy marketing site |
-| `https://another-selector-ranged.ngrok-free.dev/auth` | Mortgage Hub sign-in / journeys |
+| `https://mymortgagehub.uk` | Mortgage Hub production (see `docs/DEPLOY_MYMORTGAGEHUB.md`) |
+| `https://another-selector-ranged.ngrok-free.dev/mortgageeasy/` | MortgageEasy marketing (laptop/ngrok demo — retire after cutover) |
+| `https://another-selector-ranged.ngrok-free.dev/auth` | Mortgage Hub sign-in via ngrok demo |
 
-Start stack:
+Start stack (laptop demo only):
 
 ```bash
 bash scripts/mortgage-hub-stable.sh start
 ```
 
-Marketing links on ngrok use the same origin for Hub auth and calculator API calls.
+Marketing links on ngrok use the same origin for Hub auth and calculator API calls. After production cutover, brand sites should link to `https://mymortgagehub.uk`.

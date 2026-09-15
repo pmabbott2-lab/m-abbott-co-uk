@@ -114,11 +114,16 @@ Open http://localhost:5173 — you should see **"Complete your fact-find or book
 
 ## 5. Deploy to production
 
+**Live Hub domain:** `https://mymortgagehub.uk`  
+Full VPS + DNS + Caddy + telephony cutover checklist (Cursor/local unchanged): **[docs/DEPLOY_MYMORTGAGEHUB.md](docs/DEPLOY_MYMORTGAGEHUB.md)**.
+
+Baseline tag for go-live: `restore-point-2026-09-15-hub-telephony`.
+
 ```bash
 npm run build
 ```
 
-Serve the built app with your host (VPS + Node, Docker, Cloudflare, etc.). The build outputs a Nitro-compatible server entry at `dist/server/server.js`.
+Serve the built app with your host (VPS + Node, Docker, Cloudflare, etc.). The build outputs a Nitro-compatible server entry at `dist/server/server.js`. On the VPS this repo uses `npm run serve:prod` behind Caddy.
 
 Example test after build:
 
@@ -126,7 +131,7 @@ Example test after build:
 npm run preview
 ```
 
-Point your domain DNS at the server and set `APP_BASE_URL` to that domain.
+Point your domain DNS at the server and set `APP_BASE_URL` / `VITE_APP_URL` to `https://mymortgagehub.uk`.
 
 ### Using ngrok (e.g. `another-selector-ranged.ngrok-free.dev`)
 

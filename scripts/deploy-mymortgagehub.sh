@@ -2,6 +2,10 @@
 # Deploy / update Mortgage Hub on the production VPS (mymortgagehub.uk).
 # Run ON THE SERVER from the app directory, e.g.:
 #   cd /var/www/mymortgagehub && bash scripts/deploy-mymortgagehub.sh
+#   # or: npm run deploy:mymortgagehub
+#
+# First go-live baseline tag: restore-point-2026-09-15-hub-telephony
+# Ongoing work: MYMORTGAGEHUB_BRANCH=targeted-features bash scripts/deploy-mymortgagehub.sh
 #
 # Does not change how you develop on your Mac with Cursor.
 

@@ -18,6 +18,7 @@
     "refresh:site": "bash ~/bin/mortgage-hub-stable.sh rebuild",
     "status:site": "bash ~/bin/mortgage-hub-stable.sh status",
     "install:stable": "bash scripts/install-stable-site.sh",
+    "deploy:mymortgagehub": "bash scripts/deploy-mymortgagehub.sh",
     "set-openai-key": "bash scripts/set-openai-key.sh",
     "bootstrap:supabase": "bash scripts/bootstrap-supabase.sh",
     "verify:supabase": "node scripts/verify-supabase-env.mjs",

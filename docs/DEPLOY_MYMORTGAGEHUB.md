@@ -11,6 +11,21 @@ Cursor development on the Mac stays the same (`npm run dev` / localhost).
 
 Brand sites (Mortgage Easy, Trent Valley) keep their own domains later and link into Hub for sign-in / journeys.
 
+## Baseline restore point
+
+Deploy from (or roll back to) this tagged snapshot before going live:
+
+```bash
+git checkout restore-point-2026-09-15-hub-telephony
+```
+
+That tag locks:
+
+- MortgageHub app + telephony control (Manage → Telephony Amend, allocate/reallocate, routing, softphone → Hub Susan voicemail, AMD)
+- Everything already in `restore-point-2026-09-11-hub-mortgageeasy-trentvalley` (MortgageEasy films + Trent Valley marketing)
+
+See `docs/RESTORE_POINT.md`. After checkout on the server, run the deploy script below.
+
 ---
 
 ## What you need
@@ -67,8 +82,9 @@ sudo chown "$USER":"$USER" /var/www
 cd /var/www
 git clone https://github.com/pmabbott2-lab/m-abbott-co-uk.git mymortgagehub
 cd mymortgagehub
-# Use the branch you want live (targeted-features or main)
-git checkout targeted-features
+# Prefer the telephony restore point for first go-live (or your current branch)
+git checkout restore-point-2026-09-15-hub-telephony
+# Later, when deploying ongoing work: git checkout targeted-features
 npm install
 ```
 
@@ -128,12 +144,29 @@ Visit: `https://mymortgagehub.uk/auth`
   - `http://localhost:8080/**`
   - `http://localhost:5173/**`
 
-### Twilio (if SMS / voice enabled)
+### Twilio (SMS + voice — required for telephony restore point)
 
-Point webhooks / TwiML app voice URL at:
+On the **server**, with production `.env` set (`APP_BASE_URL=https://mymortgagehub.uk`):
 
-`https://mymortgagehub.uk/...`  
-(same paths you used with ngrok — run `npm run configure:twilio-voice` **on the server** after `.env` is correct, or update in the Twilio console).
+```bash
+cd /var/www/mymortgagehub
+npm run configure:twilio-voice
+```
+
+That points Twilio at the Hub domain. Key URLs:
+
+| Purpose | URL |
+|---------|-----|
+| Inbound voice | `https://mymortgagehub.uk/api/twilio/voice/inbound` |
+| Softphone outbound | `https://mymortgagehub.uk/api/twilio/voice/client-outbound` |
+| Call status | `https://mymortgagehub.uk/api/twilio/voice/status` |
+| AMD status | `https://mymortgagehub.uk/api/twilio/voice/amd-status` |
+| Hub Susan prompt / voicemail | `https://mymortgagehub.uk/api/twilio/voice/susan-prompt` (and related voice routes) |
+| Inbound SMS | `https://mymortgagehub.uk/api/sms/inbound` |
+
+Also confirm Messaging Service / number webhooks in the Twilio console no longer use the ngrok host.
+
+After cutover, smoke-test from Manage → Telephony: allocate number, softphone dial, missed-call → Hub Susan (not carrier voicemail).
 
 ### Teams calendar (if used)
 
@@ -143,18 +176,20 @@ Redirect URI: `https://mymortgagehub.uk/api/teams/callback`
 
 ## Everyday deploy (after you change code in Cursor)
 
-On your Mac: commit / push as usual.
+On your Mac: commit / push as usual (Cursor workflow unchanged).
 
 On the server:
 
 ```bash
 cd /var/www/mymortgagehub
+# Optional: pin a branch — MYMORTGAGEHUB_BRANCH=targeted-features bash scripts/deploy-mymortgagehub.sh
 bash scripts/deploy-mymortgagehub.sh
+# or: npm run deploy:mymortgagehub
 ```
 
 That script: `git pull` → `npm install` → `npm run build` → restart the service.
 
-Cursor workflow does **not** change. Local preview stays local. Production only updates when you run deploy on the server (or later via GitHub Action).
+Local preview stays local. Production only updates when you run deploy on the server (or later via GitHub Action).
 
 ---
 
@@ -173,6 +208,8 @@ When `https://mymortgagehub.uk/auth` works and you can sign in:
 | Check | Expect |
 |-------|--------|
 | `https://mymortgagehub.uk/auth` | Sign-in page |
+| Manage → Telephony | Amend / allocate UI loads |
+| Softphone / missed call | Routes to Hub Susan, not carrier VM |
 | `sudo systemctl status mymortgagehub` | `active (running)` |
 | `sudo journalctl -u mymortgagehub -n 50` | No crash loop |
 | Laptop asleep | Hub still loads |
