@@ -31,11 +31,19 @@ jobs:
 
       - name: Package node_modules for App Service Oryx startup
         run: |
-          tar -czf node_modules.tar.gz -C node_modules .
+          tar -czhf node_modules.tar.gz -C node_modules .
           printf '%s\n' 'compressedNodeModulesFile="node_modules.tar.gz"' > oryx-manifest.toml
-          tar -tzf node_modules.tar.gz | grep -E '^(./)?\.bin/srvx$|^(./)?srvx/package.json$' | head
-          test -n "$(tar -tzf node_modules.tar.gz | grep -E '^(./)?srvx/package.json$' || true)"
-          test -n "$(tar -tzf node_modules.tar.gz | grep -E '^(./)?\.bin/srvx$' || true)"
+          echo '--- srvx archive entries ---'
+          tar -tvzf node_modules.tar.gz | grep srvx | head -40
+          SRVX_BIN="$(tar -tvzf node_modules.tar.gz | grep -E '^(./)?\.bin/srvx$| [[:space:]](\./)?\.bin/srvx$' | head -1)"
+          SRVX_PKG="$(tar -tvzf node_modules.tar.gz | grep -E '^(./)?srvx/package\.json$| [[:space:]](\./)?srvx/package\.json$' | head -1)"
+          echo "SRVX_BIN=$SRVX_BIN"
+          echo "SRVX_PKG=$SRVX_PKG"
+          test -n "$SRVX_BIN"
+          test -n "$SRVX_PKG"
+          echo "$SRVX_BIN" | grep -qE '^-'
+          echo "$SRVX_BIN" | grep -qvE '^l'
+          echo ARCHIVE_SRVX_FILE_OK=yes
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
