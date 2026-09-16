@@ -31,11 +31,11 @@ jobs:
 
       - name: Package node_modules for App Service Oryx startup
         run: |
-          tar -czf node_modules.tar.gz node_modules
+          tar -czf node_modules.tar.gz -C node_modules .
           printf '%s\n' 'compressedNodeModulesFile="node_modules.tar.gz"' > oryx-manifest.toml
-          tar -tzf node_modules.tar.gz | grep -E 'node_modules/srvx/package.json|node_modules/\.bin/srvx' | head
-          test -n "$(tar -tzf node_modules.tar.gz | grep -E '^node_modules/srvx/package.json$' || true)"
-          test -n "$(tar -tzf node_modules.tar.gz | grep -E '^node_modules/\.bin/srvx$' || true)"
+          tar -tzf node_modules.tar.gz | grep -E '^(./)?\.bin/srvx$|^(./)?srvx/package.json$' | head
+          test -n "$(tar -tzf node_modules.tar.gz | grep -E '^(./)?srvx/package.json$' || true)"
+          test -n "$(tar -tzf node_modules.tar.gz | grep -E '^(./)?\.bin/srvx$' || true)"
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
