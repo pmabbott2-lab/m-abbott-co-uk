@@ -21,13 +21,29 @@ function trim(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-/** Server/runtime process.env, including Azure App Settings. Safe on server; empty on client. */
+/**
+ * Read process.env by dynamic key.
+ * Vite client builds replace static `process.env` / `process.env.FOO` with `{}` / literals;
+ * bracket access via globalThis survives and still works on the Node SSR/runtime.
+ */
+function readProcessEnv(name: string): string {
+  try {
+    const proc = (globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } })
+      .process;
+    const envBag = proc?.env;
+    if (!envBag) return "";
+    return trim(envBag[name]);
+  } catch {
+    return "";
+  }
+}
+
+/** Server/runtime process.env, including Azure App Settings. */
 function fromProcess(): PublicSupabaseEnv {
-  const env = typeof process !== "undefined" ? process.env : undefined;
   return {
-    url: trim(env?.SUPABASE_URL) || trim(env?.VITE_SUPABASE_URL),
+    url: readProcessEnv("SUPABASE_URL") || readProcessEnv("VITE_SUPABASE_URL"),
     publishableKey:
-      trim(env?.SUPABASE_PUBLISHABLE_KEY) || trim(env?.VITE_SUPABASE_PUBLISHABLE_KEY),
+      readProcessEnv("SUPABASE_PUBLISHABLE_KEY") || readProcessEnv("VITE_SUPABASE_PUBLISHABLE_KEY"),
   };
 }
 
@@ -69,8 +85,16 @@ export function getPublicSupabaseEnv(): PublicSupabaseEnv {
   };
 }
 
-/** Inline script for RootShell — public values only, from Azure/runtime process.env. */
+/**
+ * Inline script for RootShell — public values only.
+ * Must only be generated during SSR (import.meta.env.SSR). Client hydration must not
+ * rewrite this to empty values (client builds replace process.env with {}).
+ */
 export function getPublicEnvInlineScript(): string {
+  if (!import.meta.env.SSR) {
+    // Keep whatever the server already wrote into the HTML; do not clear it.
+    return "window.__MH_PUBLIC_ENV__=window.__MH_PUBLIC_ENV__||{};";
+  }
   const { url, publishableKey } = fromProcess();
   const payload = {
     SUPABASE_URL: url,

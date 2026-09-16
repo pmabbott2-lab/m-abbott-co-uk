@@ -131,6 +131,7 @@ function RootShell({ children }: { children: ReactNode }) {
       <head>
         <HeadContent />
         <script
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html: getPublicEnvInlineScript(),
           }}

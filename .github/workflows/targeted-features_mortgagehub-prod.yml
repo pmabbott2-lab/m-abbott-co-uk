@@ -75,11 +75,22 @@ jobs:
             head -c 2000 /tmp/azure-deploy-smoke.html
             exit 1
           fi
-          # Public env must be injected for the browser; service role must never appear
+          # Public env must be injected with real runtime values (not empty JSON)
           grep -q "__MH_PUBLIC_ENV__" /tmp/azure-deploy-smoke.html
-          grep -q "example.supabase.co" /tmp/azure-deploy-smoke.html
+          grep -q '"SUPABASE_URL":"https://example.supabase.co"' /tmp/azure-deploy-smoke.html
+          grep -q '"SUPABASE_PUBLISHABLE_KEY":"sb_publishable_ci_smoke_key"' /tmp/azure-deploy-smoke.html
+          if grep -q '"SUPABASE_URL":""' /tmp/azure-deploy-smoke.html; then
+            echo "Injected SUPABASE_URL was empty — SSR did not see runtime env"
+            head -c 2000 /tmp/azure-deploy-smoke.html
+            exit 1
+          fi
           if grep -q "sb_secret_ci_smoke_key_not_real" /tmp/azure-deploy-smoke.html; then
             echo "SERVICE_ROLE key leaked into HTML"
+            exit 1
+          fi
+          # Client bundle must not hardcode empty process.env replacement as the only path
+          if ! grep -R -l "__MH_PUBLIC_ENV__" dist/client/assets/*.js >/dev/null 2>&1; then
+            echo "Client assets missing window.__MH_PUBLIC_ENV__ reader"
             exit 1
           fi
           echo SMOKE_RUNTIME_ENV_OK=yes
