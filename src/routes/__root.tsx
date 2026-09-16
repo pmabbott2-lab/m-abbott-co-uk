@@ -14,6 +14,7 @@ import appCss from "../styles.css?url";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeInit } from "@/components/ThemeInit";
 import { supabase } from "@/integrations/supabase/client";
+import { getPublicEnvInlineScript } from "@/lib/supabase-public-env";
 
 function NotFoundComponent() {
   return (
@@ -129,6 +130,11 @@ function RootShell({ children }: { children: ReactNode }) {
     <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: getPublicEnvInlineScript(),
+          }}
+        />
         <script
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var k="mortgage-hub:theme-profile";var t=localStorage.getItem(k);var d=t||"classic-hub";document.documentElement.setAttribute("data-theme",d);}catch(e){document.documentElement.setAttribute("data-theme","classic-hub");}})();`,

@@ -48,6 +48,41 @@ jobs:
           test -d azure-deploy/dist/client
           (cd azure-deploy && node --input-type=module -e "await import('seroval-plugins/web'); console.log('SEROVAL_PLUGINS_RESOLVE_OK=yes')")
           echo DEPLOY_PACKAGE_OK=yes
+
+      - name: Smoke-test azure-deploy with runtime Supabase env
+        env:
+          # Simulate Azure App Settings (runtime only — not baked into the client at build).
+          SUPABASE_URL: https://example.supabase.co
+          SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_smoke_key
+          SUPABASE_SERVICE_ROLE_KEY: sb_secret_ci_smoke_key_not_real
+          PORT: "8765"
+        run: |
+          cd azure-deploy
+          npm start > /tmp/azure-deploy-smoke.log 2>&1 &
+          SMOKE_PID=$!
+          cleanup() { kill $SMOKE_PID 2>/dev/null || true; }
+          trap cleanup EXIT
+          for i in $(seq 1 30); do
+            if curl -sf -o /tmp/azure-deploy-smoke.html --max-time 3 "http://127.0.0.1:8765/"; then
+              break
+            fi
+            sleep 1
+          done
+          test -s /tmp/azure-deploy-smoke.html
+          # Must not surface the missing-env error page/message
+          if grep -q "Missing Supabase environment variable" /tmp/azure-deploy-smoke.html; then
+            echo "Smoke HTML still reports missing Supabase env:"
+            head -c 2000 /tmp/azure-deploy-smoke.html
+            exit 1
+          fi
+          # Public env must be injected for the browser; service role must never appear
+          grep -q "__MH_PUBLIC_ENV__" /tmp/azure-deploy-smoke.html
+          grep -q "example.supabase.co" /tmp/azure-deploy-smoke.html
+          if grep -q "sb_secret_ci_smoke_key_not_real" /tmp/azure-deploy-smoke.html; then
+            echo "SERVICE_ROLE key leaked into HTML"
+            exit 1
+          fi
+          echo SMOKE_RUNTIME_ENV_OK=yes
         working-directory: ${{ github.workspace }}
 
       - name: Upload artifact for deployment job
