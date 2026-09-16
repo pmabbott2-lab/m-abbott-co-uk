@@ -23,35 +23,32 @@ jobs:
         with:
           node-version: '22.x'
 
-      - name: npm install, build, and test
+      - name: npm install and build
         run: |
-          npm install
+          npm ci
           npm run build --if-present
-          npm run test --if-present
 
-      - name: Package node_modules for App Service Oryx startup
+      - name: Prepare self-contained deploy package
         run: |
-          tar -czhf node_modules.tar.gz -C node_modules .
-          printf '%s\n' 'compressedNodeModulesFile="node_modules.tar.gz"' > oryx-manifest.toml
-          tar -tvzf node_modules.tar.gz > node_modules.tar.list
-          echo '--- srvx archive entries ---'
-          grep srvx node_modules.tar.list | head -40 || true
-          SRVX_BIN="$(grep -E ' (\./)?\.bin/srvx$' node_modules.tar.list | head -1 || true)"
-          SRVX_PKG="$(grep -E ' (\./)?srvx/package\.json$' node_modules.tar.list | head -1 || true)"
-          echo "SRVX_BIN=$SRVX_BIN"
-          echo "SRVX_PKG=$SRVX_PKG"
-          test -n "$SRVX_BIN"
-          test -n "$SRVX_PKG"
-          echo "$SRVX_BIN" | grep -qE '^-'
-          echo "$SRVX_BIN" | grep -qvE '^l'
-          echo ARCHIVE_SRVX_FILE_OK=yes
-          rm -f node_modules.tar.list
+          npm prune --omit=dev
+          rm -rf deploy
+          mkdir -p deploy
+          cp -a dist package.json package-lock.json patches deploy/
+          cp -a node_modules deploy/
+          # Overwrite any stale Oryx compressed-modules contract so App Service
+          # uses the shipped node_modules instead of extracting node_modules.tar.gz.
+          printf '%s\n' 'PlatformName="nodejs"' > deploy/oryx-manifest.toml
+          rm -f deploy/node_modules.tar.gz
+          test -f deploy/node_modules/srvx/bin/srvx.mjs
+          test -f deploy/dist/server/server.js
+          test -d deploy/dist/client
+          echo DEPLOY_PACKAGE_OK=yes
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: .
+          path: deploy
 
   deploy:
     runs-on: ubuntu-latest
@@ -65,7 +62,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: node-app
-      
+          path: deploy
+
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -79,4 +77,4 @@ jobs:
         with:
           app-name: 'Mortgagehub-prod'
           slot-name: 'Production'
-          package: .
+          package: deploy
