@@ -30,23 +30,23 @@ jobs:
 
       - name: Prepare self-contained deploy package
         run: |
-          rm -rf deploy
-          mkdir -p deploy
-          cp -a dist package.json package-lock.json patches deploy/
+          rm -rf azure-deploy
+          mkdir -p azure-deploy
+          cp -a dist package.json package-lock.json patches azure-deploy/
           # Fresh production install retains all transitive runtime deps
           # (npm prune --omit=dev after a full tree is less reliable for SSR).
-          npm ci --omit=dev --ignore-scripts --prefix deploy
+          npm ci --omit=dev --ignore-scripts --prefix azure-deploy
           # Apply simli-client patch using build-tree patch-package
-          (cd deploy && node "$GITHUB_WORKSPACE/node_modules/patch-package/index.js")
+          (cd azure-deploy && node "$GITHUB_WORKSPACE/node_modules/patch-package/index.js")
           # Overwrite any stale Oryx compressed-modules contract.
-          printf '%s\n' 'PlatformName="nodejs"' > deploy/oryx-manifest.toml
-          rm -f deploy/node_modules.tar.gz
-          test -f deploy/node_modules/srvx/bin/srvx.mjs
-          test -f deploy/node_modules/seroval-plugins/package.json
-          test -f deploy/node_modules/seroval/package.json
-          test -f deploy/dist/server/server.js
-          test -d deploy/dist/client
-          (cd deploy && node --input-type=module -e "await import('seroval-plugins/web'); console.log('SEROVAL_PLUGINS_RESOLVE_OK=yes')")
+          printf '%s\n' 'PlatformName="nodejs"' > azure-deploy/oryx-manifest.toml
+          rm -f azure-deploy/node_modules.tar.gz
+          test -f azure-deploy/node_modules/srvx/bin/srvx.mjs
+          test -f azure-deploy/node_modules/seroval-plugins/package.json
+          test -f azure-deploy/node_modules/seroval/package.json
+          test -f azure-deploy/dist/server/server.js
+          test -d azure-deploy/dist/client
+          (cd azure-deploy && node --input-type=module -e "await import('seroval-plugins/web'); console.log('SEROVAL_PLUGINS_RESOLVE_OK=yes')")
           echo DEPLOY_PACKAGE_OK=yes
         working-directory: ${{ github.workspace }}
 
@@ -54,7 +54,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: deploy
+          path: azure-deploy
 
   deploy:
     runs-on: ubuntu-latest
@@ -68,7 +68,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: node-app
-          path: deploy
+          path: azure-deploy
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -83,4 +83,4 @@ jobs:
         with:
           app-name: 'Mortgagehub-prod'
           slot-name: 'Production'
-          package: deploy
+          package: azure-deploy
