@@ -5,8 +5,8 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-function isNewSupabaseApiKey(value: string): boolean {
-  return value.startsWith('sb_publishable_') || value.startsWith('sb_secret_');
+function isPublishableApiKey(value: string): boolean {
+  return value.startsWith('sb_publishable_');
 }
 
 function createSupabaseFetch(supabaseKey: string): typeof fetch {
@@ -19,8 +19,11 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
       new Headers(init.headers).forEach((value, key) => headers.set(key, value));
     }
 
-    // New Supabase API keys are opaque strings, not bearer JWTs.
-    if (isNewSupabaseApiKey(supabaseKey) && headers.get('Authorization') === `Bearer ${supabaseKey}`) {
+    // Publishable keys are opaque and must not be sent as Bearer (Auth rejects them).
+    // Secret keys (sb_secret_ / legacy service_role JWT) MUST keep Authorization: Bearer
+    // — Auth Admin (createUser, generateLink, deleteUser, …) returns
+    // "This endpoint requires a valid Bearer token" without it.
+    if (isPublishableApiKey(supabaseKey) && headers.get('Authorization') === `Bearer ${supabaseKey}`) {
       headers.delete('Authorization');
     }
 
@@ -42,6 +45,18 @@ function createSupabaseAdminClient() {
       ...(!SUPABASE_SERVICE_ROLE_KEY ? ['SUPABASE_SERVICE_ROLE_KEY'] : []),
     ];
     const message = `Missing Supabase environment variable(s): ${missing.join(', ')}. Set them in your .env file.`;
+    console.error(`[Supabase] ${message}`);
+    throw new Error(message);
+  }
+
+  // Common Azure misconfig after MMH cutover: paste publishable key into SERVICE_ROLE.
+  // Auth Admin then returns: "This endpoint requires a valid Bearer token".
+  if (
+    SUPABASE_SERVICE_ROLE_KEY.startsWith('sb_publishable_') ||
+    SUPABASE_SERVICE_ROLE_KEY === (process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || '').trim()
+  ) {
+    const message =
+      'SUPABASE_SERVICE_ROLE_KEY is set to a publishable/anon key. Use the secret key (sb_secret_…) or legacy service_role JWT from Supabase → Settings → API Keys.';
     console.error(`[Supabase] ${message}`);
     throw new Error(message);
   }

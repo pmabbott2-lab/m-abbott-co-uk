@@ -234,6 +234,84 @@ export const getMyAdminAccess = createServerFn({ method: "GET" })
     return resolveAdminAccess(context.userId, email);
   });
 
+function classifySupabaseKey(value: string | undefined): string {
+  if (!value) return "missing";
+  if (value.startsWith("sb_secret_")) return "sb_secret";
+  if (value.startsWith("sb_publishable_")) return "sb_publishable";
+  if (value.startsWith("eyJ")) {
+    try {
+      const payload = JSON.parse(
+        Buffer.from(value.split(".")[1]!, "base64url").toString("utf8"),
+      ) as { role?: string };
+      return `jwt:${payload.role ?? "unknown"}`;
+    } catch {
+      return "jwt:unknown";
+    }
+  }
+  return "other";
+}
+
+/** Owner-only: diagnose Azure Supabase key misconfig without exposing secrets. */
+export const diagnoseSupabaseAdminConfig = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const email = (context.claims as { email?: string }).email;
+    const access = await requireAdminAccess(context.userId, email);
+    if (!access.isOwner) throw new Error("Owner only");
+
+    const url = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "")
+      .trim()
+      .replace(/\/+$/, "");
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+    const publishable = (
+      process.env.SUPABASE_PUBLISHABLE_KEY ||
+      process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+      ""
+    ).trim();
+
+    const serviceRoleKind = classifySupabaseKey(serviceRole);
+    const publishableKind = classifySupabaseKey(publishable);
+    const serviceRoleIsPublishable =
+      serviceRoleKind === "sb_publishable" ||
+      Boolean(serviceRole && publishable && serviceRole === publishable);
+
+    let authAdminOk = false;
+    let authAdminError: string | null = null;
+    if (url && serviceRole && !serviceRoleIsPublishable) {
+      try {
+        const res = await fetch(`${url}/auth/v1/admin/users?page=1&per_page=1`, {
+          headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}` },
+        });
+        const body = await res.text();
+        authAdminOk = res.ok;
+        if (!res.ok) {
+          try {
+            authAdminError = (JSON.parse(body) as { msg?: string }).msg ?? `HTTP ${res.status}`;
+          } catch {
+            authAdminError = `HTTP ${res.status}`;
+          }
+        }
+      } catch (e) {
+        authAdminError = e instanceof Error ? e.message : "network error";
+      }
+    } else if (serviceRoleIsPublishable) {
+      authAdminError =
+        "SUPABASE_SERVICE_ROLE_KEY is a publishable key — Auth Admin will fail with “valid Bearer token”.";
+    } else if (!serviceRole) {
+      authAdminError = "SUPABASE_SERVICE_ROLE_KEY is missing on this host.";
+    }
+
+    return {
+      supabaseUrlHost: url ? new URL(url).host : null,
+      serviceRoleKind,
+      publishableKind,
+      serviceRoleIsPublishable,
+      authAdminOk,
+      authAdminError,
+      appBaseUrl: (process.env.APP_BASE_URL || process.env.VITE_APP_URL || "").trim() || null,
+    };
+  });
+
 export const listAdmins = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {

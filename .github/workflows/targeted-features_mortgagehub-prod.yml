@@ -162,6 +162,43 @@ jobs:
               }
             ]
 
+      # When GitHub secrets are present, overwrite Azure Supabase keys so Auth Admin
+      # never runs with a publishable key (that yields “valid Bearer token” errors).
+      - name: Sync Supabase keys to Azure (when GitHub secrets exist)
+        if: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY != '' && secrets.SUPABASE_URL != '' && secrets.SUPABASE_PUBLISHABLE_KEY != '' }}
+        uses: azure/appservice-settings@v1
+        with:
+          app-name: Mortgagehub-prod
+          slot-name: Production
+          app-settings-json: |
+            [
+              {
+                "name": "SUPABASE_URL",
+                "value": "${{ secrets.SUPABASE_URL }}",
+                "slotSetting": false
+              },
+              {
+                "name": "VITE_SUPABASE_URL",
+                "value": "${{ secrets.SUPABASE_URL }}",
+                "slotSetting": false
+              },
+              {
+                "name": "SUPABASE_PUBLISHABLE_KEY",
+                "value": "${{ secrets.SUPABASE_PUBLISHABLE_KEY }}",
+                "slotSetting": false
+              },
+              {
+                "name": "VITE_SUPABASE_PUBLISHABLE_KEY",
+                "value": "${{ secrets.SUPABASE_PUBLISHABLE_KEY }}",
+                "slotSetting": false
+              },
+              {
+                "name": "SUPABASE_SERVICE_ROLE_KEY",
+                "value": "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}",
+                "slotSetting": false
+              }
+            ]
+
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3

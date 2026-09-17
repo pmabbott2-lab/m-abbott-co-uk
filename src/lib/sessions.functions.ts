@@ -3115,7 +3115,18 @@ export const listNotes = createServerFn({ method: "POST" })
 // used by listAdvisors / allocateSession.
 async function requireAdmin(userId: string): Promise<void> {
   const roles = await getRolesForUser(userId);
-  if (!roles.includes("admin")) throw new Error("Forbidden");
+  if (roles.includes("admin")) return;
+  // Owner/supervisor via ADMIN_EMAILS / admin_profiles should also pass.
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: profile } = await supabaseAdmin
+    .from("profiles")
+    .select("email")
+    .eq("id", userId)
+    .maybeSingle();
+  const { resolveAdminAccess } = await import("@/lib/admin.functions");
+  const access = await resolveAdminAccess(userId, profile?.email ?? undefined);
+  if (access.isOwner || access.isSupervisor || access.isAdmin) return;
+  throw new Error("Forbidden");
 }
 
 // Stamp deleted_at on an advisor profile, swallowing the error if the column

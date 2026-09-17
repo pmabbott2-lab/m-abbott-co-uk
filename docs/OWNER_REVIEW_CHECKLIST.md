@@ -9,6 +9,8 @@ Baseline: restore point `restore-point-2026-09-15-hub-telephony` + Azure packagi
 ## 0. Before you start (config)
 
 - [ ] Azure App Settings include `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (no trailing slash on URL)
+- [ ] **Critical:** `SUPABASE_SERVICE_ROLE_KEY` must be `sb_secret_…` (or legacy `service_role` JWT) — **never** `sb_publishable_…`. Wrong key → “This endpoint requires a valid Bearer token” on booking confirm, invites, test accounts, SMS admin paths.
+- [ ] Prefer also storing the same three Supabase values as GitHub Actions secrets so deploys can re-sync them to Azure
 - [ ] `ADMIN_EMAILS=pmabbott2@aol.com`
 - [ ] `APP_BASE_URL=https://mymortgagehub.uk` and `VITE_APP_URL=https://mymortgagehub.uk`
 - [ ] Teams: `TEAMS_CLIENT_ID`, `TEAMS_CLIENT_SECRET`, `TEAMS_TENANT_ID` (same as laptop `.env`)
