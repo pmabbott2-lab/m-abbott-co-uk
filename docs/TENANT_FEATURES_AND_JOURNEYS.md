@@ -232,19 +232,17 @@ No developer intervention / deploy to flip Susan on/off.
 
 ---
 
-## 8. G1 schema / helper amendments required (design only — not applied)
+## 8. G1 / G1A schema notes
 
-| Item | Need |
-|------|------|
-| `feature_catalogue` + `tenant_features` | New tables (future authorised migration) |
-| Seed catalogue keys | Including `susan_ai_journey` |
-| Seed 001 ENABLED / 002 DISABLED for Susan | After tenants exist (G1 already has 001/002) |
-| `requireTenantFeature` / `isTenantFeatureEnabled` helpers | Server + optional RLS-friendly SQL |
-| G1 `tenant_settings.feature_flags` jsonb | **Insufficient long-term** — migrate conceptually to `tenant_features`; may use jsonb only as temporary bridge |
+| Item | Status after G1A |
+|------|------------------|
+| `feature_catalogue` + `tenant_features` | **Applied** |
+| Seed catalogue keys | **Applied** (24 keys) |
+| Seed 001 ENABLED / 002 DISABLED for Susan | **Applied** |
+| `is_tenant_feature_enabled` / `require_tenant_feature` | **Applied** (DB); **not** wired to live routes/APIs yet |
+| `tenant_settings.feature_flags` | Remains as **TEMPORARY** bridge only — canonical source is `tenant_features`. Retire when app/server reads exclusively from `tenant_features` at the feature-enforcement gate. Do not add new long-term flags to `feature_flags`. |
 
-**No change** to `can_administer_tenant` / data-wall helpers for feature toggles — features are orthogonal to GROUP/EXTERNAL data access.
-
-Do **not** implement in this checkpoint.
+App route/API enforcement of features is a **later gate**, not G1A.
 
 ---
 
