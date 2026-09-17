@@ -108,10 +108,19 @@ export function IntroducerContactBox({
       </div>
       {introQ.isLoading ? (
         <p className="text-xs text-muted-foreground">Loading…</p>
-      ) : info?.companyCode ? (
+      ) : info?.companyCode || info?.companyName ? (
         <div className="text-xs sm:text-sm">
-          <div className="font-medium truncate">{info.companyName ?? "Company"}</div>
-          <div className="font-mono text-muted-foreground">{info.companyCode}</div>
+          <div className="font-medium truncate">
+            {info.isStaff ? `Staff: ${info.companyName ?? "Advisor"}` : (info.companyName ?? "Company")}
+          </div>
+          {info.companyCode && (
+            <div className="font-mono text-muted-foreground">{info.companyCode}</div>
+          )}
+          {info.isStaff && (
+            <div className="text-[10px] text-muted-foreground mt-0.5">
+              Introducer commission (fee + mortgage fee) pays this staff member
+            </div>
+          )}
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">No introducer</p>

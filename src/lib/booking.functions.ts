@@ -257,6 +257,26 @@ async function ensureStaffIntroducerRecord(staffUserId: string): Promise<string>
     if (existing.active === false) {
       await supabaseAdmin.from("introducers").update({ active: true }).eq("id", existing.id);
     }
+    const { data: existingRate } = await supabaseAdmin
+      .from("commission_rates")
+      .select("user_id")
+      .eq("user_id", staffUserId)
+      .eq("role", "introducer")
+      .maybeSingle();
+    if (!existingRate) {
+      await supabaseAdmin.from("commission_rates").upsert(
+        {
+          user_id: staffUserId,
+          role: "introducer",
+          percentage: 10,
+          pct_fee: 10,
+          pct_mortgage_fee: 10,
+          pct_insurance_fee: 0,
+          pct_other_fee: 0,
+        },
+        { onConflict: "user_id,role" },
+      );
+    }
     return existing.id;
   }
 
@@ -293,6 +313,27 @@ async function ensureStaffIntroducerRecord(staffUserId: string): Promise<string>
     .select("id")
     .single();
   if (error) throw new Error(error.message);
+  // Seed introducer fee + mortgage % if missing (insurance/other stay advisor-exclusive).
+  const { data: existingRate } = await supabaseAdmin
+    .from("commission_rates")
+    .select("user_id")
+    .eq("user_id", staffUserId)
+    .eq("role", "introducer")
+    .maybeSingle();
+  if (!existingRate) {
+    await supabaseAdmin.from("commission_rates").upsert(
+      {
+        user_id: staffUserId,
+        role: "introducer",
+        percentage: 10,
+        pct_fee: 10,
+        pct_mortgage_fee: 10,
+        pct_insurance_fee: 0,
+        pct_other_fee: 0,
+      },
+      { onConflict: "user_id,role" },
+    );
+  }
   return inserted.id;
 }
 

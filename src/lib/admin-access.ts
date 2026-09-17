@@ -25,6 +25,8 @@ export const PERMISSION_KEYS = [
   "finance_advisor_pct",
   "finance_introducer_pct",
   "finance_raf",
+  "finance_network_statements",
+  "finance_network_validate",
   "relationship",
 ] as const;
 
@@ -45,6 +47,8 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   finance_advisor_pct: "Finance — advisor commission %",
   finance_introducer_pct: "Finance — introducer commission %",
   finance_raf: "Finance — RAF commission highlight",
+  finance_network_statements: "Finance — network statements (input / allocate)",
+  finance_network_validate: "Finance — validate network statements",
   relationship: "Relationship management (renewals)",
 };
 
@@ -64,6 +68,8 @@ export const DEFAULT_GENERAL_PERMISSIONS: Record<PermissionKey, PermissionAccess
   finance_advisor_pct: "none",
   finance_introducer_pct: "none",
   finance_raf: "none",
+  finance_network_statements: "none",
+  finance_network_validate: "none",
   relationship: "none",
 };
 

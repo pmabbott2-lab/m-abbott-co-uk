@@ -36,6 +36,10 @@ async function commissionPctForUser(
   role: "advisor" | "introducer",
   feeType: string,
 ): Promise<number> {
+  // Introducers (including staff attributed as introducer) earn on fee + mortgage fee only.
+  // Insurance and other fee commission rates are advisor-exclusive.
+  if (role === "introducer" && feeType !== "fee" && feeType !== "mortgage_fee") return 0;
+
   const { data: rate, error } = await supabaseAdmin
     .from("commission_rates")
     .select("percentage, pct_fee, pct_mortgage_fee, pct_insurance_fee, pct_other_fee")
@@ -316,7 +320,11 @@ export const submitSessionFees = createServerFn({ method: "POST" })
       }
 
       // Introducer commission: case → customer → introducer (falls back to session leads).
-      if (resolvedIntroducerId) {
+      // Introducers earn on fee + mortgage fee only — never insurance/other.
+      if (
+        resolvedIntroducerId &&
+        (line.fee_type === "fee" || line.fee_type === "mortgage_fee")
+      ) {
         const { data: intro } = await supabaseAdmin
           .from("introducers")
           .select("user_id")
@@ -555,19 +563,47 @@ export const listFinanceLedger = createServerFn({ method: "GET" })
 export const listCommissionStaff = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ role: z.enum(["advisor", "introducer"]), query: z.string().max(80).optional() }).parse(d),
+    z
+      .object({
+        role: z.enum(["advisor", "introducer", "admin"]),
+        query: z.string().max(80).optional(),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
-    const key = data.role === "advisor" ? "finance_advisor_pct" : "finance_introducer_pct";
+    // Admin picker only needs introducer % permission (admins earn intro commission on bookings).
+    const key =
+      data.role === "advisor"
+        ? "finance_advisor_pct"
+        : "finance_introducer_pct";
     if (!canView(access, key)) throw new Error("Forbidden");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: roleRows } = await supabaseAdmin.from("user_roles").select("user_id, role");
-    const ids = new Set(
-      (roleRows ?? []).filter((r) => r.role === data.role).map((r) => r.user_id),
-    );
+    const byUser = new Map<string, Set<string>>();
+    for (const r of roleRows ?? []) {
+      const set = byUser.get(r.user_id) ?? new Set<string>();
+      set.add(r.role);
+      byUser.set(r.user_id, set);
+    }
+
+    const ids = new Set<string>();
+    if (data.role === "advisor") {
+      // Pure advisors (+ anyone with advisor role). Do not pull admins-only into this list.
+      for (const [userId, roles] of byUser) {
+        if (roles.has("advisor")) ids.add(userId);
+      }
+    } else if (data.role === "admin") {
+      for (const [userId, roles] of byUser) {
+        if (roles.has("admin")) ids.add(userId);
+      }
+    } else {
+      for (const [userId, roles] of byUser) {
+        if (roles.has("introducer")) ids.add(userId);
+      }
+    }
     if (ids.size === 0) return [];
 
     const { data: profiles } = await supabaseAdmin
@@ -577,13 +613,13 @@ export const listCommissionStaff = createServerFn({ method: "GET" })
       .order("full_name", { ascending: true });
 
     const advisorCodeMap = new Map<string, string>();
-    if (data.role === "advisor") {
+    if (data.role === "advisor" || data.role === "admin") {
       const { data: codes } = await supabaseAdmin.from("advisor_profiles").select("user_id, code");
       for (const c of codes ?? []) advisorCodeMap.set(c.user_id, c.code);
     }
 
     const introCodeMap = new Map<string, string>();
-    if (data.role === "introducer") {
+    if (data.role === "introducer" || data.role === "admin") {
       const res = await supabaseAdmin.from("introducers").select("user_id, company_code");
       for (const r of res.data ?? []) {
         introCodeMap.set(r.user_id, (r as { company_code?: string }).company_code ?? "");
@@ -596,9 +632,9 @@ export const listCommissionStaff = createServerFn({ method: "GET" })
       .filter((p) => {
         if (!q) return true;
         const code =
-          data.role === "advisor"
-            ? advisorCodeMap.get(p.id) ?? ""
-            : introCodeMap.get(p.id) ?? "";
+          data.role === "introducer"
+            ? introCodeMap.get(p.id) ?? ""
+            : advisorCodeMap.get(p.id) ?? introCodeMap.get(p.id) ?? "";
         const hay = [p.full_name, p.email, code].filter(Boolean).join(" ").toLowerCase();
         return hay.includes(q);
       })
@@ -607,9 +643,9 @@ export const listCommissionStaff = createServerFn({ method: "GET" })
         full_name: p.full_name,
         email: p.email,
         referenceCode:
-          data.role === "advisor"
-            ? advisorCodeMap.get(p.id) ?? null
-            : introCodeMap.get(p.id) || null,
+          data.role === "introducer"
+            ? introCodeMap.get(p.id) || null
+            : advisorCodeMap.get(p.id) ?? introCodeMap.get(p.id) ?? null,
       }));
   });
 
@@ -756,8 +792,9 @@ export const setCommissionRate = createServerFn({ method: "POST" })
     const nextByType: Record<string, number> = {
       fee: data.pctFee,
       mortgage_fee: data.pctMortgageFee,
-      insurance_fee: data.pctInsuranceFee,
-      other_fee: data.pctOtherFee,
+      // Introducer rates: fee + mortgage only; insurance/other stay advisor-exclusive.
+      insurance_fee: data.role === "introducer" ? 0 : data.pctInsuranceFee,
+      other_fee: data.role === "introducer" ? 0 : data.pctOtherFee,
     };
 
     const { error } = await supabaseAdmin.from("commission_rates").upsert(
@@ -765,10 +802,10 @@ export const setCommissionRate = createServerFn({ method: "POST" })
         user_id: data.userId,
         role: data.role,
         percentage: data.pctFee,
-        pct_fee: data.pctFee,
-        pct_mortgage_fee: data.pctMortgageFee,
-        pct_insurance_fee: data.pctInsuranceFee,
-        pct_other_fee: data.pctOtherFee,
+        pct_fee: nextByType.fee,
+        pct_mortgage_fee: nextByType.mortgage_fee,
+        pct_insurance_fee: nextByType.insurance_fee,
+        pct_other_fee: nextByType.other_fee,
         updated_by: context.userId,
         updated_at: new Date().toISOString(),
       },

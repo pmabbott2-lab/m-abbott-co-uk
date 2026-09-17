@@ -573,7 +573,7 @@ export function OwnerFinanceReport() {
     queryFn: () => commissionExportFn({ data: {} }),
   });
   const rafBonusQ = useQuery({ queryKey: ["raf-bonus-amount"], queryFn: () => rafBonusFn() });
-  const [rateRole, setRateRole] = useState<"advisor" | "introducer">("advisor");
+  const [rateRole, setRateRole] = useState<"advisor" | "introducer" | "admin">("advisor");
   const [rateUserId, setRateUserId] = useState("");
   const [staffSearch, setStaffSearch] = useState("");
   const [pctFee, setPctFee] = useState("10");
@@ -582,17 +582,18 @@ export function OwnerFinanceReport() {
   const [pctOther, setPctOther] = useState("10");
   const [introPctFee, setIntroPctFee] = useState("10");
   const [introPctMortgage, setIntroPctMortgage] = useState("10");
-  const [introPctInsurance, setIntroPctInsurance] = useState("10");
-  const [introPctOther, setIntroPctOther] = useState("10");
 
   const staffQ = useQuery({
     queryKey: ["commission-staff", rateRole, staffSearch],
     queryFn: () => staffFn({ data: { role: rateRole, query: staffSearch || undefined } }),
   });
 
+  // DB rate role: admins only store introducer % (for bookings they make).
+  const storedRateRole = rateRole === "admin" ? "introducer" : rateRole;
+
   const existingRateQ = useQuery({
-    queryKey: ["commission-rate", rateUserId, rateRole],
-    queryFn: () => getRateFn({ data: { userId: rateUserId, role: rateRole } }),
+    queryKey: ["commission-rate", rateUserId, storedRateRole],
+    queryFn: () => getRateFn({ data: { userId: rateUserId, role: storedRateRole } }),
     enabled: Boolean(rateUserId),
   });
 
@@ -603,8 +604,8 @@ export function OwnerFinanceReport() {
   });
 
   const historyQ = useQuery({
-    queryKey: ["commission-history", rateUserId, rateRole],
-    queryFn: () => historyFn({ data: { userId: rateUserId, role: rateRole } }),
+    queryKey: ["commission-history", rateUserId, storedRateRole],
+    queryFn: () => historyFn({ data: { userId: rateUserId, role: storedRateRole } }),
     enabled: Boolean(rateUserId),
   });
 
@@ -621,47 +622,74 @@ export function OwnerFinanceReport() {
     if (!r || !rateUserId) return;
     if (r.pctFee != null) setPctFee(String(r.pctFee));
     if (r.pctMortgageFee != null) setPctMortgage(String(r.pctMortgageFee));
-    if (r.pctInsuranceFee != null) setPctInsurance(String(r.pctInsuranceFee));
-    if (r.pctOtherFee != null) setPctOther(String(r.pctOtherFee));
-  }, [existingRateQ.data, rateUserId]);
+    if (rateRole === "advisor") {
+      if (r.pctInsuranceFee != null) setPctInsurance(String(r.pctInsuranceFee));
+      if (r.pctOtherFee != null) setPctOther(String(r.pctOtherFee));
+    }
+  }, [existingRateQ.data, rateUserId, rateRole]);
 
   useEffect(() => {
     const r = existingIntroRateQ.data;
     if (!r || !rateUserId || rateRole !== "advisor") return;
     if (r.pctFee != null) setIntroPctFee(String(r.pctFee));
     if (r.pctMortgageFee != null) setIntroPctMortgage(String(r.pctMortgageFee));
-    if (r.pctInsuranceFee != null) setIntroPctInsurance(String(r.pctInsuranceFee));
-    if (r.pctOtherFee != null) setIntroPctOther(String(r.pctOtherFee));
   }, [existingIntroRateQ.data, rateUserId, rateRole]);
 
   const setRate = useMutation({
     mutationFn: async () => {
+      if (rateRole === "admin") {
+        // Admins only earn introducer commission on appointments they book.
+        await setRateFn({
+          data: {
+            userId: rateUserId,
+            role: "introducer",
+            pctFee: Number(pctFee),
+            pctMortgageFee: Number(pctMortgage),
+            pctInsuranceFee: 0,
+            pctOtherFee: 0,
+          },
+        });
+        return;
+      }
+      if (rateRole === "introducer") {
+        await setRateFn({
+          data: {
+            userId: rateUserId,
+            role: "introducer",
+            pctFee: Number(pctFee),
+            pctMortgageFee: Number(pctMortgage),
+            pctInsuranceFee: 0,
+            pctOtherFee: 0,
+          },
+        });
+        return;
+      }
       await setRateFn({
         data: {
           userId: rateUserId,
-          role: rateRole,
+          role: "advisor",
           pctFee: Number(pctFee),
           pctMortgageFee: Number(pctMortgage),
           pctInsuranceFee: Number(pctInsurance),
           pctOtherFee: Number(pctOther),
         },
       });
-      if (rateRole === "advisor") {
-        await setRateFn({
-          data: {
-            userId: rateUserId,
-            role: "introducer",
-            pctFee: Number(introPctFee),
-            pctMortgageFee: Number(introPctMortgage),
-            pctInsuranceFee: Number(introPctInsurance),
-            pctOtherFee: Number(introPctOther),
-          },
-        });
-      }
+      await setRateFn({
+        data: {
+          userId: rateUserId,
+          role: "introducer",
+          pctFee: Number(introPctFee),
+          pctMortgageFee: Number(introPctMortgage),
+          pctInsuranceFee: 0,
+          pctOtherFee: 0,
+        },
+      });
     },
     onSuccess: () => {
       toast.success("Commission rates saved — applies to new fees only");
       historyQ.refetch();
+      existingRateQ.refetch();
+      if (rateRole === "advisor") existingIntroRateQ.refetch();
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not save rates"),
   });
@@ -692,6 +720,9 @@ export function OwnerFinanceReport() {
     );
   }
 
+  const personLabel =
+    rateRole === "advisor" ? "Advisor" : rateRole === "admin" ? "Admin" : "Introducer";
+
   return (
     <div className="flex flex-col gap-4">
       <div className="space-y-6 min-w-0">
@@ -699,8 +730,9 @@ export function OwnerFinanceReport() {
       <div>
         <h3 className="font-semibold text-lg">Commission rates</h3>
         <p className="text-sm text-muted-foreground mt-1">
-          Set a separate % for each fee type. Changes apply to newly posted fees only — historical
-          commission stays unchanged.
+          Advisors: case commission by fee type, plus introducer % when they book a customer.
+          Admins: introducer % only (appointments they book — shown on the customer profile).
+          Introducers: fee + mortgage fee only. Changes apply to newly posted fees.
         </p>
       </div>
       <div className="grid sm:grid-cols-2 gap-3">
@@ -709,9 +741,10 @@ export function OwnerFinanceReport() {
           <select
             className="w-full h-9 rounded-md border bg-background px-2 text-sm"
             value={rateRole}
-            onChange={(e) => setRateRole(e.target.value as "advisor" | "introducer")}
+            onChange={(e) => setRateRole(e.target.value as "advisor" | "introducer" | "admin")}
           >
             <option value="advisor">Advisor</option>
+            <option value="admin">Admin</option>
             <option value="introducer">Introducer</option>
           </select>
         </div>
@@ -725,7 +758,7 @@ export function OwnerFinanceReport() {
         </div>
       </div>
       <div className="space-y-1">
-        <Label>{rateRole === "advisor" ? "Advisor" : "Introducer"}</Label>
+        <Label>{personLabel}</Label>
         <select
           className="w-full h-9 rounded-md border bg-background px-2 text-sm"
           value={rateUserId}
@@ -742,9 +775,14 @@ export function OwnerFinanceReport() {
       </div>
       {rateUserId && (
         <>
+        {(rateRole === "advisor" || rateRole === "introducer" || rateRole === "admin") && (
         <div className="grid sm:grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-4">
           <div className="sm:col-span-2 text-sm font-medium">
-            {rateRole === "advisor" ? "Advisor commission %" : "Introducer commission %"}
+            {rateRole === "advisor"
+              ? "Advisor commission %"
+              : rateRole === "admin"
+                ? "Introducer commission % (admin bookings — fee + mortgage fee)"
+                : "Introducer commission % (fee + mortgage fee only)"}
           </div>
           <div className="space-y-1">
             <Label>{FEE_TYPE_LABELS.fee} %</Label>
@@ -754,18 +792,32 @@ export function OwnerFinanceReport() {
             <Label>{FEE_TYPE_LABELS.mortgage_fee} %</Label>
             <Input type="number" min="0" max="100" step="0.1" value={pctMortgage} onChange={(e) => setPctMortgage(e.target.value)} />
           </div>
-          <div className="space-y-1">
-            <Label>{FEE_TYPE_LABELS.insurance_fee} %</Label>
-            <Input type="number" min="0" max="100" step="0.1" value={pctInsurance} onChange={(e) => setPctInsurance(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label>{FEE_TYPE_LABELS.other_fee} %</Label>
-            <Input type="number" min="0" max="100" step="0.1" value={pctOther} onChange={(e) => setPctOther(e.target.value)} />
-          </div>
+          {rateRole === "advisor" && (
+            <>
+              <div className="space-y-1">
+                <Label>{FEE_TYPE_LABELS.insurance_fee} %</Label>
+                <Input type="number" min="0" max="100" step="0.1" value={pctInsurance} onChange={(e) => setPctInsurance(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>{FEE_TYPE_LABELS.other_fee} %</Label>
+                <Input type="number" min="0" max="100" step="0.1" value={pctOther} onChange={(e) => setPctOther(e.target.value)} />
+              </div>
+            </>
+          )}
+          {(rateRole === "introducer" || rateRole === "admin") && (
+            <p className="sm:col-span-2 text-xs text-muted-foreground">
+              {rateRole === "admin"
+                ? "When this admin books a customer, they appear as introducer on the customer profile. Payable introducer commission uses these rates (fee + mortgage fee only)."
+                : "Introducers earn on fee and mortgage fee only. Insurance and other rates are advisor-only."}
+            </p>
+          )}
         </div>
+        )}
         {rateRole === "advisor" && (
           <div className="grid sm:grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-4">
-            <div className="sm:col-span-2 text-sm font-medium">Introducer commission % (when this advisor refers)</div>
+            <div className="sm:col-span-2 text-sm font-medium">
+              Introducer commission % (when this advisor is the customer&apos;s introducer)
+            </div>
             <div className="space-y-1">
               <Label>{FEE_TYPE_LABELS.fee} %</Label>
               <Input type="number" min="0" max="100" step="0.1" value={introPctFee} onChange={(e) => setIntroPctFee(e.target.value)} />
@@ -774,14 +826,9 @@ export function OwnerFinanceReport() {
               <Label>{FEE_TYPE_LABELS.mortgage_fee} %</Label>
               <Input type="number" min="0" max="100" step="0.1" value={introPctMortgage} onChange={(e) => setIntroPctMortgage(e.target.value)} />
             </div>
-            <div className="space-y-1">
-              <Label>{FEE_TYPE_LABELS.insurance_fee} %</Label>
-              <Input type="number" min="0" max="100" step="0.1" value={introPctInsurance} onChange={(e) => setIntroPctInsurance(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label>{FEE_TYPE_LABELS.other_fee} %</Label>
-              <Input type="number" min="0" max="100" step="0.1" value={introPctOther} onChange={(e) => setIntroPctOther(e.target.value)} />
-            </div>
+            <p className="sm:col-span-2 text-xs text-muted-foreground">
+              Fee + mortgage fee only — insurance / other commission stays on the advisor rates above.
+            </p>
           </div>
         )}
         </>

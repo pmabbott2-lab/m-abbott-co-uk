@@ -60,6 +60,7 @@ export type DiarySubTabId = (typeof DIARY_SUB_TABS)[keyof typeof DIARY_SUB_TABS]
 export const FINANCE_SUB_TABS = {
   MY_COMMISSION: "my-commission",
   COMMISSION_MGMT: "commission-mgmt",
+  NETWORK_STATEMENTS: "network-statements",
   FINANCE_REPORT: "finance-report",
 } as const;
 
@@ -125,6 +126,7 @@ export type StaffBranchVisibility = {
   finance: {
     myCommission: boolean;
     commissionMgmt: boolean;
+    networkStatements: boolean;
     financeReport: boolean;
   };
 };
@@ -167,6 +169,11 @@ export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranc
   /** Pure advisors only — not owner/supervisor/general admin dashboards. */
   const financeMyCommission = isAdvisor && !isMainAdmin;
   const financeCommissionMgmt = canViewCommissionPayouts(adminAccess);
+  const financeNetworkStatements =
+    isOwner ||
+    isSupervisor ||
+    canView(adminAccess, "finance_network_statements") ||
+    financeCommissionMgmt;
   const financeReport = canViewFinanceReport(adminAccess);
 
   const staffAdvisor = isAdvisor && !isMainAdmin;
@@ -187,7 +194,7 @@ export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranc
       management,
       marketing,
       introducers: introducersBranch,
-      finance: financeMyCommission || financeCommissionMgmt || financeReport,
+      finance: financeMyCommission || financeCommissionMgmt || financeNetworkStatements || financeReport,
     },
     customers: {
       list: customersList,
@@ -218,6 +225,7 @@ export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranc
     finance: {
       myCommission: financeMyCommission,
       commissionMgmt: financeCommissionMgmt,
+      networkStatements: financeNetworkStatements,
       financeReport,
     },
   };
@@ -263,6 +271,7 @@ export function defaultViewSubTab(vis: StaffBranchVisibility): ViewSubTabId {
 export function defaultFinanceSubTab(vis: StaffBranchVisibility): FinanceSubTabId {
   if (vis.finance.myCommission) return FINANCE_SUB_TABS.MY_COMMISSION;
   if (vis.finance.commissionMgmt) return FINANCE_SUB_TABS.COMMISSION_MGMT;
+  if (vis.finance.networkStatements) return FINANCE_SUB_TABS.NETWORK_STATEMENTS;
   return FINANCE_SUB_TABS.FINANCE_REPORT;
 }
 

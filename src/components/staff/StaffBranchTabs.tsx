@@ -48,6 +48,7 @@ import { AdvisorCommissionStatementsPanel } from "@/components/staff/panels/mana
 import { JourneyAnalyticsPanel } from "@/components/staff/panels/management/JourneyAnalyticsPanel";
 import { TeamRolesPanel } from "@/components/staff/panels/management/TeamRolesPanel";
 import { DiaryTabsPanel } from "@/components/staff/panels/diary/DiaryTabsPanel";
+import { NetworkStatementsPanel } from "@/components/staff/panels/finance/NetworkStatementsPanel";
 import { getAdvisorView } from "@/lib/advisor-view";
 import { canEditAdminPermissions } from "@/lib/admin-access";
 import { HubSubNav, type HubSubNavTab } from "@/components/ui/tabs";
@@ -242,6 +243,15 @@ function FinanceBranchPanel({ visibility, staff }: { visibility: StaffBranchVisi
       label: "Commission mgmt",
       icon: <PoundSterling className="w-4 h-4 shrink-0" />,
       content: <CommissionPayoutsPanel canAmend={staff.canAmendPayouts} />,
+    });
+  }
+
+  if (visibility.finance.networkStatements) {
+    tabs.push({
+      id: FINANCE_SUB_TABS.NETWORK_STATEMENTS,
+      label: "Network statements",
+      icon: <PoundSterling className="w-4 h-4 shrink-0" />,
+      content: <NetworkStatementsPanel />,
     });
   }
 

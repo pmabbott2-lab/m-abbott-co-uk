@@ -52,6 +52,8 @@ export type CustomerIntroducerInfo = {
   companyCode: string | null;
   companyName: string | null;
   effectiveFrom: string | null;
+  /** True when the introducer row is a staff advisor/admin attribution (not an external firm). */
+  isStaff: boolean;
 };
 
 export const lookupIntroducerByCode = createServerFn({ method: "GET" })
@@ -101,12 +103,13 @@ export const getCustomerIntroducer = createServerFn({ method: "GET" })
         companyCode: null,
         companyName: null,
         effectiveFrom: null,
+        isStaff: false,
       };
     }
 
     const { data: intro } = await supabaseAdmin
       .from("introducers")
-      .select("id, company_code, company_name")
+      .select("id, company_code, company_name, user_id")
       .eq("id", introducerId)
       .maybeSingle();
 
@@ -116,12 +119,23 @@ export const getCustomerIntroducer = createServerFn({ method: "GET" })
       .eq("customer_id", data.customerId)
       .maybeSingle();
 
+    let isStaff = false;
+    const introUserId = (intro as { user_id?: string | null } | null)?.user_id ?? null;
+    if (introUserId) {
+      const { data: roles } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", introUserId);
+      isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
+    }
+
     return {
       customerId: data.customerId,
       introducerId,
       companyCode: (intro as { company_code?: string | null })?.company_code ?? null,
       companyName: (intro as { company_name?: string | null })?.company_name ?? null,
       effectiveFrom: (link as { effective_from?: string | null })?.effective_from ?? null,
+      isStaff,
     };
   });
 
