@@ -24,6 +24,10 @@ jobs:
           node-version: '22.x'
 
       - name: npm install and build
+        env:
+          # Bake MMH into the client bundle so auth/reset/signup never fall back to a stale ngrok URL.
+          VITE_APP_URL: https://mymortgagehub.uk
+          APP_BASE_URL: https://mymortgagehub.uk
         run: |
           npm ci
           npm run build --if-present
@@ -113,6 +117,9 @@ jobs:
       SUPABASE_URL_SECRET: ${{ secrets.SUPABASE_URL }}
       SUPABASE_PUBLISHABLE_KEY_SECRET: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
       SUPABASE_SERVICE_ROLE_KEY_SECRET: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      TEAMS_CLIENT_ID_SECRET: ${{ secrets.TEAMS_CLIENT_ID }}
+      TEAMS_CLIENT_SECRET_SECRET: ${{ secrets.TEAMS_CLIENT_SECRET }}
+      TEAMS_TENANT_ID_SECRET: ${{ secrets.TEAMS_TENANT_ID }}
 
     steps:
       - name: Download artifact from build job
@@ -128,7 +135,7 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_6CDE810C6DD942AA83AAB86938AE38AC }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_0BB4606FADAC49DCB1511B23EE738AAB }}
 
-      - name: Ensure production App Settings (owner + Teams + public URL)
+      - name: Ensure production App Settings (owner + public URL)
         uses: azure/appservice-settings@v1
         with:
           app-name: Mortgagehub-prod
@@ -149,20 +156,30 @@ jobs:
                 "name": "VITE_APP_URL",
                 "value": "https://mymortgagehub.uk",
                 "slotSetting": false
-              },
+              }
+            ]
+
+      - name: Sync Teams calendar secrets to Azure (when GitHub secrets exist)
+        if: ${{ env.TEAMS_CLIENT_ID_SECRET != '' && env.TEAMS_CLIENT_SECRET_SECRET != '' && env.TEAMS_TENANT_ID_SECRET != '' }}
+        uses: azure/appservice-settings@v1
+        with:
+          app-name: Mortgagehub-prod
+          slot-name: Production
+          app-settings-json: |
+            [
               {
                 "name": "TEAMS_CLIENT_ID",
-                "value": "${{ secrets.TEAMS_CLIENT_ID }}",
+                "value": "${{ env.TEAMS_CLIENT_ID_SECRET }}",
                 "slotSetting": false
               },
               {
                 "name": "TEAMS_CLIENT_SECRET",
-                "value": "${{ secrets.TEAMS_CLIENT_SECRET }}",
+                "value": "${{ env.TEAMS_CLIENT_SECRET_SECRET }}",
                 "slotSetting": false
               },
               {
                 "name": "TEAMS_TENANT_ID",
-                "value": "${{ secrets.TEAMS_TENANT_ID }}",
+                "value": "${{ env.TEAMS_TENANT_ID_SECRET }}",
                 "slotSetting": false
               }
             ]

@@ -35,12 +35,12 @@ export function DiaryTabsPanel({
         <AdvisorDiaryPanel
           viewAsAdvisorId={viewAsAdvisorId}
           allowAdvisorFilter={!isStaffAdvisor && !viewAsAdvisorId}
-          showTeamsLink={isStaffAdvisor && !viewAsAdvisorId}
+          showTeamsLink={!viewAsAdvisorId}
           title={isStaffAdvisor ? "Your diary" : "Advisor diary"}
           description={
             isStaffAdvisor
               ? "Your upcoming customer appointments. Link Microsoft Teams to sync meetings when you book or amend slots."
-              : "Filter by advisor name or code to view confirmed upcoming appointments."
+              : "Filter by advisor name or code to view confirmed upcoming appointments. Connect Teams on your own advisor account from Diary."
           }
           teamsSearch={teamsSearch}
         />

@@ -4,7 +4,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { getServerPasswordResetUrl } from "@/lib/app-url.server";
 
 const SUPABASE_REDIRECT_HINT =
-  "Add your app URL (e.g. http://localhost:8080/**) to Supabase → Authentication → URL Configuration → Redirect URLs.";
+  "In Supabase → Authentication → URL Configuration set Site URL to https://mymortgagehub.uk and add Redirect URLs: https://mymortgagehub.uk/** (and http://localhost:8080/** for local only).";
 
 function isLocalRedirectTarget(redirectTo: string): boolean {
   try {

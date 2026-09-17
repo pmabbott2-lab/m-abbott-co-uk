@@ -78,10 +78,11 @@ export function TeamsCalendarLinkCard({ search }: Props) {
 
       {status && !status.configured && (
         <p className="text-sm text-amber-700 dark:text-amber-400">
-          Teams linking is not configured on the server yet. Add{" "}
+          Teams linking is not configured on the server yet. Azure needs{" "}
           <code className="text-xs">TEAMS_CLIENT_ID</code>,{" "}
           <code className="text-xs">TEAMS_CLIENT_SECRET</code> and{" "}
-          <code className="text-xs">TEAMS_TENANT_ID</code> to <code className="text-xs">.env</code>.
+          <code className="text-xs">TEAMS_TENANT_ID</code>. In Entra, the redirect URI must be{" "}
+          <code className="text-xs">https://mymortgagehub.uk/api/teams/callback</code>.
         </p>
       )}
 

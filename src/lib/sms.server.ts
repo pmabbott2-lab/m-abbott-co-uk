@@ -100,7 +100,20 @@ export function getAppBaseUrl(): string {
     process.env.APP_BASE_URL?.trim() ||
     process.env.VITE_APP_URL?.trim() ||
     process.env.APP_URL?.trim();
-  if (fromEnv) return fromEnv.replace(/\/$/, "");
+  if (fromEnv) {
+    const cleaned = fromEnv.replace(/\/$/, "");
+    // Azure production must never emit ngrok links (stale App Setting / local .env bleed).
+    if (
+      (process.env.WEBSITE_SITE_NAME || process.env.WEBSITE_HOSTNAME) &&
+      /ngrok/i.test(cleaned)
+    ) {
+      return "https://mymortgagehub.uk";
+    }
+    return cleaned;
+  }
+  if (process.env.WEBSITE_SITE_NAME || process.env.WEBSITE_HOSTNAME) {
+    return "https://mymortgagehub.uk";
+  }
   return "http://localhost:5173";
 }
 
