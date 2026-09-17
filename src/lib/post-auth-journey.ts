@@ -85,17 +85,31 @@ export function buildAuthPath(opts?: {
   join?: boolean;
   fromBroker?: boolean;
   start?: PostAuthStart;
+  tenantSlug?: string;
 }) {
   const params = new URLSearchParams();
   if (opts?.fromBroker) params.set("from", "broker");
   if (opts?.join) params.set("join", "1");
   if (opts?.start) params.set("start", opts.start);
+  if (opts?.tenantSlug) params.set("tenant", opts.tenantSlug);
   const q = params.toString();
   return q ? `/auth?${q}` : "/auth";
 }
 
-export function buildHomePathAfterAuth(start: PostAuthStart | null) {
+/** After auth: prefer tenant workspace gate when a tenant slug was requested. */
+export function buildHomePathAfterAuth(start: PostAuthStart | null, tenantSlug?: string | null) {
+  const slug = tenantSlug?.trim().toLowerCase();
+  if (slug) {
+    const q = start ? `?start=${encodeURIComponent(start)}` : "";
+    return `/${encodeURIComponent(slug)}/workspace${q}`;
+  }
   return start ? `/home?start=${encodeURIComponent(start)}` : "/home";
+}
+
+export function readTenantSlugFromLocation(): string | null {
+  if (typeof window === "undefined") return null;
+  const t = new URLSearchParams(window.location.search).get("tenant");
+  return t?.trim().toLowerCase() || null;
 }
 
 /** Only book uses appointment-first signup; voice and chat use the classic create-account form. */

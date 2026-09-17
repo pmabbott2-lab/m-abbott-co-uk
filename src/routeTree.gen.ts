@@ -12,7 +12,9 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
+import { Route as TenantSlugRouteRouteImport } from './routes/$tenantSlug/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as TenantSlugIndexRouteImport } from './routes/$tenantSlug/index'
 import { Route as RafCodeRouteImport } from './routes/raf.$code'
 import { Route as GoSlugRouteImport } from './routes/go.$slug'
 import { Route as BookSlugRouteImport } from './routes/book.$slug'
@@ -26,6 +28,8 @@ import { Route as AuthenticatedHomeRouteImport } from './routes/_authenticated/h
 import { Route as AuthenticatedDiaryRouteImport } from './routes/_authenticated/diary'
 import { Route as AuthenticatedCasesRouteImport } from './routes/_authenticated/cases'
 import { Route as AuthenticatedBookingRouteImport } from './routes/_authenticated/booking'
+import { Route as TenantSlugWorkspaceRouteImport } from './routes/$tenantSlug/workspace'
+import { Route as TenantSlugLoginRouteImport } from './routes/$tenantSlug/login'
 import { Route as ApiTeamsCallbackRouteImport } from './routes/api/teams/callback'
 import { Route as ApiSmsInboundRouteImport } from './routes/api/sms/inbound'
 import { Route as ApiIntroducerCalculatorLeadRouteImport } from './routes/api/introducer/calculator-lead'
@@ -37,6 +41,7 @@ import { Route as AuthenticatedSessionsSessionIdRouteImport } from './routes/_au
 import { Route as AuthenticatedInterviewSessionIdRouteImport } from './routes/_authenticated/interview.$sessionId'
 import { Route as AuthenticatedCustomersCustomerIdRouteImport } from './routes/_authenticated/customers.$customerId'
 import { Route as AuthenticatedChatSessionIdRouteImport } from './routes/_authenticated/chat.$sessionId'
+import { Route as TenantSlugRefIntroducerRefRouteImport } from './routes/$tenantSlug/ref.$introducerRef'
 import { Route as ApiTwilioVoiceVoicemailDoneRouteImport } from './routes/api/twilio/voice/voicemail-done'
 import { Route as ApiTwilioVoiceSusanPromptRouteImport } from './routes/api/twilio/voice/susan-prompt'
 import { Route as ApiTwilioVoiceStatusRouteImport } from './routes/api/twilio/voice/status'
@@ -60,10 +65,20 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
   id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TenantSlugRouteRoute = TenantSlugRouteRouteImport.update({
+  id: '/$tenantSlug',
+  path: '/$tenantSlug',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const TenantSlugIndexRoute = TenantSlugIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => TenantSlugRouteRoute,
 } as any)
 const RafCodeRoute = RafCodeRouteImport.update({
   id: '/raf/$code',
@@ -130,6 +145,16 @@ const AuthenticatedBookingRoute = AuthenticatedBookingRouteImport.update({
   path: '/booking',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const TenantSlugWorkspaceRoute = TenantSlugWorkspaceRouteImport.update({
+  id: '/workspace',
+  path: '/workspace',
+  getParentRoute: () => TenantSlugRouteRoute,
+} as any)
+const TenantSlugLoginRoute = TenantSlugLoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => TenantSlugRouteRoute,
+} as any)
 const ApiTeamsCallbackRoute = ApiTeamsCallbackRouteImport.update({
   id: '/api/teams/callback',
   path: '/api/teams/callback',
@@ -194,6 +219,12 @@ const AuthenticatedChatSessionIdRoute =
     path: '/chat/$sessionId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const TenantSlugRefIntroducerRefRoute =
+  TenantSlugRefIntroducerRefRouteImport.update({
+    id: '/ref/$introducerRef',
+    path: '/ref/$introducerRef',
+    getParentRoute: () => TenantSlugRouteRoute,
+  } as any)
 const ApiTwilioVoiceVoicemailDoneRoute =
   ApiTwilioVoiceVoicemailDoneRouteImport.update({
     id: '/api/twilio/voice/voicemail-done',
@@ -241,8 +272,11 @@ const ApiTwilioVoiceAmdStatusRoute = ApiTwilioVoiceAmdStatusRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/$tenantSlug': typeof TenantSlugRouteRouteWithChildren
   '/auth': typeof AuthRouteWithChildren
   '/register': typeof RegisterRoute
+  '/$tenantSlug/login': typeof TenantSlugLoginRoute
+  '/$tenantSlug/workspace': typeof TenantSlugWorkspaceRoute
   '/booking': typeof AuthenticatedBookingRoute
   '/cases': typeof AuthenticatedCasesRoute
   '/diary': typeof AuthenticatedDiaryRoute
@@ -256,6 +290,8 @@ export interface FileRoutesByFullPath {
   '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
   '/raf/$code': typeof RafCodeRoute
+  '/$tenantSlug/': typeof TenantSlugIndexRoute
+  '/$tenantSlug/ref/$introducerRef': typeof TenantSlugRefIntroducerRefRoute
   '/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
@@ -280,6 +316,8 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRouteWithChildren
   '/register': typeof RegisterRoute
+  '/$tenantSlug/login': typeof TenantSlugLoginRoute
+  '/$tenantSlug/workspace': typeof TenantSlugWorkspaceRoute
   '/booking': typeof AuthenticatedBookingRoute
   '/cases': typeof AuthenticatedCasesRoute
   '/diary': typeof AuthenticatedDiaryRoute
@@ -293,6 +331,8 @@ export interface FileRoutesByTo {
   '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
   '/raf/$code': typeof RafCodeRoute
+  '/$tenantSlug': typeof TenantSlugIndexRoute
+  '/$tenantSlug/ref/$introducerRef': typeof TenantSlugRefIntroducerRefRoute
   '/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
@@ -316,9 +356,12 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/$tenantSlug': typeof TenantSlugRouteRouteWithChildren
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRouteWithChildren
   '/register': typeof RegisterRoute
+  '/$tenantSlug/login': typeof TenantSlugLoginRoute
+  '/$tenantSlug/workspace': typeof TenantSlugWorkspaceRoute
   '/_authenticated/booking': typeof AuthenticatedBookingRoute
   '/_authenticated/cases': typeof AuthenticatedCasesRoute
   '/_authenticated/diary': typeof AuthenticatedDiaryRoute
@@ -332,6 +375,8 @@ export interface FileRoutesById {
   '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
   '/raf/$code': typeof RafCodeRoute
+  '/$tenantSlug/': typeof TenantSlugIndexRoute
+  '/$tenantSlug/ref/$introducerRef': typeof TenantSlugRefIntroducerRefRoute
   '/_authenticated/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/_authenticated/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/_authenticated/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
@@ -356,8 +401,11 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/$tenantSlug'
     | '/auth'
     | '/register'
+    | '/$tenantSlug/login'
+    | '/$tenantSlug/workspace'
     | '/booking'
     | '/cases'
     | '/diary'
@@ -371,6 +419,8 @@ export interface FileRouteTypes {
     | '/book/$slug'
     | '/go/$slug'
     | '/raf/$code'
+    | '/$tenantSlug/'
+    | '/$tenantSlug/ref/$introducerRef'
     | '/chat/$sessionId'
     | '/customers/$customerId'
     | '/interview/$sessionId'
@@ -395,6 +445,8 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/register'
+    | '/$tenantSlug/login'
+    | '/$tenantSlug/workspace'
     | '/booking'
     | '/cases'
     | '/diary'
@@ -408,6 +460,8 @@ export interface FileRouteTypes {
     | '/book/$slug'
     | '/go/$slug'
     | '/raf/$code'
+    | '/$tenantSlug'
+    | '/$tenantSlug/ref/$introducerRef'
     | '/chat/$sessionId'
     | '/customers/$customerId'
     | '/interview/$sessionId'
@@ -430,9 +484,12 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/$tenantSlug'
     | '/_authenticated'
     | '/auth'
     | '/register'
+    | '/$tenantSlug/login'
+    | '/$tenantSlug/workspace'
     | '/_authenticated/booking'
     | '/_authenticated/cases'
     | '/_authenticated/diary'
@@ -446,6 +503,8 @@ export interface FileRouteTypes {
     | '/book/$slug'
     | '/go/$slug'
     | '/raf/$code'
+    | '/$tenantSlug/'
+    | '/$tenantSlug/ref/$introducerRef'
     | '/_authenticated/chat/$sessionId'
     | '/_authenticated/customers/$customerId'
     | '/_authenticated/interview/$sessionId'
@@ -469,6 +528,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  TenantSlugRouteRoute: typeof TenantSlugRouteRouteWithChildren
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRouteWithChildren
   RegisterRoute: typeof RegisterRoute
@@ -518,12 +578,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/$tenantSlug': {
+      id: '/$tenantSlug'
+      path: '/$tenantSlug'
+      fullPath: '/$tenantSlug'
+      preLoaderRoute: typeof TenantSlugRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/$tenantSlug/': {
+      id: '/$tenantSlug/'
+      path: '/'
+      fullPath: '/$tenantSlug/'
+      preLoaderRoute: typeof TenantSlugIndexRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
     }
     '/raf/$code': {
       id: '/raf/$code'
@@ -616,6 +690,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedBookingRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/$tenantSlug/workspace': {
+      id: '/$tenantSlug/workspace'
+      path: '/workspace'
+      fullPath: '/$tenantSlug/workspace'
+      preLoaderRoute: typeof TenantSlugWorkspaceRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
+    '/$tenantSlug/login': {
+      id: '/$tenantSlug/login'
+      path: '/login'
+      fullPath: '/$tenantSlug/login'
+      preLoaderRoute: typeof TenantSlugLoginRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
     '/api/teams/callback': {
       id: '/api/teams/callback'
       path: '/api/teams/callback'
@@ -693,6 +781,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChatSessionIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/$tenantSlug/ref/$introducerRef': {
+      id: '/$tenantSlug/ref/$introducerRef'
+      path: '/ref/$introducerRef'
+      fullPath: '/$tenantSlug/ref/$introducerRef'
+      preLoaderRoute: typeof TenantSlugRefIntroducerRefRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
     '/api/twilio/voice/voicemail-done': {
       id: '/api/twilio/voice/voicemail-done'
       path: '/api/twilio/voice/voicemail-done'
@@ -752,6 +847,24 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface TenantSlugRouteRouteChildren {
+  TenantSlugLoginRoute: typeof TenantSlugLoginRoute
+  TenantSlugWorkspaceRoute: typeof TenantSlugWorkspaceRoute
+  TenantSlugIndexRoute: typeof TenantSlugIndexRoute
+  TenantSlugRefIntroducerRefRoute: typeof TenantSlugRefIntroducerRefRoute
+}
+
+const TenantSlugRouteRouteChildren: TenantSlugRouteRouteChildren = {
+  TenantSlugLoginRoute: TenantSlugLoginRoute,
+  TenantSlugWorkspaceRoute: TenantSlugWorkspaceRoute,
+  TenantSlugIndexRoute: TenantSlugIndexRoute,
+  TenantSlugRefIntroducerRefRoute: TenantSlugRefIntroducerRefRoute,
+}
+
+const TenantSlugRouteRouteWithChildren = TenantSlugRouteRoute._addFileChildren(
+  TenantSlugRouteRouteChildren,
+)
+
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedBookingRoute: typeof AuthenticatedBookingRoute
   AuthenticatedCasesRoute: typeof AuthenticatedCasesRoute
@@ -793,6 +906,7 @@ const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  TenantSlugRouteRoute: TenantSlugRouteRouteWithChildren,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRouteWithChildren,
   RegisterRoute: RegisterRoute,

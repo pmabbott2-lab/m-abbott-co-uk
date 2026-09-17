@@ -1,5 +1,5 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   goToPasswordRecoveryPage,
@@ -8,120 +8,109 @@ import {
   shouldBlockAuthenticatedApp,
 } from "@/lib/auth-recovery";
 import { Button } from "@/components/ui/button";
-import { CalendarCheck, MessageSquare, Mic } from "lucide-react";
-import avatarImg from "@/assets/susan.png";
+import { listActiveTenantSummariesFn } from "@/lib/tenant-presentation.server";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Mortgage Hub — Voice, Chat & Appointments" },
+      { title: "Mortgage Hub" },
       {
         name: "description",
-        content:
-          "Create your account with Susan — talk or type your fact-find, or book an appointment. You only need your name, email, phone and a password.",
+        content: "Mortgage Hub — multi-firm mortgage advice platform.",
       },
     ],
   }),
-  component: Landing,
+  loader: async () => {
+    try {
+      const firms = await listActiveTenantSummariesFn();
+      return { firms };
+    } catch {
+      return { firms: [] as Array<{ slug: string; companyName: string; companyCode: string }> };
+    }
+  },
+  component: PlatformRoot,
 });
 
-function Landing() {
+/**
+ * Gate G4 platform root.
+ * This is Mortgage Hub — not Mortgage Easy.
+ * Does not redirect to 001.
+ */
+function PlatformRoot() {
   const navigate = useNavigate();
+  const { firms } = Route.useLoaderData();
+  const [signedIn, setSignedIn] = useState(false);
 
   useEffect(() => {
     if (isPasswordRecoveryUrl()) {
       goToPasswordRecoveryPage();
       return;
     }
-    if (isPasswordRecoveryPending()) {
+    if (isPasswordRecoveryPending() || shouldBlockAuthenticatedApp()) {
       window.location.replace("/auth/reset");
       return;
     }
-    if (shouldBlockAuthenticatedApp()) {
-      window.location.replace("/auth/reset");
-      return;
-    }
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) navigate({ to: "/home" });
-    });
 
     void supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/home" });
+      setSignedIn(Boolean(data.session));
     });
-
-    return () => subscription.unsubscribe();
-  }, [navigate]);
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="px-6 py-5 flex items-center justify-between max-w-6xl mx-auto">
+      <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
         <a href="/" className="flex items-center gap-2 font-semibold text-foreground no-underline">
-          <span className="inline-block w-7 h-7 rounded-full bg-accent" />
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-xs font-bold text-primary-foreground">
+            MH
+          </span>
           Mortgage Hub
         </a>
-        <a href="/auth"><Button variant="ghost">Sign in</Button></a>
+        <div className="flex items-center gap-2">
+          {signedIn ? (
+            <Button variant="ghost" onClick={() => void navigate({ to: "/home" })}>
+              Open workspace
+            </Button>
+          ) : (
+            <a href="/auth">
+              <Button variant="ghost">Platform sign in</Button>
+            </a>
+          )}
+        </div>
       </header>
-      <main className="max-w-6xl mx-auto px-6 pt-12 pb-24 space-y-16">
-        <section className="grid md:grid-cols-2 gap-12 items-center">
-          <div className="space-y-6">
-            <h1 className="text-4xl md:text-5xl font-semibold tracking-tight text-foreground leading-[1.1]">
-              Get your mortgage advisor up to speed — before you even meet.
-            </h1>
-            <p className="text-lg text-muted-foreground">
-              Create your account, then answer simple questions about you, your job, and the property
-              you want. Talk to Susan in a spoken fact-find, or type quietly in chat — we'll hand a
-              clean summary to your advisor.
-            </p>
-            <div className="flex flex-wrap gap-3">
-              <a href="/auth?join=1"><Button size="lg">Get started</Button></a>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              To get started we only need your <span className="font-medium text-foreground">name</span>,{" "}
-              <span className="font-medium text-foreground">email address</span>,{" "}
-              <span className="font-medium text-foreground">telephone number</span> and a{" "}
-              <span className="font-medium text-foreground">password</span> to set up your account.
-            </p>
-          </div>
-          <div className="flex items-center justify-center">
-            <div className="rounded-3xl bg-card border shadow-sm p-8">
-              <img src={avatarImg} alt="Your interview guide" width={320} height={320} className="w-80 h-80 rounded-full object-cover object-top" />
-              <p className="mt-4 text-center text-sm text-muted-foreground">Susan can speak each question aloud — or chat by text.</p>
-            </div>
-          </div>
+
+      <main className="mx-auto max-w-5xl space-y-12 px-6 pb-24 pt-10">
+        <section className="max-w-2xl space-y-4">
+          <p className="text-sm font-medium text-muted-foreground">Platform</p>
+          <h1 className="text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
+            Mortgage Hub
+          </h1>
+          <p className="text-lg text-muted-foreground">
+            One application for multiple advice firms. Choose your firm below to open its branded
+            workspace. Access to firm data still requires membership — a URL never grants
+            authority.
+          </p>
         </section>
 
         <section>
-          <h2 className="text-xl font-semibold mb-1">Choose how you'd like to get started</h2>
-          <p className="text-sm text-muted-foreground mb-4">
-            Talk or type with Susan after you create your account — or book an appointment first.
-          </p>
-          <div className="grid sm:grid-cols-3 gap-4">
-            <a href="/auth?join=1&start=voice" className="rounded-2xl border bg-card p-5 transition hover:border-accent hover:shadow-sm no-underline text-foreground">
-              <Mic className="w-7 h-7 mb-3 text-accent" />
-              <h3 className="font-semibold">Verbal interview</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                Create your account, then talk through your details with Susan in a spoken fact-find.
-              </p>
-              <p className="text-sm font-medium text-accent mt-3">Get started →</p>
-            </a>
-            <a href="/auth?join=1&start=chat" className="rounded-2xl border bg-card p-5 transition hover:border-accent hover:shadow-sm no-underline text-foreground">
-              <MessageSquare className="w-7 h-7 mb-3 text-accent" />
-              <h3 className="font-semibold">Text interview</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                Create your account, then answer the same questions in a quiet typed chat.
-              </p>
-              <p className="text-sm font-medium text-accent mt-3">Create account →</p>
-            </a>
-            <a href="/auth?join=1&start=book" className="rounded-2xl border bg-card p-5 transition hover:border-accent hover:shadow-sm no-underline text-foreground">
-              <CalendarCheck className="w-7 h-7 mb-3 text-accent" />
-              <h3 className="font-semibold">Book an appointment</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                Pick a time with your advisor first — appointment-first signup with our diary.
-              </p>
-              <p className="text-sm font-medium text-accent mt-3">Book appointment →</p>
-            </a>
-          </div>
+          <h2 className="mb-4 text-lg font-semibold text-foreground">Firms on this platform</h2>
+          {firms.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No active firms are listed right now.</p>
+          ) : (
+            <ul className="grid gap-3 sm:grid-cols-2">
+              {firms.map((f) => (
+                <li key={f.slug}>
+                  <Link
+                    to="/$tenantSlug"
+                    params={{ tenantSlug: f.slug }}
+                    className="block rounded-xl border bg-card p-5 text-foreground no-underline transition hover:border-primary/40 hover:shadow-sm"
+                  >
+                    <p className="font-semibold">{f.companyName}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">/{f.slug}</p>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       </main>
     </div>

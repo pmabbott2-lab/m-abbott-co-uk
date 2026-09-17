@@ -3,7 +3,7 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 import { type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { getMarketingSiteUrl } from "@/lib/referral";
+import { useTenantUi } from "@/lib/tenant-ui";
 
 export function AppShell({
   title,
@@ -21,9 +21,17 @@ export function AppShell({
   backLabel?: string;
 }) {
   const navigate = useNavigate();
-  const mortgageEasyUrl = getMarketingSiteUrl();
+  const tenant = useTenantUi();
+  const companyWebsite = tenant?.websiteUrl?.trim() || null;
+  const companyLabel = tenant?.tradingName || tenant?.companyName || null;
   const signOut = async () => {
     await supabase.auth.signOut();
+    try {
+      sessionStorage.removeItem("mh:ui-tenant-slug");
+      sessionStorage.removeItem("mh:ui-tenant-id");
+    } catch {
+      /* ignore */
+    }
     navigate({ to: "/auth", replace: true });
   };
   return (
@@ -34,17 +42,28 @@ export function AppShell({
             <span className="inline-flex w-7 h-7 items-center justify-center rounded-lg bg-primary text-primary-foreground text-xs font-bold shadow-sm">
               MH
             </span>
-            <span className="hidden sm:inline">Mortgage Hub</span>
+            <span className="hidden sm:inline">
+              {companyLabel ? (
+                <>
+                  <span className="text-foreground">{companyLabel}</span>
+                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">via Mortgage Hub</span>
+                </>
+              ) : (
+                "Mortgage Hub"
+              )}
+            </span>
           </Link>
           <h1 className="text-sm font-medium text-muted-foreground hidden sm:block min-w-0 truncate">{title}</h1>
           <div className="flex items-center justify-end gap-1 sm:gap-2 min-w-0">
             {action}
-            <Button variant="ghost" size="sm" className="shrink-0 px-2 sm:px-3" asChild>
-              <a href={mortgageEasyUrl} target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="w-4 h-4 sm:mr-1.5" />
-                <span className="hidden sm:inline">MortgageEasy</span>
-              </a>
-            </Button>
+            {companyWebsite ? (
+              <Button variant="ghost" size="sm" className="shrink-0 px-2 sm:px-3" asChild>
+                <a href={companyWebsite} rel="noopener noreferrer">
+                  <ExternalLink className="w-4 h-4 sm:mr-1.5" />
+                  <span className="hidden sm:inline">Company website</span>
+                </a>
+              </Button>
+            ) : null}
             {backTo && (
               <Button
                 variant="ghost"

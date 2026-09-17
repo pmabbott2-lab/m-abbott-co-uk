@@ -26,6 +26,7 @@ import {
   readPostAuthStart,
   readPostAuthStartFromUrl,
   readAuthEntryFromLocation,
+  readTenantSlugFromLocation,
   resolvePostAuthStart,
   savePostAuthStart,
   syncPostAuthStart,
@@ -71,11 +72,14 @@ export const Route = createFileRoute("/auth")({
       search.mode === "signup" ||
       search.mode === "join" ||
       start !== undefined;
+    const tenantRaw = typeof search.tenant === "string" ? search.tenant.trim().toLowerCase() : "";
+    const tenant = /^[a-z0-9-]{2,64}$/.test(tenantRaw) ? tenantRaw : undefined;
     return {
       recovery: search.recovery === "1" || search.recovery === 1 || search.recovery === true,
       join,
       fromBroker,
       start,
+      tenant,
     };
   },
   head: () => ({
@@ -96,10 +100,11 @@ function AuthPage() {
   // mismatches that a window-location check would cause.
   const matches = useMatches();
   const isChildRoute = matches.some((m) => m.routeId === "/auth/reset");
-  const { recovery, fromBroker } = Route.useSearch();
+  const { recovery, fromBroker, tenant: tenantFromSearch } = Route.useSearch();
   const urlIntent = readAuthEntryFromLocation();
   const journeyStart = urlIntent.start;
   const effectiveJoin = urlIntent.join;
+  const tenantSlug = tenantFromSearch ?? readTenantSlugFromLocation();
   const [mode, setMode] = useState<AuthMode>(() => {
     if (typeof window === "undefined") return "signin";
     return readAuthEntryFromLocation().join ? "signup" : "signin";
@@ -138,7 +143,7 @@ function AuthPage() {
   const goHomeAfterAuth = (routeStart?: typeof journeyStart) => {
     const pendingStart =
       mode === "signin" ? null : resolvePostAuthStart(routeStart ?? journeyStart);
-    window.location.assign(buildHomePathAfterAuth(pendingStart));
+    window.location.assign(buildHomePathAfterAuth(pendingStart, tenantSlug));
   };
 
   const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
@@ -310,7 +315,7 @@ function AuthPage() {
       }
       // Full reload so /_authenticated beforeLoad always sees a stored session.
       const pendingStart = mode === "signin" ? null : resolvePostAuthStart(journeyStart);
-      window.location.assign(buildHomePathAfterAuth(pendingStart));
+      window.location.assign(buildHomePathAfterAuth(pendingStart, tenantSlug));
     } finally {
       // Keep in-flight true through navigation; unload clears it.
     }
