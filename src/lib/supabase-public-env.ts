@@ -21,6 +21,11 @@ function trim(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/** Azure App Settings sometimes include a trailing slash; Supabase clients expect the bare project URL. */
+function normalizeSupabaseUrl(value: string): string {
+  return trim(value).replace(/\/+$/, "");
+}
+
 /**
  * Read process.env by dynamic key.
  * Vite client builds replace static `process.env` / `process.env.FOO` with `{}` / literals;
@@ -41,7 +46,7 @@ function readProcessEnv(name: string): string {
 /** Server/runtime process.env, including Azure App Settings. */
 function fromProcess(): PublicSupabaseEnv {
   return {
-    url: readProcessEnv("SUPABASE_URL") || readProcessEnv("VITE_SUPABASE_URL"),
+    url: normalizeSupabaseUrl(readProcessEnv("SUPABASE_URL") || readProcessEnv("VITE_SUPABASE_URL")),
     publishableKey:
       readProcessEnv("SUPABASE_PUBLISHABLE_KEY") || readProcessEnv("VITE_SUPABASE_PUBLISHABLE_KEY"),
   };
@@ -50,7 +55,7 @@ function fromProcess(): PublicSupabaseEnv {
 /** Vite build-time public env (present when VITE_* was available during `vite build`). */
 function fromVite(): PublicSupabaseEnv {
   return {
-    url: trim(import.meta.env.VITE_SUPABASE_URL),
+    url: normalizeSupabaseUrl(import.meta.env.VITE_SUPABASE_URL),
     publishableKey: trim(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY),
   };
 }
@@ -60,7 +65,7 @@ function fromWindow(): PublicSupabaseEnv {
   if (typeof window === "undefined") return { url: "", publishableKey: "" };
   const injected = window.__MH_PUBLIC_ENV__;
   return {
-    url: trim(injected?.SUPABASE_URL),
+    url: normalizeSupabaseUrl(injected?.SUPABASE_URL ?? ""),
     publishableKey: trim(injected?.SUPABASE_PUBLISHABLE_KEY),
   };
 }
