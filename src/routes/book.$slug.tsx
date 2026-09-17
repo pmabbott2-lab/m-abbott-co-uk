@@ -8,6 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createAppointment, getAvailableSlots, getLeadForBooking } from "@/lib/booking.functions";
+import { bookingCalendarDisabled } from "@/lib/booking-calendar";
+import {
+  BookingAdvisorPicker,
+  advisorChoiceToPayload,
+  type AdvisorChoice,
+} from "@/components/BookingAdvisorPicker";
 import { resolveReferralSlug } from "@/lib/introducer.functions";
 import { setReferralCookie } from "@/lib/referral";
 import { CalendarCheck, CheckCircle2 } from "lucide-react";
@@ -33,6 +39,7 @@ function DirectBookingPage() {
 
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [advisorChoice, setAdvisorChoice] = useState<AdvisorChoice>("any");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
@@ -63,14 +70,19 @@ function DirectBookingPage() {
 
   const dateKey = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null;
   const slotsQ = useQuery({
-    queryKey: ["available-slots", dateKey],
-    queryFn: () => slotsFn({ data: { date: dateKey! } }),
+    queryKey: ["available-slots", dateKey, "pool"],
+    queryFn: () => slotsFn({ data: { date: dateKey!, pool: true } }),
     enabled: Boolean(dateKey),
   });
+  const advisorsForSlot =
+    selectedSlot && slotsQ.data?.advisorsBySlot
+      ? (slotsQ.data.advisorsBySlot[selectedSlot] ?? [])
+      : [];
 
   const book = useMutation({
-    mutationFn: () =>
-      bookFn({
+    mutationFn: () => {
+      const adv = advisorChoiceToPayload(advisorChoice);
+      return bookFn({
         data: {
           slug,
           leadId,
@@ -78,8 +90,10 @@ function DirectBookingPage() {
           customerPhone,
           customerEmail,
           startsAt: selectedSlot!,
+          ...adv,
         },
-      }),
+      });
+    },
     onSuccess: () => setBooked(true),
   });
 
@@ -93,7 +107,9 @@ function DirectBookingPage() {
         <div className="text-center space-y-3">
           <h1 className="text-xl font-semibold">Booking link not found</h1>
           <p className="text-sm text-muted-foreground">This link may be invalid or inactive.</p>
-          <Link to="/"><Button variant="outline">Go home</Button></Link>
+          <Link to="/auth">
+            <Button variant="outline">Go to sign in</Button>
+          </Link>
         </div>
       </div>
     );
@@ -111,7 +127,9 @@ function DirectBookingPage() {
             You&apos;ll receive a text confirmation if SMS is enabled. Your advisor will call you at the
             scheduled time.
           </p>
-          <Link to="/"><Button>Done</Button></Link>
+          <Link to="/auth">
+            <Button>Done</Button>
+          </Link>
         </div>
       </div>
     );
@@ -124,7 +142,9 @@ function DirectBookingPage() {
           <CalendarCheck className="w-5 h-5" />
           Book an appointment
         </div>
-        <Link to="/" className="text-sm text-muted-foreground hover:text-foreground">Home</Link>
+        <Link to="/auth" className="text-sm text-muted-foreground hover:text-foreground">
+          Sign in
+        </Link>
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-8 space-y-8">
@@ -132,7 +152,7 @@ function DirectBookingPage() {
           <p className="text-sm text-muted-foreground">Referred by</p>
           <h1 className="text-2xl font-semibold">{introducer.company_name}</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Pick a date and time — no fact-find required. You can complete that later if you prefer.
+            Pick a weekday and time — no fact-find required. You can complete that later if you prefer.
           </p>
         </div>
 
@@ -145,8 +165,9 @@ function DirectBookingPage() {
               onSelect={(d) => {
                 setSelectedDate(d);
                 setSelectedSlot(null);
+                setAdvisorChoice("any");
               }}
-              disabled={{ before: new Date() }}
+              disabled={bookingCalendarDisabled}
             />
           </div>
 
@@ -154,14 +175,24 @@ function DirectBookingPage() {
             <div>
               <h2 className="font-medium mb-3">Available times</h2>
               {!selectedDate && (
-                <p className="text-sm text-muted-foreground">Select a date to see available slots.</p>
+                <p className="text-sm text-muted-foreground">Select a weekday to see available slots.</p>
               )}
               {selectedDate && slotsQ.isLoading && (
                 <p className="text-sm text-muted-foreground">Loading slots…</p>
               )}
-              {selectedDate && slotsQ.data?.slots.length === 0 && (
-                <p className="text-sm text-muted-foreground">No slots available on this day.</p>
+              {selectedDate && slotsQ.isError && (
+                <p className="text-sm text-destructive">
+                  {(slotsQ.error as Error)?.message || "Could not load times."}
+                </p>
               )}
+              {selectedDate &&
+                !slotsQ.isLoading &&
+                !slotsQ.isError &&
+                (slotsQ.data?.slots.length ?? 0) === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    No slots on this day (weekdays 9am–5pm). Try another weekday.
+                  </p>
+                )}
               <div className="grid grid-cols-2 gap-2">
                 {(slotsQ.data?.slots ?? []).map((slot) => (
                   <Button
@@ -169,13 +200,23 @@ function DirectBookingPage() {
                     type="button"
                     variant={selectedSlot === slot ? "default" : "outline"}
                     size="sm"
-                    onClick={() => setSelectedSlot(slot)}
+                    onClick={() => {
+                      setSelectedSlot(slot);
+                      setAdvisorChoice("any");
+                    }}
                   >
                     {format(new Date(slot), "HH:mm")}
                   </Button>
                 ))}
               </div>
             </div>
+
+            <BookingAdvisorPicker
+              selectedSlot={selectedSlot}
+              advisorsForSlot={advisorsForSlot}
+              value={advisorChoice}
+              onChange={setAdvisorChoice}
+            />
 
             <div className="rounded-2xl border bg-card p-4 space-y-4">
               <h2 className="font-medium">Your details</h2>
@@ -189,7 +230,12 @@ function DirectBookingPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="email">Email (optional)</Label>
-                <Input id="email" type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} />
+                <Input
+                  id="email"
+                  type="email"
+                  value={customerEmail}
+                  onChange={(e) => setCustomerEmail(e.target.value)}
+                />
               </div>
               <Button
                 className="w-full"

@@ -25,6 +25,7 @@ import {
   advisorChoiceToPayload,
   type AdvisorChoice,
 } from "@/components/BookingAdvisorPicker";
+import { bookingCalendarDisabled } from "@/lib/booking-calendar";
 import { CalendarCheck, CheckCircle2, Mail, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 
@@ -110,7 +111,15 @@ export function IntroducerCustomerBookingCard({
       if (sendLink.variables === "email" && res.mailto) {
         window.location.href = res.mailto;
       }
-      toast.success(sendLink.variables === "sms" ? "Booking link sent by text" : "Email draft opened");
+      if (sendLink.variables === "sms" && "smsError" in res && res.smsError) {
+        toast.error(String(res.smsError));
+      } else if (sendLink.variables === "sms" && "smsSent" in res && res.smsSent) {
+        toast.success("Booking link sent by text");
+      } else if (sendLink.variables === "email") {
+        toast.success("Email draft opened — link also ready to copy");
+      } else {
+        toast.success("Booking link ready to copy");
+      }
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not send link"),
   });
@@ -234,17 +243,30 @@ export function IntroducerCustomerBookingCard({
                         setSelectedSlot(null);
                         setAdvisorChoice("any");
                       }}
-                      disabled={{ before: new Date() }}
+                      disabled={bookingCalendarDisabled}
                     />
                   </div>
                   <div>
                     <h4 className="text-sm font-medium mb-2">Time</h4>
                     {!selectedDate && (
-                      <p className="text-sm text-muted-foreground">Select a date first.</p>
+                      <p className="text-sm text-muted-foreground">Select a date first (weekdays only).</p>
                     )}
                     {selectedDate && slotsQ.isLoading && (
                       <p className="text-sm text-muted-foreground">Loading slots…</p>
                     )}
+                    {selectedDate && slotsQ.isError && (
+                      <p className="text-sm text-destructive">
+                        {(slotsQ.error as Error)?.message || "Could not load times."}
+                      </p>
+                    )}
+                    {selectedDate &&
+                      !slotsQ.isLoading &&
+                      !slotsQ.isError &&
+                      (slotsQ.data?.slots.length ?? 0) === 0 && (
+                        <p className="text-sm text-muted-foreground">
+                          No times on this day (weekdays 9am–5pm). Try another weekday.
+                        </p>
+                      )}
                     <div className="grid grid-cols-2 gap-2">
                       {(slotsQ.data?.slots ?? []).map((slot) => (
                         <Button

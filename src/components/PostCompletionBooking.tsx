@@ -13,6 +13,7 @@ import {
   requestSessionCallback,
 } from "@/lib/booking.functions";
 import { getReferralSlug } from "@/lib/referral";
+import { bookingCalendarDisabled } from "@/lib/booking-calendar";
 import {
   BookingAdvisorPicker,
   advisorChoiceToPayload,
@@ -178,7 +179,7 @@ export function PostCompletionBooking({
                 setSelectedSlot(null);
                 setAdvisorChoice("any");
               }}
-              disabled={{ before: new Date() }}
+              disabled={bookingCalendarDisabled}
             />
           </div>
 
@@ -186,7 +187,7 @@ export function PostCompletionBooking({
             <div>
               <h3 className="font-medium mb-3">Available times</h3>
               {!selectedDate && (
-                <p className="text-sm text-muted-foreground">Select a date to see available slots.</p>
+                <p className="text-sm text-muted-foreground">Select a weekday to see available slots.</p>
               )}
               {selectedDate && slotsQ.isLoading && (
                 <p className="text-sm text-muted-foreground">Loading slots…</p>

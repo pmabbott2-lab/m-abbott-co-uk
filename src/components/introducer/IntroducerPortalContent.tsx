@@ -15,6 +15,7 @@ import {
 } from "@/lib/introducer.functions";
 import { sendLeadBookingSms } from "@/lib/booking.functions";
 import {
+  bookingLinkForSlug,
   marketingCalculatorLinkForSlug,
   marketingJourneyLinkForSlug,
   referralLinkForSlug,
@@ -186,7 +187,11 @@ export function IntroducerPortalContent({
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <Input readOnly value={referralUrl} className="font-mono text-sm" />
-          <CopyLinkButton url={referralUrl} label="Copy link" />
+          <CopyLinkButton url={referralUrl} label="Copy hub link" />
+        </div>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Input readOnly value={bookingLinkForSlug(profile.slug)} className="font-mono text-sm" />
+          <CopyLinkButton url={bookingLinkForSlug(profile.slug)} label="Copy book link" />
         </div>
       </section>
 

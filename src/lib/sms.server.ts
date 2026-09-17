@@ -93,7 +93,12 @@ export async function sendSms(opts: {
 }
 
 export function getAppBaseUrl(): string {
-  return process.env.APP_BASE_URL ?? "http://localhost:5173";
+  const fromEnv =
+    process.env.APP_BASE_URL?.trim() ||
+    process.env.VITE_APP_URL?.trim() ||
+    process.env.APP_URL?.trim();
+  if (fromEnv) return fromEnv.replace(/\/$/, "");
+  return "http://localhost:5173";
 }
 
 export function bookingConfirmationMessage(opts: {

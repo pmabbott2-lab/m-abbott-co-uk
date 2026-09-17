@@ -25,9 +25,7 @@ function ReferralRedirect() {
           return;
         }
         setReferralCookie(introducer.slug);
-        // Send the customer to the public landing page so they can self-serve
-        // (verbal, text, or book). The referral cookie keeps the introducer
-        // attached to whatever session/appointment they create.
+        // Public landing (voice / chat / book). Referral cookie keeps the introducer attached.
         navigate({ to: "/" });
       } catch {
         if (!cancelled) setError("Something went wrong. Please try again later.");

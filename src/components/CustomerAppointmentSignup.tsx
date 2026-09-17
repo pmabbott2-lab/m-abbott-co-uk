@@ -11,6 +11,7 @@ import {
   customerAppointmentSignup,
   getAvailableSlots,
 } from "@/lib/booking.functions";
+import { bookingCalendarDisabled } from "@/lib/booking-calendar";
 import {
   BookingAdvisorPicker,
   advisorChoiceToPayload,
@@ -288,7 +289,7 @@ export function CustomerAppointmentSignup({
               setSelectedSlot(null);
               setAdvisorChoice("any");
             }}
-            disabled={{ before: new Date() }}
+            disabled={bookingCalendarDisabled}
             className="mx-auto"
           />
           <div>

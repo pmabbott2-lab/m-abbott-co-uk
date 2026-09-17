@@ -94,7 +94,7 @@ async function listBookableAdvisors(): Promise<BookableAdvisor[]> {
 
   const { data: advProfiles } = await supabaseAdmin
     .from("advisor_profiles")
-    .select("user_id, deleted_at, teams_calendar_enabled, ms_refresh_token")
+    .select("user_id, deleted_at, teams_calendar_enabled, teams_calendar_linked_at")
     .in("user_id", ids);
 
   const advById = new Map(
@@ -104,7 +104,7 @@ async function listBookableAdvisors(): Promise<BookableAdvisor[]> {
         user_id: string;
         deleted_at?: string | null;
         teams_calendar_enabled?: boolean | null;
-        ms_refresh_token?: string | null;
+        teams_calendar_linked_at?: string | null;
       },
     ]),
   );
@@ -115,7 +115,8 @@ async function listBookableAdvisors(): Promise<BookableAdvisor[]> {
     if (ap?.deleted_at) continue;
     const email = p.email ?? null;
     const isTest = isTestAccountEmail(email);
-    const teamsLinked = Boolean(ap?.teams_calendar_enabled && ap?.ms_refresh_token);
+    const teamsLinked = Boolean(ap?.teams_calendar_enabled);
+    // Live advisors need Teams/Outlook linked. Test advisors stay bookable on Hub hours.
     if (!isTest && !teamsLinked) continue;
     out.push({
       id: p.id,
@@ -2930,9 +2931,8 @@ export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertStaffBookingAccess(context.userId);
-    if (data.sendSms !== false && !isTwilioConfigured()) {
-      throw new Error("SMS is not configured — copy the booking link instead.");
-    }
+    const twilioOk = isTwilioConfigured();
+    const wantSms = data.sendSms !== false;
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const introducerId = await ensureStaffIntroducerRecord(context.userId);
@@ -2942,6 +2942,7 @@ export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
       .eq("id", introducerId)
       .single();
     if (introErr) throw new Error(introErr.message);
+    if (!introducer?.slug) throw new Error("Booking link profile is not set up yet.");
 
     const phone = normaliseUkPhone(data.customerPhone);
     const { data: lead, error: leadErr } = await supabaseAdmin
@@ -2965,25 +2966,42 @@ export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
       introducerName: introducer.company_name ?? "Your advisor",
     });
 
-    if (data.sendSms !== false && isTwilioConfigured()) {
-      const { sid } = await sendSms({ to: phone, body });
-      await logSms({
-        direction: "outbound",
-        from: getSmsSenderLabel(),
-        to: phone,
-        body,
-        twilioSid: sid,
-        leadId: lead.id,
-      });
-      await supabaseAdmin
-        .from("introducer_leads")
-        .update({ status: "contacted" })
-        .eq("id", lead.id);
+    let smsSent = false;
+    let smsError: string | null = null;
+    if (wantSms) {
+      if (!twilioOk) {
+        smsError = "SMS is not configured on this environment — copy or email the link instead.";
+      } else {
+        try {
+          const { sid } = await sendSms({ to: phone, body });
+          await logSms({
+            direction: "outbound",
+            from: getSmsSenderLabel(),
+            to: phone,
+            body,
+            twilioSid: sid,
+            leadId: lead.id,
+          });
+          await supabaseAdmin
+            .from("introducer_leads")
+            .update({ status: "contacted" })
+            .eq("id", lead.id);
+          smsSent = true;
+        } catch (e) {
+          smsError = e instanceof Error ? e.message : "Could not send SMS";
+        }
+      }
     }
 
     console.info(`[booking-email] Invite to ${data.customerEmail}: ${bookUrl}`);
 
-    return { ok: true as const, bookUrl, mailto: `mailto:${encodeURIComponent(data.customerEmail)}?subject=${encodeURIComponent("Book your mortgage appointment")}&body=${encodeURIComponent(`Hi ${data.customerName},\n\nPlease book a time using this link:\n\n${bookUrl}`)}` };
+    return {
+      ok: true as const,
+      bookUrl,
+      smsSent,
+      smsError,
+      mailto: `mailto:${encodeURIComponent(data.customerEmail)}?subject=${encodeURIComponent("Book your mortgage appointment")}&body=${encodeURIComponent(`Hi ${data.customerName},\n\nPlease book a time using this link:\n\n${bookUrl}`)}`,
+    };
   });
 
 async function assertIntroducerBookingAccess(userId: string): Promise<string> {
@@ -3105,17 +3123,20 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
     );
 
     const introducerId = await assertIntroducerBookingAccess(targetUserId);
-    if (data.sendSms !== false && !isTwilioConfigured()) {
-      throw new Error("SMS is not configured — copy the booking link instead.");
-    }
+    const twilioOk = isTwilioConfigured();
+    const wantSms = data.sendSms !== false;
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: introducer, error: introErr } = await supabaseAdmin
       .from("introducers")
-      .select("slug, company_name")
+      .select("slug, company_name, active")
       .eq("id", introducerId)
       .single();
     if (introErr) throw new Error(introErr.message);
+    if (!introducer?.slug) throw new Error("Introducer referral link is not set up yet.");
+    if (introducer.active === false) {
+      await supabaseAdmin.from("introducers").update({ active: true }).eq("id", introducerId);
+    }
 
     const phone = normaliseUkPhone(data.customerPhone);
     const { data: lead, error: leadErr } = await supabaseAdmin
@@ -3139,20 +3160,31 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
       introducerName: introducer.company_name ?? "Your introducer",
     });
 
-    if (data.sendSms !== false && isTwilioConfigured()) {
-      const { sid } = await sendSms({ to: phone, body });
-      await logSms({
-        direction: "outbound",
-        from: getSmsSenderLabel(),
-        to: phone,
-        body,
-        twilioSid: sid,
-        leadId: lead.id,
-      });
-      await supabaseAdmin
-        .from("introducer_leads")
-        .update({ status: "contacted" })
-        .eq("id", lead.id);
+    let smsSent = false;
+    let smsError: string | null = null;
+    if (wantSms) {
+      if (!twilioOk) {
+        smsError = "SMS is not configured on this environment — copy or email the link instead.";
+      } else {
+        try {
+          const { sid } = await sendSms({ to: phone, body });
+          await logSms({
+            direction: "outbound",
+            from: getSmsSenderLabel(),
+            to: phone,
+            body,
+            twilioSid: sid,
+            leadId: lead.id,
+          });
+          await supabaseAdmin
+            .from("introducer_leads")
+            .update({ status: "contacted" })
+            .eq("id", lead.id);
+          smsSent = true;
+        } catch (e) {
+          smsError = e instanceof Error ? e.message : "Could not send SMS";
+        }
+      }
     }
 
     if (viewAsMode) {
@@ -3172,6 +3204,8 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
     return {
       ok: true as const,
       bookUrl,
+      smsSent,
+      smsError,
       mailto: `mailto:${encodeURIComponent(data.customerEmail)}?subject=${encodeURIComponent("Book your mortgage appointment")}&body=${encodeURIComponent(`Hi ${data.customerName},\n\nPlease book a time using this link:\n\n${bookUrl}`)}`,
     };
   });

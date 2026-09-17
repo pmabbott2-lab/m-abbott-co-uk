@@ -1380,6 +1380,7 @@ async function grantIntroducerRole(
       company_name: base,
       slug,
       contact_email: profile?.email ?? null,
+      active: true,
     };
     const { error: insErr } = await supabaseAdmin
       .from("introducers")

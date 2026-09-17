@@ -20,6 +20,7 @@ import {
   bookCustomerAppointmentAsStaff,
   getAvailableSlots,
 } from "@/lib/booking.functions";
+import { bookingCalendarDisabled } from "@/lib/booking-calendar";
 import {
   BookingAdvisorPicker,
   advisorChoiceToPayload,
@@ -197,7 +198,7 @@ export function CustomerHubBookingDialog({
                     setSelectedSlot(null);
                     setAdvisorChoice("any");
                   }}
-                  disabled={{ before: new Date() }}
+                  disabled={bookingCalendarDisabled}
                 />
               </div>
 
@@ -205,7 +206,7 @@ export function CustomerHubBookingDialog({
                 <div>
                   <h4 className="text-sm font-medium mb-2">Time</h4>
                   {!selectedDate && (
-                    <p className="text-sm text-muted-foreground">Select a date first.</p>
+                    <p className="text-sm text-muted-foreground">Select a weekday first.</p>
                   )}
                   {selectedDate && slotsQ.isLoading && (
                     <p className="text-sm text-muted-foreground">Loading slots…</p>

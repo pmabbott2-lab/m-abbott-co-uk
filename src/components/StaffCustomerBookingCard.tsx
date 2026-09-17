@@ -25,6 +25,7 @@ import {
   advisorChoiceToPayload,
   type AdvisorChoice,
 } from "@/components/BookingAdvisorPicker";
+import { bookingCalendarDisabled } from "@/lib/booking-calendar";
 import { CalendarCheck, CheckCircle2, Mail, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 
@@ -98,7 +99,15 @@ export function StaffCustomerBookingCard({ onBooked }: { onBooked?: () => void }
       if (sendLink.variables === "email" && res.mailto) {
         window.location.href = res.mailto;
       }
-      toast.success(sendLink.variables === "sms" ? "Booking link sent by text" : "Email draft opened");
+      if (sendLink.variables === "sms" && "smsError" in res && res.smsError) {
+        toast.error(String(res.smsError));
+      } else if (sendLink.variables === "sms" && "smsSent" in res && res.smsSent) {
+        toast.success("Booking link sent by text");
+      } else if (sendLink.variables === "email") {
+        toast.success("Email draft opened — link also ready to copy");
+      } else {
+        toast.success("Booking link ready to copy");
+      }
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not send link"),
   });
@@ -222,7 +231,7 @@ export function StaffCustomerBookingCard({ onBooked }: { onBooked?: () => void }
                         setSelectedSlot(null);
                         setAdvisorChoice("any");
                       }}
-                      disabled={{ before: new Date() }}
+                      disabled={bookingCalendarDisabled}
                     />
                   </div>
                   <div>
