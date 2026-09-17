@@ -36,3 +36,4 @@ Backups/
 *.njsproj
 *.sln
 *.sw?
+backups/

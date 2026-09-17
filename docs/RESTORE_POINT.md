@@ -6,25 +6,27 @@ Tagged snapshots let you roll back application code safely. Database rows create
 
 ```bash
 cd ~/Projects/m-abbott-co-uk-main
-git checkout restore-point-2026-09-17-mmh-pre-twilio
+git checkout restore-point-2026-09-17-mmh-verified
 npm run build
 # Production is Azure (MMH). Do not rebuild Hub onto ngrok.
 ```
 
-**MMH pre–Twilio cutover** (`restore-point-2026-09-17-mmh-pre-twilio` → commit `0005cd5`):
+**MMH verified** (`restore-point-2026-09-17-mmh-verified` → commit `a990495`):
 
 - Hub live on `https://mymortgagehub.uk` (Azure)
-- Advisor booking pool + “I don’t mind”, introducer link fixes, Admin/network commission
-- Taken **before** Twilio voice/SMS webhooks moved from ngrok → MMH
-- Ngrok kept only for MortgageEasy / Trent Valley marketing until their own domains
+- Twilio voice/SMS webhooks on MMH (not ngrok)
+- Azure `SUPABASE_SERVICE_ROLE_KEY` corrected to `sb_secret_…`
+- Azure Twilio App Settings synced; confirmation SMS working
+- Dual verification suites passed (Twilio 17/17, site functions 12/12)
+- Taken **before** the next feature element
 
 ### Supabase
 
 | Record | Detail |
 |--------|--------|
-| Marker row | `public.platform_restore_points` name `restore-point-2026-09-17-mmh-pre-twilio` |
-| Counts at tag | 22 auth users, 22 profiles, 9 appointments, 39 sessions |
-| Full DB restore | Use **Supabase Dashboard → Database → Backups** (daily physical backup / PITR if enabled). Note the timestamp **2026-09-17 ~08:47 UTC** as the cutover moment. |
+| Marker row | `public.platform_restore_points` name `restore-point-2026-09-17-mmh-verified` |
+| Counts at tag | 22 auth users, 22 profiles, 11 appointments, 40 interview sessions |
+| Full DB restore | Use **Supabase Dashboard → Database → Backups** (daily physical backup / PITR if enabled). Note the timestamp **2026-09-17 ~10:38 UTC** as this restore-point moment. |
 
 > A git tag does **not** restore customer data. Always pair code tags with a Supabase backup/PITR window.
 
@@ -32,6 +34,7 @@ npm run build
 
 | Tag | Purpose |
 |-----|---------|
+| `restore-point-2026-09-17-mmh-verified` | **Current** — MMH + Twilio verified; before next feature |
 | `restore-point-2026-09-17-mmh-pre-twilio` | MMH live; before Twilio cutover off ngrok |
 | `restore-point-2026-09-15-hub-telephony` | Hub telephony: Manage tab, Amend allocate/reallocate, routing rules, Hub Susan VM, AMD |
 | `restore-point-2026-09-11-hub-mortgageeasy-trentvalley` | Whole stack lock: MortgageHub, MortgageEasy, Trent Valley marketing |
