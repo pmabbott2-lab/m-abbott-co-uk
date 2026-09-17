@@ -63,16 +63,12 @@ export function MyCommissionPipelinePanel({
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          Open commission (pending + received) created in{" "}
+          Open commission (received, not yet paid or rejected) created in{" "}
           {data.pipelineSummary.label.toLowerCase()}.
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="rounded-xl border bg-muted/20 p-3">
-            <p className="text-xs text-muted-foreground">Pending</p>
-            <p className="text-lg font-semibold mt-1">{formatPence(data.pipelineSummary.pendingPence)}</p>
-          </div>
-          <div className="rounded-xl border bg-muted/20 p-3">
-            <p className="text-xs text-muted-foreground">Received</p>
+            <p className="text-xs text-muted-foreground">Received (open)</p>
             <p className="text-lg font-semibold mt-1">{formatPence(data.pipelineSummary.receivedPence)}</p>
           </div>
           <div className="rounded-xl border bg-muted/20 p-3">
@@ -86,11 +82,9 @@ export function MyCommissionPipelinePanel({
         {(
           [
             ["all", "All"],
-            ["pending", "Pending"],
             ["received", "Received"],
             ["paid", "Paid"],
             ["rejected", "Rejected"],
-            ["lost", "Lost"],
           ] as const
         ).map(([value, label]) => (
           <Button

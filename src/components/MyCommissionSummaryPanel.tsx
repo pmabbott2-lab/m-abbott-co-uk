@@ -127,8 +127,8 @@ export function MyCommissionSummaryPanel({
           )}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          {(["paid", "pending", "received", "rejected", "lost"] as const).map((status) => (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {(["paid", "received", "rejected"] as const).map((status) => (
             <div key={status} className="rounded-xl border bg-muted/20 p-3">
               <p className="text-xs text-muted-foreground">{PAYOUT_STATUS_LABELS[status]}</p>
               <p className="text-lg font-semibold mt-1">
@@ -148,7 +148,6 @@ export function MyCommissionSummaryPanel({
                 <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <th className="p-2 font-medium sticky top-0 bg-muted/40">Month</th>
                   <th className="p-2 font-medium text-right sticky top-0 bg-muted/40">Paid</th>
-                  <th className="p-2 font-medium text-right sticky top-0 bg-muted/40">Pending</th>
                   <th className="p-2 font-medium text-right sticky top-0 bg-muted/40">Received</th>
                   <th className="p-2 font-medium text-right sticky top-0 bg-muted/40">Rejected</th>
                 </tr>
@@ -158,7 +157,6 @@ export function MyCommissionSummaryPanel({
                   <tr key={m.label}>
                     <td className="p-2">{m.label}</td>
                     <td className="p-2 text-right">{formatPence(m.totals.paid.amountPence)}</td>
-                    <td className="p-2 text-right">{formatPence(m.totals.pending.amountPence)}</td>
                     <td className="p-2 text-right">{formatPence(m.totals.received.amountPence)}</td>
                     <td className="p-2 text-right">{formatPence(m.totals.rejected.amountPence)}</td>
                   </tr>

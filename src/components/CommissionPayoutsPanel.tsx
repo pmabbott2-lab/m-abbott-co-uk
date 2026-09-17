@@ -28,7 +28,7 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
   const updateFn = useServerFn(updateCommissionPayoutStatus);
 
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("received");
   const [caseSearch, setCaseSearch] = useState("");
 
   const caseQuery = caseSearch.trim();
@@ -162,11 +162,9 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
           {(
             [
               ["all", "All statuses"],
-              ["pending", "Pending"],
               ["received", "Received"],
               ["paid", "Paid"],
               ["rejected", "Rejected"],
-              ["lost", "Lost"],
             ] as const
           ).map(([value, label]) => (
             <Button
@@ -307,13 +305,13 @@ function PayoutRow({
               onChange={(e) => onStatusChange(e.target.value as PayoutStatus)}
               aria-label="Payout status"
             >
-              {(["pending", "received", "paid", "rejected", "lost"] as const).map((s) => (
+              {(["received", "paid", "rejected"] as const).map((s) => (
                 <option key={s} value={s}>
                   {PAYOUT_STATUS_LABELS[s]}
                 </option>
               ))}
             </select>
-            {row.payoutStatus !== "rejected" && row.payoutStatus !== "lost" && (
+            {row.payoutStatus !== "rejected" && (
               <Button
                 type="button"
                 size="sm"

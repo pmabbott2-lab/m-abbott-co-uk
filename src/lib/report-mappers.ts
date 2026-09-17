@@ -99,7 +99,7 @@ export function commissionPeriodSummaryToSheet(
   return {
     name: "Period summary",
     headers: ["Status", "Count", "Amount (£)"],
-    rows: (["pending", "received", "paid", "rejected", "lost"] as const).map((status) => [
+    rows: (["received", "paid", "rejected"] as const).map((status) => [
       statusLabel(status),
       totals[status].count,
       penceToGbp(totals[status].amountPence),
@@ -110,14 +110,12 @@ export function commissionPeriodSummaryToSheet(
 export function commissionAnnualBreakdownToSheet(rows: MonthlyBreakdownRow[]): ExportSheet {
   return {
     name: "Monthly breakdown",
-    headers: ["Month", "Pending (£)", "Received (£)", "Paid (£)", "Rejected (£)", "Lost (£)"],
+    headers: ["Month", "Received (£)", "Paid (£)", "Rejected (£)"],
     rows: rows.map((m) => [
       m.label,
-      penceToGbp(m.totals.pending.amountPence),
       penceToGbp(m.totals.received.amountPence),
       penceToGbp(m.totals.paid.amountPence),
       penceToGbp(m.totals.rejected.amountPence),
-      penceToGbp(m.totals.lost.amountPence),
     ]),
   };
 }
@@ -128,12 +126,11 @@ export function commissionPipelineSummaryToSheet(
 ): ExportSheet {
   return {
     name: "Pipeline summary",
-    headers: ["Period", "Pending (£)", "Received (£)", "Total pipeline (£)", "Rows"],
+    headers: ["Period", "Received (£)", "Total pipeline (£)", "Rows"],
     rows: windows.map((window) => {
       const summary = summarizePipelineWindow(rows, window);
       return [
         summary.label,
-        penceToGbp(summary.pendingPence),
         penceToGbp(summary.receivedPence),
         penceToGbp(summary.totalPence),
         summary.count,
@@ -165,7 +162,7 @@ export function customerReportToSheet(rows: OwnerCustomerExportRow[]): ExportShe
       "Fees posted (£)",
       "Advisor commission (£)",
       "Introducer commission (£)",
-      "Pending commission (£)",
+      "Received commission (£)",
       "Paid commission (£)",
     ],
     rows: rows.map((r) => [

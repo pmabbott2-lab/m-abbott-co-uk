@@ -259,7 +259,7 @@ test("commissionRowsToSheet handles empty and populated rows", () => {
     feeType: "fee",
     commissionPct: 10,
     amountPence: 10000,
-    payoutStatus: "pending",
+    payoutStatus: "received",
     payoutAt: null,
   };
   const sheet = commissionRowsToSheet([row]);

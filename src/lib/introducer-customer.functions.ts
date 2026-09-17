@@ -328,7 +328,7 @@ export const refreshCustomerIntroducerCommission = createServerFn({ method: "POS
         beneficiary_user_id: intro.user_id,
         beneficiary_role: "introducer",
         commission_pct: row.commission_pct,
-        payout_status: row.payout_status ?? "pending",
+        payout_status: row.payout_status ?? "received",
         note: "Commission refresh — reattributed to amended introducer",
         created_by: context.userId,
       });

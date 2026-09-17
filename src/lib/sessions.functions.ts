@@ -3670,7 +3670,7 @@ export const exportOwnerCustomerReport = createServerFn({ method: "GET" })
           }
           if (row.payout_status === "paid") {
             paidCommByCustomer.set(cid, (paidCommByCustomer.get(cid) ?? 0) + signed);
-          } else if (row.payout_status === "pending") {
+          } else if (row.payout_status === "received" || row.payout_status === "pending") {
             pendingCommByCustomer.set(cid, (pendingCommByCustomer.get(cid) ?? 0) + signed);
           }
         }

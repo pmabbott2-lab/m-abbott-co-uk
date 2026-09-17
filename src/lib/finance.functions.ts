@@ -72,17 +72,16 @@ export const FEE_TYPE_LABELS: Record<(typeof FEE_TYPES)[number], string> = {
   other_fee: "Other fee",
 };
 
-export const PAYOUT_STATUSES = ["pending", "received", "paid", "rejected", "lost"] as const;
+export const PAYOUT_STATUSES = ["received", "paid", "rejected"] as const;
 export type PayoutStatus = (typeof PAYOUT_STATUSES)[number];
 
 export const PAYOUT_STATUS_LABELS: Record<PayoutStatus, string> = {
-  pending: "Pending",
   received: "Received",
   paid: "Paid",
   rejected: "Rejected",
-  lost: "Lost",
 };
 
+/** @deprecated Lost is no longer a payout status — kept only for reading legacy rows. */
 export const LOST_COMMISSION_REASONS = [
   { value: "customer_not_proceeding", label: "Customer not proceeding" },
   { value: "application_declined", label: "Application declined / withdrawn" },
@@ -93,9 +92,13 @@ export const LOST_COMMISSION_REASONS = [
 export type LostCommissionReason = (typeof LOST_COMMISSION_REASONS)[number]["value"];
 
 function normalizePayoutStatus(raw: string | null | undefined): PayoutStatus {
+  if (raw === "pending") return "received";
+  if (raw === "lost") return "rejected";
   if (raw && PAYOUT_STATUSES.includes(raw as PayoutStatus)) return raw as PayoutStatus;
-  return "pending";
+  return "received";
 }
+
+const PAYOUT_STATUS_Z = z.enum(["received", "paid", "rejected"]);
 
 export const BENEFICIARY_ROLE_LABELS: Record<string, string> = {
   advisor: "Advisor",
@@ -185,54 +188,16 @@ export const upsertDraftFee = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data: _data, context }) => {
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
     if (!canAmend(access, "finance_customer")) throw new Error("Forbidden");
 
-    const amountPence = Math.round(data.amountPounds * 100);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-
-    if (data.lineId) {
-      const { data: existing } = await supabaseAdmin
-        .from("finance_fee_lines")
-        .select("status")
-        .eq("id", data.lineId)
-        .maybeSingle();
-      if (!existing) throw new Error("Fee line not found");
-      if (existing.status === "posted") {
-        throw new Error("Posted fees must be amended via Amend (creates a red ledger entry).");
-      }
-      const { error } = await supabaseAdmin
-        .from("finance_fee_lines")
-        .update({
-          amount_pence: amountPence,
-          note: data.note ?? null,
-          fee_type: data.feeType,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", data.lineId);
-      if (error) throw new Error(error.message);
-      return { id: data.lineId };
-    }
-
-    const { data: inserted, error } = await supabaseAdmin
-      .from("finance_fee_lines")
-      .insert({
-        session_id: data.sessionId,
-        fee_type: data.feeType,
-        amount_pence: amountPence,
-        note: data.note ?? null,
-        status: "draft",
-        created_by: context.userId,
-      })
-      .select("id")
-      .single();
-    if (error) {
-      if (isMissingTable(error)) throw new Error("Run the admin/finance migration first.");
-      throw new Error(error.message);
-    }
-    return { id: inserted.id };
+    // Case fees must come from Finance → Network statements → Allocate.
+    // Manual draft create/edit is closed so commission only pull through from the network.
+    throw new Error(
+      "Manual fee entry is disabled. Allocate the fee from Finance → Network statements; it appears here as a draft to submit.",
+    );
   });
 
 export const submitSessionFees = createServerFn({ method: "POST" })
@@ -314,7 +279,7 @@ export const submitSessionFees = createServerFn({ method: "POST" })
           beneficiary_user_id: a.advisor_id,
           beneficiary_role: "advisor",
           commission_pct: pct,
-          payout_status: "pending",
+          payout_status: "received",
           created_by: context.userId,
         });
       }
@@ -350,7 +315,7 @@ export const submitSessionFees = createServerFn({ method: "POST" })
                 beneficiary_user_id: intro.user_id,
                 beneficiary_role: "introducer",
                 commission_pct: pct,
-                payout_status: "pending",
+                payout_status: "received",
                 created_by: context.userId,
               });
             }
@@ -885,7 +850,7 @@ async function getRafBonusPence(
   return data?.num_value ?? RAF_BONUS_PENCE;
 }
 
-/** Creates a pending RAF commission ledger row when a referral bonus becomes eligible. */
+/** Creates a received RAF commission ledger row when a referral bonus becomes eligible. */
 export async function ensureRafCommissionLedgerEntry(
   referralId: string,
   createdBy?: string,
@@ -928,7 +893,7 @@ export async function ensureRafCommissionLedgerEntry(
     beneficiary_user_id: referral.referrer_user_id,
     beneficiary_role: "referrer",
     referral_id: referralId,
-    payout_status: "pending",
+    payout_status: "received",
     note: referrerName ? `${note} · referrer ${referrerName}` : note,
     created_by: createdBy ?? null,
   });
@@ -1039,7 +1004,7 @@ export const listMyCommissionStatement = createServerFn({ method: "GET" })
   .inputValidator((d: unknown) =>
     z
       .object({
-        payoutStatus: z.enum(["pending", "received", "paid", "rejected", "lost"]).optional(),
+        payoutStatus: PAYOUT_STATUS_Z.optional(),
         viewAsUserId: z.string().uuid().optional(),
       })
       .parse(d ?? {}),
@@ -1096,7 +1061,7 @@ export const listCommissionPayouts = createServerFn({ method: "GET" })
     z
       .object({
         beneficiaryRole: z.enum(["advisor", "introducer", "referrer"]).optional(),
-        payoutStatus: z.enum(["pending", "received", "paid", "rejected", "lost"]).optional(),
+        payoutStatus: PAYOUT_STATUS_Z.optional(),
         beneficiaryUserId: z.string().uuid().optional(),
         caseRefQuery: z.string().max(64).optional(),
         sessionId: z.string().uuid().optional(),
@@ -1171,14 +1136,8 @@ export const updateCommissionPayoutStatus = createServerFn({ method: "POST" })
     z
       .object({
         ledgerId: z.string().uuid(),
-        payoutStatus: z.enum(["pending", "received", "paid", "rejected", "lost"]),
+        payoutStatus: PAYOUT_STATUS_Z,
         payoutNote: z.string().max(500).optional(),
-        lostReason: z.enum([
-          "customer_not_proceeding",
-          "application_declined",
-          "remortgaged_elsewhere",
-          "duplicate_or_error",
-        ]).optional(),
       })
       .parse(d),
   )
@@ -1197,14 +1156,8 @@ export const updateSessionCommissionPayoutStatus = createServerFn({ method: "POS
       .object({
         sessionId: z.string().uuid(),
         ledgerId: z.string().uuid(),
-        payoutStatus: z.enum(["pending", "received", "paid", "rejected", "lost"]),
+        payoutStatus: PAYOUT_STATUS_Z,
         payoutNote: z.string().max(500).optional(),
-        lostReason: z.enum([
-          "customer_not_proceeding",
-          "application_declined",
-          "remortgaged_elsewhere",
-          "duplicate_or_error",
-        ]).optional(),
       })
       .parse(d),
   )
@@ -1232,7 +1185,6 @@ async function applyCommissionPayoutStatusPatch(
     ledgerId: string;
     payoutStatus: PayoutStatus;
     payoutNote?: string;
-    lostReason?: LostCommissionReason;
   },
   userId: string,
 ) {
@@ -1245,23 +1197,13 @@ async function applyCommissionPayoutStatusPatch(
     if (readErr) throw new Error(readErr.message);
     if (!row || row.kind !== "commission") throw new Error("Commission row not found");
 
-    if (data.payoutStatus === "lost" && !data.lostReason) {
-      data.lostReason = "customer_not_proceeding";
-    }
-
     const now = new Date().toISOString();
     const patch: Record<string, unknown> = {
       payout_status: data.payoutStatus,
       payout_note: data.payoutNote ?? null,
-      lost_reason: data.payoutStatus === "lost" ? data.lostReason : null,
-      payout_at:
-        data.payoutStatus === "pending" || data.payoutStatus === "received"
-          ? null
-          : now,
-      payout_by:
-        data.payoutStatus === "pending" || data.payoutStatus === "received"
-          ? null
-          : userId,
+      lost_reason: null,
+      payout_at: data.payoutStatus === "received" ? null : now,
+      payout_by: data.payoutStatus === "received" ? null : userId,
     };
 
     const { error } = await supabaseAdmin.from("finance_ledger").update(patch).eq("id", data.ledgerId);
@@ -1273,12 +1215,10 @@ async function applyCommissionPayoutStatusPatch(
     }
 
     if (row.referral_id && row.beneficiary_role === "referrer") {
-      const bonusMap: Record<string, string> = {
-        pending: "eligible",
+      const bonusMap: Record<PayoutStatus, string> = {
         received: "eligible",
         paid: "paid",
         rejected: "rejected",
-        lost: "rejected",
       };
       await supabaseAdmin
         .from("referrals")

@@ -20,15 +20,13 @@ export type PipelineWindow = "month" | "ytd" | "l12m";
 
 export type PeriodSummaryMode = "month" | "year";
 
-const ALL_STATUSES: PayoutStatus[] = ["pending", "received", "paid", "rejected", "lost"];
+const ALL_STATUSES: PayoutStatus[] = ["received", "paid", "rejected"];
 
 export function emptyStatusAmounts(): StatusAmounts {
   return {
-    pending: { count: 0, amountPence: 0 },
     received: { count: 0, amountPence: 0 },
     paid: { count: 0, amountPence: 0 },
     rejected: { count: 0, amountPence: 0 },
-    lost: { count: 0, amountPence: 0 },
   };
 }
 
@@ -41,9 +39,9 @@ function inRange(date: Date, start: Date, end: Date): boolean {
   return isWithinInterval(date, { start, end });
 }
 
-/** Date used for paid / rejected / lost activity in period reports. */
+/** Date used for paid / rejected activity in period reports. */
 export function payoutActivityDate(row: CommissionPayoutRow): Date {
-  if (row.payoutAt && (row.payoutStatus === "paid" || row.payoutStatus === "rejected" || row.payoutStatus === "lost")) {
+  if (row.payoutAt && (row.payoutStatus === "paid" || row.payoutStatus === "rejected")) {
     return parseISO(row.payoutAt);
   }
   return parseISO(row.createdAt);
@@ -59,7 +57,7 @@ export function filterRowsByCaseQuery(rows: CommissionPayoutRow[], query: string
   });
 }
 
-/** Monthly activity: paid/rejected/lost by payout date; pending/received by created date. */
+/** Monthly activity: paid/rejected by payout date; received by created date. */
 export function summarizeCalendarMonth(
   rows: CommissionPayoutRow[],
   year: number,
@@ -71,12 +69,12 @@ export function summarizeCalendarMonth(
 
   for (const row of rows) {
     const created = parseISO(row.createdAt);
-    if (row.payoutStatus === "paid" || row.payoutStatus === "rejected" || row.payoutStatus === "lost") {
+    if (row.payoutStatus === "paid" || row.payoutStatus === "rejected") {
       const activity = payoutActivityDate(row);
       if (inRange(activity, start, end)) addToTotals(totals, row.payoutStatus, row.amountPence);
       continue;
     }
-    if ((row.payoutStatus === "pending" || row.payoutStatus === "received") && inRange(created, start, end)) {
+    if (row.payoutStatus === "received" && inRange(created, start, end)) {
       addToTotals(totals, row.payoutStatus, row.amountPence);
     }
   }
@@ -91,12 +89,12 @@ export function summarizeCalendarYear(rows: CommissionPayoutRow[], year: number)
 
   for (const row of rows) {
     const created = parseISO(row.createdAt);
-    if (row.payoutStatus === "paid" || row.payoutStatus === "rejected" || row.payoutStatus === "lost") {
+    if (row.payoutStatus === "paid" || row.payoutStatus === "rejected") {
       const activity = payoutActivityDate(row);
       if (inRange(activity, start, end)) addToTotals(totals, row.payoutStatus, row.amountPence);
       continue;
     }
-    if ((row.payoutStatus === "pending" || row.payoutStatus === "received") && inRange(created, start, end)) {
+    if (row.payoutStatus === "received" && inRange(created, start, end)) {
       addToTotals(totals, row.payoutStatus, row.amountPence);
     }
   }
@@ -137,27 +135,25 @@ export function pipelineWindowRange(window: PipelineWindow, anchor = new Date())
   return { start, end: anchor, label: "Last 12 months" };
 }
 
-/** Open pipeline (pending + received) by when commission was created. */
+/** Open pipeline (received, not yet paid/rejected) by when commission was created. */
 export function summarizePipelineWindow(
   rows: CommissionPayoutRow[],
   window: PipelineWindow,
   anchor = new Date(),
-): { label: string; pendingPence: number; receivedPence: number; totalPence: number; count: number } {
+): { label: string; receivedPence: number; totalPence: number; count: number } {
   const { start, end, label } = pipelineWindowRange(window, anchor);
-  let pendingPence = 0;
   let receivedPence = 0;
   let count = 0;
 
   for (const row of rows) {
-    if (row.payoutStatus !== "pending" && row.payoutStatus !== "received") continue;
+    if (row.payoutStatus !== "received") continue;
     const created = parseISO(row.createdAt);
     if (!inRange(created, start, end)) continue;
     count += 1;
-    if (row.payoutStatus === "pending") pendingPence += row.amountPence;
-    else receivedPence += row.amountPence;
+    receivedPence += row.amountPence;
   }
 
-  return { label, pendingPence, receivedPence, totalPence: pendingPence + receivedPence, count };
+  return { label, receivedPence, totalPence: receivedPence, count };
 }
 
 export function listMonthOptions(rows: CommissionPayoutRow[], anchor = new Date()): { value: string; label: string; year: number; month: number }[] {
@@ -219,3 +215,5 @@ export function periodSummaryTitle(mode: PeriodSummaryMode, year: number, month?
 export function statusLabel(status: PayoutStatus): string {
   return PAYOUT_STATUS_LABELS[status];
 }
+
+export { ALL_STATUSES };

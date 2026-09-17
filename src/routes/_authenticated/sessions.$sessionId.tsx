@@ -22,16 +22,13 @@ import {
 } from "@/lib/sessions.functions";
 import {
   listSessionFees,
-  upsertDraftFee,
   submitSessionFees,
   amendPostedFee,
   listSessionCommissions,
   updateSessionCommissionPayoutStatus,
   FEE_TYPE_LABELS,
   BENEFICIARY_ROLE_LABELS,
-  LOST_COMMISSION_REASONS,
   type PayoutStatus,
-  type LostCommissionReason,
 } from "@/lib/finance.functions";
 import {
   canAmend,
@@ -1379,16 +1376,9 @@ function CustomerFinanceCard({
   const qc = useQueryClient();
   const listFn = useServerFn(listSessionFees);
   const commissionsFn = useServerFn(listSessionCommissions);
-  const upsertFn = useServerFn(upsertDraftFee);
   const submitFn = useServerFn(submitSessionFees);
   const amendFn = useServerFn(amendPostedFee);
   const commissionStatusFn = useServerFn(updateSessionCommissionPayoutStatus);
-
-  const [feeType, setFeeType] = useState<"fee" | "mortgage_fee" | "insurance_fee" | "other_fee">("fee");
-  const [amount, setAmount] = useState("");
-  const [note, setNote] = useState("");
-  const [lostLedgerId, setLostLedgerId] = useState<string | null>(null);
-  const [lostReason, setLostReason] = useState<LostCommissionReason>("customer_not_proceeding");
 
   const feesQ = useQuery({
     queryKey: ["session-fees", sessionId],
@@ -1410,44 +1400,19 @@ function CustomerFinanceCard({
   const pipeline = commissionPipelineTotals(commissionRows);
 
   const updateCommission = useMutation({
-    mutationFn: (vars: {
-      ledgerId: string;
-      payoutStatus: PayoutStatus;
-      lostReason?: LostCommissionReason;
-    }) =>
+    mutationFn: (vars: { ledgerId: string; payoutStatus: PayoutStatus }) =>
       commissionStatusFn({
         data: {
           sessionId,
           ledgerId: vars.ledgerId,
           payoutStatus: vars.payoutStatus,
-          lostReason: vars.lostReason,
         },
       }),
     onSuccess: () => {
       toast.success("Commission status updated");
-      setLostLedgerId(null);
       refresh();
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not update"),
-  });
-
-  const addDraft = useMutation({
-    mutationFn: () =>
-      upsertFn({
-        data: {
-          sessionId,
-          feeType,
-          amountPounds: Number(amount),
-          note: note || undefined,
-        },
-      }),
-    onSuccess: () => {
-      setAmount("");
-      setNote("");
-      toast.success("Draft fee added");
-      refresh();
-    },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not add fee"),
   });
 
   const submit = useMutation({
@@ -1486,53 +1451,57 @@ function CustomerFinanceCard({
       <div>
         <h3 className="font-semibold">Customer fees</h3>
         <p className="text-xs text-muted-foreground mt-1">
-          Add draft fees, then Submit to lock them. Amendments and deletions appear as red ledger
-          transactions for the owner report.
+          Fee amounts come from the network commission statement. Allocate a line under Finance →
+          Network statements; it appears here as a draft. Submit locks fees and creates payable
+          commission. Amendments to posted fees appear as red ledger transactions.
         </p>
       </div>
 
       {canAmendFees && (
-        <div className="grid sm:grid-cols-4 gap-3 items-end">
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Type</label>
-            <select
-              className="w-full h-9 rounded-md border bg-background px-2 text-sm"
-              value={feeType}
-              onChange={(e) => setFeeType(e.target.value as typeof feeType)}
-            >
-              {(Object.keys(FEE_TYPE_LABELS) as Array<keyof typeof FEE_TYPE_LABELS>).map((k) => (
-                <option key={k} value={k}>
-                  {FEE_TYPE_LABELS[k]}
-                </option>
-              ))}
-            </select>
+        <div className="space-y-2 rounded-lg border border-dashed bg-muted/40 p-3">
+          <p className="text-xs text-muted-foreground">
+            Manual fee entry is disabled. Waiting for allocation from Finance → Network statements.
+          </p>
+          <div className="grid sm:grid-cols-4 gap-3 items-end opacity-60 pointer-events-none">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Type</label>
+              <select
+                disabled
+                className="w-full h-9 rounded-md border bg-muted px-2 text-sm text-muted-foreground"
+                aria-disabled="true"
+              >
+                <option>Fee</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Amount (£)</label>
+              <Input type="number" disabled value="" placeholder="—" className="bg-muted" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Note</label>
+              <Input disabled value="" placeholder="From network statement" className="bg-muted" />
+            </div>
+            <Button disabled variant="secondary">
+              Add draft
+            </Button>
           </div>
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Amount (£)</label>
-            <Input
-              type="number"
-              min="0"
-              step="0.01"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1 sm:col-span-1">
-            <label className="text-xs text-muted-foreground">Note</label>
-            <Input value={note} onChange={(e) => setNote(e.target.value)} />
-          </div>
-          <Button
-            disabled={!amount || addDraft.isPending}
-            onClick={() => addDraft.mutate()}
-          >
-            Add draft
-          </Button>
+          <p className="text-xs">
+            <Link to="/home" className="text-primary underline-offset-2 hover:underline">
+              Open staff home
+            </Link>
+            {" "}
+            → Finance → Network statements to allocate.
+          </p>
         </div>
       )}
 
       <div className="space-y-2">
         <h4 className="text-sm font-medium">Drafts</h4>
-        {drafts.length === 0 && <p className="text-sm text-muted-foreground">No draft fees.</p>}
+        {drafts.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            No draft fees yet. Allocate from the network statement when commission is received.
+          </p>
+        )}
         {drafts.map((l) => (
           <div key={l.id} className="flex justify-between text-sm border rounded-lg px-3 py-2">
             <span>
@@ -1615,66 +1584,31 @@ function CustomerFinanceCard({
                 <div className="flex items-center gap-2">
                   <span className="font-medium">£{(row.amountPence / 100).toFixed(2)}</span>
                   <PayoutStatusBadge status={row.payoutStatus} />
-                  {canAmendFees && row.payoutStatus !== "lost" && row.payoutStatus !== "rejected" && (
+                  {canAmendFees && row.payoutStatus !== "rejected" && (
                     <select
                       className="h-8 rounded-md border bg-background px-2 text-xs"
                       value={row.payoutStatus}
                       disabled={updateCommission.isPending}
                       onChange={(e) => {
-                        const status = e.target.value as PayoutStatus;
-                        if (status === "lost") {
-                          setLostLedgerId(row.id);
-                          return;
-                        }
-                        updateCommission.mutate({ ledgerId: row.id, payoutStatus: status });
+                        updateCommission.mutate({
+                          ledgerId: row.id,
+                          payoutStatus: e.target.value as PayoutStatus,
+                        });
                       }}
                     >
-                      <option value="pending">Pending</option>
                       <option value="received">Received</option>
                       <option value="paid">Paid</option>
-                      <option value="lost">Mark lost</option>
+                      <option value="rejected">Rejected</option>
                     </select>
                   )}
                 </div>
               </div>
             ))}
             <div className="flex flex-wrap gap-3 text-xs text-muted-foreground pt-2">
-              <span>Pipeline pending: £{(pipeline.pending / 100).toFixed(2)}</span>
               <span>Received: £{(pipeline.received / 100).toFixed(2)}</span>
               <span>Paid: £{(pipeline.paid / 100).toFixed(2)}</span>
-              <span>Lost: £{(pipeline.lost / 100).toFixed(2)}</span>
+              <span>Rejected: £{(pipeline.rejected / 100).toFixed(2)}</span>
             </div>
-          </div>
-        )}
-        {lostLedgerId && canAmendFees && (
-          <div className="flex flex-wrap items-end gap-2 p-3 rounded-lg border bg-muted/30">
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Lost commission reason</label>
-              <select
-                className="h-9 rounded-md border bg-background px-2 text-sm"
-                value={lostReason}
-                onChange={(e) => setLostReason(e.target.value as LostCommissionReason)}
-              >
-                {LOST_COMMISSION_REASONS.map((r) => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
-                ))}
-              </select>
-            </div>
-            <Button
-              size="sm"
-              variant="destructive"
-              disabled={updateCommission.isPending}
-              onClick={() =>
-                updateCommission.mutate({
-                  ledgerId: lostLedgerId,
-                  payoutStatus: "lost",
-                  lostReason,
-                })
-              }
-            >
-              Confirm lost
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setLostLedgerId(null)}>Cancel</Button>
           </div>
         )}
       </div>
