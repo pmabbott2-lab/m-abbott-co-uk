@@ -377,23 +377,35 @@ async function upsertTestUser(
   if (spec.role === "advisor") {
     const { ensureAdvisorCode } = await import("@/lib/sessions.functions");
     await ensureAdvisorCode(userId);
-    // Seed weekday diary so test advisors appear in the booking pool without Teams.
+    // Always refresh weekday demo diary so test advisors stay bookable without Teams.
     const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
-    const { count } = await admin
-      .from("advisor_availability")
-      .select("id", { count: "exact", head: true })
-      .eq("advisor_id", userId);
-    if ((count ?? 0) === 0) {
-      await admin.from("advisor_availability").insert(
-        [1, 2, 3, 4, 5].map((day) => ({
+    for (const day of [1, 2, 3, 4, 5]) {
+      const { data: existing } = await admin
+        .from("advisor_availability")
+        .select("id")
+        .eq("advisor_id", userId)
+        .eq("day_of_week", day)
+        .maybeSingle();
+      if (existing?.id) {
+        await admin
+          .from("advisor_availability")
+          .update({
+            start_time: "09:00",
+            end_time: "17:00",
+            slot_minutes: 30,
+            active: true,
+          })
+          .eq("id", existing.id);
+      } else {
+        await admin.from("advisor_availability").insert({
           advisor_id: userId,
           day_of_week: day,
           start_time: "09:00",
           end_time: "17:00",
           slot_minutes: 30,
           active: true,
-        })),
-      );
+        });
+      }
     }
   }
 

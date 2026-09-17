@@ -15,6 +15,9 @@ import { clearSessionAttention, assertStaffCanAccessCustomer } from "@/lib/sessi
 
 const SLOT_MINUTES = 30;
 const BOOKING_HORIZON_DAYS = 28;
+/** Demo diary hours for test advisors (Europe/London wall clock). */
+const TEST_DIARY_START = "09:00";
+const TEST_DIARY_END = "17:00";
 
 /** Auth email for customers without an address — phone-only bookings. */
 export function emailForCustomerAccount(email: string, phone: string): string {
@@ -33,6 +36,61 @@ function minutesToTime(total: number): string {
   const h = Math.floor(total / 60);
   const m = total % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/** Offset of `timeZone` vs UTC at the given instant (ms). */
+function timeZoneOffsetMs(timeZone: string, instant: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(instant);
+  const map: Record<string, string> = {};
+  for (const p of parts) {
+    if (p.type !== "literal") map[p.type] = p.value;
+  }
+  const asUtc = Date.UTC(
+    Number(map.year),
+    Number(map.month) - 1,
+    Number(map.day),
+    Number(map.hour) % 24,
+    Number(map.minute),
+    Number(map.second),
+  );
+  return asUtc - instant.getTime();
+}
+
+/** Interpret YYYY-MM-DD + HH:mm as Europe/London wall time → UTC Date. */
+function londonWallToUtc(dateKey: string, timeHHmm: string): Date {
+  const [y, mo, d] = dateKey.split("-").map(Number);
+  const [h, mi] = timeHHmm.split(":").map(Number);
+  const utcGuess = new Date(Date.UTC(y!, mo! - 1, d!, h!, mi!, 0));
+  const offset = timeZoneOffsetMs("Europe/London", utcGuess);
+  return new Date(utcGuess.getTime() - offset);
+}
+
+/** Day of week in Europe/London (0=Sun … 6=Sat) for a YYYY-MM-DD calendar date. */
+function londonWeekdayIndex(dateKey: string): number {
+  const noon = londonWallToUtc(dateKey, "12:00");
+  const wd = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/London",
+    weekday: "short",
+  }).format(noon);
+  const map: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  return map[wd] ?? 0;
 }
 
 async function getPrimaryAdvisorId(): Promise<string> {
@@ -134,8 +192,8 @@ async function countAdvisorAppointmentsOnDay(
   dateKey: string,
 ): Promise<number> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const dayStart = new Date(`${dateKey}T00:00:00`);
-  const dayEnd = new Date(`${dateKey}T23:59:59`);
+  const dayStart = londonWallToUtc(dateKey, "00:00");
+  const dayEnd = londonWallToUtc(dateKey, "23:59");
   const { count, error } = await supabaseAdmin
     .from("appointments")
     .select("id", { count: "exact", head: true })
@@ -147,27 +205,77 @@ async function countAdvisorAppointmentsOnDay(
   return count ?? 0;
 }
 
+/** Keep test advisors on a reliable Mon–Fri 09:00–17:00 London demo diary. */
+async function ensureTestAdvisorDemoDiary(advisorId: string): Promise<void> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const weekdays = [1, 2, 3, 4, 5];
+  for (const day of weekdays) {
+    const { data: existing } = await supabaseAdmin
+      .from("advisor_availability")
+      .select("id")
+      .eq("advisor_id", advisorId)
+      .eq("day_of_week", day)
+      .maybeSingle();
+    if (existing?.id) {
+      await supabaseAdmin
+        .from("advisor_availability")
+        .update({
+          start_time: TEST_DIARY_START,
+          end_time: TEST_DIARY_END,
+          slot_minutes: SLOT_MINUTES,
+          active: true,
+        })
+        .eq("id", existing.id);
+    } else {
+      await supabaseAdmin.from("advisor_availability").insert({
+        advisor_id: advisorId,
+        day_of_week: day,
+        start_time: TEST_DIARY_START,
+        end_time: TEST_DIARY_END,
+        slot_minutes: SLOT_MINUTES,
+        active: true,
+      });
+    }
+  }
+}
+
 async function computeAdvisorFreeSlots(
   advisor: BookableAdvisor,
   dateKey: string,
 ): Promise<string[]> {
-  await ensureDefaultAvailability(advisor.id);
+  const dayOfWeek = londonWeekdayIndex(dateKey);
+  // Weekends never have Hub demo / default hours.
+  if (dayOfWeek === 0 || dayOfWeek === 6) return [];
+
+  if (advisor.isTest) {
+    await ensureTestAdvisorDemoDiary(advisor.id);
+  } else {
+    await ensureDefaultAvailability(advisor.id);
+  }
+
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const day = new Date(`${dateKey}T12:00:00`);
-  const dayOfWeek = day.getDay();
 
-  const { data: availability, error: availErr } = await supabaseAdmin
-    .from("advisor_availability")
-    .select("*")
-    .eq("advisor_id", advisor.id)
-    .eq("day_of_week", dayOfWeek)
-    .eq("active", true)
-    .maybeSingle();
-  if (availErr) throw new Error(availErr.message);
-  if (!availability) return [];
+  let startMin = parseTimeToMinutes(TEST_DIARY_START);
+  let endMin = parseTimeToMinutes(TEST_DIARY_END);
+  let slotSize = SLOT_MINUTES;
 
-  const dayStart = new Date(`${dateKey}T00:00:00`);
-  const dayEnd = new Date(`${dateKey}T23:59:59`);
+  if (!advisor.isTest) {
+    const { data: availability, error: availErr } = await supabaseAdmin
+      .from("advisor_availability")
+      .select("*")
+      .eq("advisor_id", advisor.id)
+      .eq("day_of_week", dayOfWeek)
+      .eq("active", true)
+      .maybeSingle();
+    if (availErr) throw new Error(availErr.message);
+    if (!availability) return [];
+    startMin = parseTimeToMinutes(String(availability.start_time).slice(0, 5));
+    endMin = parseTimeToMinutes(String(availability.end_time).slice(0, 5));
+    slotSize = availability.slot_minutes ?? SLOT_MINUTES;
+  }
+
+  const dayStart = londonWallToUtc(dateKey, "00:00");
+  const dayEnd = londonWallToUtc(dateKey, "23:59");
   const { data: booked, error: bookedErr } = await supabaseAdmin
     .from("appointments")
     .select("starts_at, ends_at")
@@ -180,26 +288,28 @@ async function computeAdvisorFreeSlots(
   const bookedStarts = new Set((booked ?? []).map((b) => new Date(b.starts_at).toISOString()));
 
   let outlookBusy: Array<{ start: Date; end: Date }> = [];
+  let slotOverlapsBusy: (
+    slotStart: Date,
+    slotEnd: Date,
+    busy: Array<{ start: Date; end: Date }>,
+  ) => boolean = () => false;
   if (!advisor.isTest) {
-    const {
-      listAdvisorBusyIntervalsInOutlook,
-    } = await import("@/lib/teams-calendar.server");
-    outlookBusy = await listAdvisorBusyIntervalsInOutlook(advisor.id, dayStart, dayEnd);
+    const teams = await import("@/lib/teams-calendar.server");
+    slotOverlapsBusy = teams.slotOverlapsBusy;
+    outlookBusy = await teams.listAdvisorBusyIntervalsInOutlook(
+      advisor.id,
+      dayStart,
+      dayEnd,
+    );
   }
 
-  const startMin = parseTimeToMinutes(availability.start_time.slice(0, 5));
-  const endMin = parseTimeToMinutes(availability.end_time.slice(0, 5));
-  const slotSize = availability.slot_minutes ?? SLOT_MINUTES;
   const now = new Date();
-  const horizon = new Date();
-  horizon.setDate(horizon.getDate() + BOOKING_HORIZON_DAYS);
+  const horizon = new Date(now.getTime() + BOOKING_HORIZON_DAYS * 24 * 60 * 60 * 1000);
   const slots: string[] = [];
-
-  const { slotOverlapsBusy } = await import("@/lib/teams-calendar.server");
 
   for (let t = startMin; t + slotSize <= endMin; t += slotSize) {
     const time = minutesToTime(t);
-    const startsAt = new Date(`${dateKey}T${time}:00`);
+    const startsAt = londonWallToUtc(dateKey, time);
     if (startsAt <= now) continue;
     if (startsAt > horizon) continue;
     if (bookedStarts.has(startsAt.toISOString())) continue;
@@ -374,13 +484,22 @@ export const getAvailableSlots = createServerFn({ method: "GET" })
     > = {};
     const slotSet = new Set<string>();
 
-    for (const advisor of advisors) {
-      const free = await computeAdvisorFreeSlots(advisor, data.date);
-      for (const slot of free) {
-        slotSet.add(slot);
-        const list = advisorsBySlot[slot] ?? [];
-        list.push({ id: advisor.id, fullName: advisor.fullName, isTest: advisor.isTest });
-        advisorsBySlot[slot] = list;
+    // Test demo diaries first so Outlook/live failures never blank the day for UAT.
+    const ordered = [...advisors].sort(
+      (a, b) => Number(b.isTest) - Number(a.isTest) || a.fullName.localeCompare(b.fullName),
+    );
+
+    for (const advisor of ordered) {
+      try {
+        const free = await computeAdvisorFreeSlots(advisor, data.date);
+        for (const slot of free) {
+          slotSet.add(slot);
+          const list = advisorsBySlot[slot] ?? [];
+          list.push({ id: advisor.id, fullName: advisor.fullName, isTest: advisor.isTest });
+          advisorsBySlot[slot] = list;
+        }
+      } catch (e) {
+        console.error("computeAdvisorFreeSlots failed", advisor.email ?? advisor.id, e);
       }
     }
 
