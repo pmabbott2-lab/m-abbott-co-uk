@@ -64,15 +64,37 @@ async function uniqueSlug(base: string): Promise<string> {
 export const resolveReferralSlug = createServerFn({ method: "GET" })
   .inputValidator((d: unknown) => z.object({ slug: z.string().min(1) }).parse(d))
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: introducer, error } = await supabaseAdmin
-      .from("introducers")
+    const slug = data.slug.trim().toLowerCase();
+
+    // Prefer service-role (bypasses RLS). Fall back to public booking view so
+    // /book/:slug still works if Azure SERVICE_ROLE_KEY is missing/mis-set.
+    try {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { data: introducer, error } = await supabaseAdmin
+        .from("introducers")
+        .select("id, company_name, slug")
+        .eq("slug", slug)
+        .eq("active", true)
+        .maybeSingle();
+      if (!error && introducer) return introducer;
+    } catch (e) {
+      console.error("resolveReferralSlug admin lookup failed", e);
+    }
+
+    const { createClient } = await import("@supabase/supabase-js");
+    const { getPublicSupabaseEnv } = await import("@/lib/supabase-public-env");
+    const env = getPublicSupabaseEnv();
+    if (!env.url || !env.publishableKey) {
+      throw new Error("Supabase public env is not configured.");
+    }
+    const pub = createClient(env.url, env.publishableKey);
+    const { data: row, error: pubErr } = await pub
+      .from("introducer_public_booking")
       .select("id, company_name, slug")
-      .eq("slug", data.slug)
-      .eq("active", true)
+      .eq("slug", slug)
       .maybeSingle();
-    if (error) throw new Error(error.message);
-    return introducer;
+    if (pubErr) throw new Error(pubErr.message);
+    return row;
   });
 
 export const checkIsIntroducer = createServerFn({ method: "GET" })

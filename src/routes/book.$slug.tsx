@@ -101,6 +101,22 @@ function DirectBookingPage() {
     return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Loading…</div>;
   }
 
+  if (introducerQ.isError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="text-center space-y-3">
+          <h1 className="text-xl font-semibold">Could not open booking link</h1>
+          <p className="text-sm text-muted-foreground">
+            {(introducerQ.error as Error)?.message || "Please try again in a moment."}
+          </p>
+          <Link to="/auth">
+            <Button variant="outline">Go to sign in</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (!introducerQ.data) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">

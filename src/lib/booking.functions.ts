@@ -439,76 +439,130 @@ export const getAvailableSlots = createServerFn({ method: "GET" })
       .parse(d),
   )
   .handler(async ({ data }) => {
-    const usePool = data.pool === true || !data.advisorId;
-    const pool = await listBookableAdvisors();
-    if (pool.length === 0) {
-      return {
-        slots: [] as string[],
-        advisorsBySlot: {} as Record<
-          string,
-          Array<{ id: string; fullName: string; isTest: boolean }>
-        >,
-        advisorId: null as string | null,
-      };
-    }
-
-    let advisors: BookableAdvisor[] = data.advisorId
-      ? pool.filter((a) => a.id === data.advisorId)
-      : usePool
-        ? pool
-        : pool.slice(0, 1);
-
-    // Single-advisor lock path when caller passed a specific id not in pool (e.g. staff self).
-    if (data.advisorId && advisors.length === 0) {
-      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-      const { isTestAccountEmail } = await import("@/lib/test-accounts");
-      const { data: profile } = await supabaseAdmin
-        .from("profiles")
-        .select("id, full_name, email")
-        .eq("id", data.advisorId)
-        .maybeSingle();
-      if (profile) {
-        advisors.push({
-          id: profile.id,
-          fullName: (profile.full_name ?? "").trim() || profile.email || "Advisor",
-          email: profile.email,
-          isTest: isTestAccountEmail(profile.email),
-          teamsLinked: false,
-        });
-      }
-    }
-
-    const advisorsBySlot: Record<
-      string,
-      Array<{ id: string; fullName: string; isTest: boolean }>
-    > = {};
-    const slotSet = new Set<string>();
-
-    // Test demo diaries first so Outlook/live failures never blank the day for UAT.
-    const ordered = [...advisors].sort(
-      (a, b) => Number(b.isTest) - Number(a.isTest) || a.fullName.localeCompare(b.fullName),
-    );
-
-    for (const advisor of ordered) {
-      try {
-        const free = await computeAdvisorFreeSlots(advisor, data.date);
-        for (const slot of free) {
-          slotSet.add(slot);
-          const list = advisorsBySlot[slot] ?? [];
-          list.push({ id: advisor.id, fullName: advisor.fullName, isTest: advisor.isTest });
-          advisorsBySlot[slot] = list;
-        }
-      } catch (e) {
-        console.error("computeAdvisorFreeSlots failed", advisor.email ?? advisor.id, e);
-      }
-    }
-
-    const slots = [...slotSet].sort();
-    return {
-      slots,
-      advisorsBySlot,
-      advisorId: data.advisorId ?? null,
+    const empty = {
+      slots: [] as string[],
+      advisorsBySlot: {} as Record<
+        string,
+        Array<{ id: string; fullName: string; isTest: boolean }>
+      >,
+      advisorId: null as string | null,
     };
+
+    const mergeTestDiaryFallback = async (
+      slots: string[],
+      advisorsBySlot: Record<string, Array<{ id: string; fullName: string; isTest: boolean }>>,
+    ) => {
+      if (slots.length > 0) return { slots, advisorsBySlot };
+      try {
+        const { createClient } = await import("@supabase/supabase-js");
+        const { getPublicSupabaseEnv } = await import("@/lib/supabase-public-env");
+        const env = getPublicSupabaseEnv();
+        if (!env.url || !env.publishableKey) return { slots, advisorsBySlot };
+        const pub = createClient(env.url, env.publishableKey);
+        const { data: rows, error } = await pub.rpc("hub_test_diary_slots", {
+          p_date: data.date,
+        });
+        if (error || !rows?.length) {
+          if (error) console.error("hub_test_diary_slots failed", error.message);
+          return { slots, advisorsBySlot };
+        }
+        const nextSlots = new Set(slots);
+        const nextBySlot = { ...advisorsBySlot };
+        for (const row of rows as Array<{
+          starts_at: string;
+          advisor_id: string;
+          advisor_name: string;
+        }>) {
+          if (data.advisorId && row.advisor_id !== data.advisorId) continue;
+          const iso = new Date(row.starts_at).toISOString();
+          nextSlots.add(iso);
+          const list = nextBySlot[iso] ?? [];
+          if (!list.some((a) => a.id === row.advisor_id)) {
+            list.push({
+              id: row.advisor_id,
+              fullName: row.advisor_name,
+              isTest: true,
+            });
+          }
+          nextBySlot[iso] = list;
+        }
+        return { slots: [...nextSlots].sort(), advisorsBySlot: nextBySlot };
+      } catch (e) {
+        console.error("test diary fallback failed", e);
+        return { slots, advisorsBySlot };
+      }
+    };
+
+    try {
+      const usePool = data.pool === true || !data.advisorId;
+      const pool = await listBookableAdvisors();
+      if (pool.length === 0) {
+        const fb = await mergeTestDiaryFallback([], {});
+        return { ...empty, ...fb, advisorId: data.advisorId ?? null };
+      }
+
+      let advisors: BookableAdvisor[] = data.advisorId
+        ? pool.filter((a) => a.id === data.advisorId)
+        : usePool
+          ? pool
+          : pool.slice(0, 1);
+
+      // Single-advisor lock path when caller passed a specific id not in pool (e.g. staff self).
+      if (data.advisorId && advisors.length === 0) {
+        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        const { isTestAccountEmail } = await import("@/lib/test-accounts");
+        const { data: profile } = await supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, email")
+          .eq("id", data.advisorId)
+          .maybeSingle();
+        if (profile) {
+          advisors.push({
+            id: profile.id,
+            fullName: (profile.full_name ?? "").trim() || profile.email || "Advisor",
+            email: profile.email,
+            isTest: isTestAccountEmail(profile.email),
+            teamsLinked: false,
+          });
+        }
+      }
+
+      const advisorsBySlot: Record<
+        string,
+        Array<{ id: string; fullName: string; isTest: boolean }>
+      > = {};
+      const slotSet = new Set<string>();
+
+      // Test demo diaries first so Outlook/live failures never blank the day for UAT.
+      const ordered = [...advisors].sort(
+        (a, b) => Number(b.isTest) - Number(a.isTest) || a.fullName.localeCompare(b.fullName),
+      );
+
+      for (const advisor of ordered) {
+        try {
+          const free = await computeAdvisorFreeSlots(advisor, data.date);
+          for (const slot of free) {
+            slotSet.add(slot);
+            const list = advisorsBySlot[slot] ?? [];
+            list.push({ id: advisor.id, fullName: advisor.fullName, isTest: advisor.isTest });
+            advisorsBySlot[slot] = list;
+          }
+        } catch (e) {
+          console.error("computeAdvisorFreeSlots failed", advisor.email ?? advisor.id, e);
+        }
+      }
+
+      const merged = await mergeTestDiaryFallback([...slotSet].sort(), advisorsBySlot);
+      return {
+        slots: merged.slots,
+        advisorsBySlot: merged.advisorsBySlot,
+        advisorId: data.advisorId ?? null,
+      };
+    } catch (e) {
+      console.error("getAvailableSlots failed, using test diary fallback", e);
+      const fb = await mergeTestDiaryFallback([], {});
+      return { ...empty, ...fb, advisorId: data.advisorId ?? null };
+    }
   });
 
 const appointmentInput = z.object({
@@ -3123,23 +3177,35 @@ export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
     };
   });
 
-async function assertIntroducerBookingAccess(userId: string): Promise<string> {
+/**
+ * Confirm introducer role + profile.
+ * Prefer the signed-in user client when checking self — RLS allows reading own
+ * roles/profile even if SUPABASE_SERVICE_ROLE_KEY is wrong on Azure.
+ */
+async function assertIntroducerBookingAccess(
+  userId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  userClient?: { from: (table: string) => any },
+): Promise<string> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data: roles } = await supabaseAdmin
+  const client = userClient ?? supabaseAdmin;
+
+  const { data: roles, error: rolesErr } = await client
     .from("user_roles")
     .select("role")
     .eq("user_id", userId);
-  if (!(roles ?? []).some((r) => r.role === "introducer")) {
+  if (rolesErr) throw new Error(rolesErr.message);
+  if (!(roles ?? []).some((r: { role: string }) => r.role === "introducer")) {
     throw new Error("Forbidden");
   }
-  const { data: introducer, error } = await supabaseAdmin
+  const { data: introducer, error } = await client
     .from("introducers")
     .select("id")
     .eq("user_id", userId)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!introducer) throw new Error("Introducer profile not set up yet.");
-  return introducer.id;
+  return introducer.id as string;
 }
 
 export const bookNewCustomerAsIntroducer = createServerFn({ method: "POST" })
@@ -3171,7 +3237,7 @@ export const bookNewCustomerAsIntroducer = createServerFn({ method: "POST" })
     );
 
     if (!viewAsMode) {
-      await assertIntroducerBookingAccess(context.userId);
+      await assertIntroducerBookingAccess(context.userId, context.supabase);
     } else {
       await assertIntroducerBookingAccess(targetUserId);
     }
@@ -3241,12 +3307,17 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
       data.viewAsIntroducerUserId,
     );
 
-    const introducerId = await assertIntroducerBookingAccess(targetUserId);
+    const introducerId = await assertIntroducerBookingAccess(
+      targetUserId,
+      viewAsMode ? undefined : context.supabase,
+    );
     const twilioOk = isTwilioConfigured();
     const wantSms = data.sendSms !== false;
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: introducer, error: introErr } = await supabaseAdmin
+    // Own introducer writes work via RLS with the user client; view-as needs admin.
+    const db = viewAsMode ? supabaseAdmin : context.supabase;
+    const { data: introducer, error: introErr } = await db
       .from("introducers")
       .select("slug, company_name, active")
       .eq("id", introducerId)
@@ -3254,11 +3325,11 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
     if (introErr) throw new Error(introErr.message);
     if (!introducer?.slug) throw new Error("Introducer referral link is not set up yet.");
     if (introducer.active === false) {
-      await supabaseAdmin.from("introducers").update({ active: true }).eq("id", introducerId);
+      await db.from("introducers").update({ active: true }).eq("id", introducerId);
     }
 
     const phone = normaliseUkPhone(data.customerPhone);
-    const { data: lead, error: leadErr } = await supabaseAdmin
+    const { data: lead, error: leadErr } = await db
       .from("introducer_leads")
       .insert({
         introducer_id: introducerId,
@@ -3295,7 +3366,7 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
             twilioSid: sid,
             leadId: lead.id,
           });
-          await supabaseAdmin
+          await db
             .from("introducer_leads")
             .update({ status: "contacted" })
             .eq("id", lead.id);
