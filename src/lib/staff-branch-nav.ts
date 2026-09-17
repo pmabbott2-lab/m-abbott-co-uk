@@ -28,7 +28,6 @@ export type CustomersSubTabId = (typeof CUSTOMERS_SUB_TABS)[keyof typeof CUSTOME
 
 export const MANAGEMENT_SUB_TABS = {
   ANALYTICS: "analytics",
-  ADVISOR_COMMISSION: "advisor-commission",
   VIEW: "view",
   MANAGE: "manage",
   ADMIN_ACCESS: "admin-access",
@@ -53,6 +52,7 @@ export type MarketingSubTabId = (typeof MARKETING_SUB_TABS)[keyof typeof MARKETI
 
 export const DIARY_SUB_TABS = {
   MY_DIARY: "my-diary",
+  DIARY_SETTINGS: "diary-settings",
   ALL_APPOINTMENTS: "all-appointments",
 } as const;
 
@@ -60,6 +60,7 @@ export type DiarySubTabId = (typeof DIARY_SUB_TABS)[keyof typeof DIARY_SUB_TABS]
 
 export const FINANCE_SUB_TABS = {
   MY_COMMISSION: "my-commission",
+  COMMISSION_STATEMENTS: "commission-statements",
   COMMISSION_MGMT: "commission-mgmt",
   NETWORK_STATEMENTS: "network-statements",
   FINANCE_REPORT: "finance-report",
@@ -105,7 +106,6 @@ export type StaffBranchVisibility = {
   };
   management: {
     analytics: boolean;
-    advisorCommission: boolean;
     view: boolean;
     manage: boolean;
     adminAccess: boolean;
@@ -118,6 +118,7 @@ export type StaffBranchVisibility = {
   };
   diary: {
     myDiary: boolean;
+    diarySettings: boolean;
     allAppointments: boolean;
   };
   view: {
@@ -127,6 +128,7 @@ export type StaffBranchVisibility = {
   };
   finance: {
     myCommission: boolean;
+    commissionStatements: boolean;
     commissionMgmt: boolean;
     networkStatements: boolean;
     financeReport: boolean;
@@ -162,10 +164,9 @@ export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranc
   const analytics = isOwner || isSupervisor;
   const viewAsAdmin = (isOwner || isSupervisor) && isMainAdmin;
   const view = viewAsAdmin;
-  const advisorCommission =
+  const commissionStatements =
     isMainAdmin && (isOwner || isSupervisor || canView(adminAccess, "advisors"));
-  const management =
-    isMainAdmin && (analytics || advisorCommission || view || manage || adminAccessTab);
+  const management = isMainAdmin && (analytics || view || manage || adminAccessTab);
 
   /** Top Introducers tab — real introducer accounts only (not owner/supervisor admin). */
   const introducersBranch = isIntroducer && !isOwner && !isSupervisor;
@@ -189,6 +190,7 @@ export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranc
       canView(adminAccess, "appointments"));
 
   const diaryMy = staffAdvisor || adminDiary;
+  const diarySettings = diaryMy;
   const diaryAll = adminDiary;
 
   return {
@@ -198,7 +200,12 @@ export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranc
       management,
       marketing,
       introducers: introducersBranch,
-      finance: financeMyCommission || financeCommissionMgmt || financeNetworkStatements || financeReport,
+      finance:
+        financeMyCommission ||
+        commissionStatements ||
+        financeCommissionMgmt ||
+        financeNetworkStatements ||
+        financeReport,
     },
     customers: {
       list: customersList,
@@ -207,7 +214,6 @@ export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranc
     },
     management: {
       analytics,
-      advisorCommission,
       view,
       manage,
       adminAccess: adminAccessTab,
@@ -220,6 +226,7 @@ export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranc
     },
     diary: {
       myDiary: diaryMy,
+      diarySettings,
       allAppointments: diaryAll,
     },
     view: {
@@ -229,6 +236,7 @@ export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranc
     },
     finance: {
       myCommission: financeMyCommission,
+      commissionStatements,
       commissionMgmt: financeCommissionMgmt,
       networkStatements: financeNetworkStatements,
       financeReport,
@@ -255,7 +263,6 @@ export function defaultManagementSubTab(
   vis: StaffBranchVisibility,
   opts?: { showViewTab?: boolean },
 ): ManagementSubTabId {
-  if (vis.management.advisorCommission) return MANAGEMENT_SUB_TABS.ADVISOR_COMMISSION;
   if (vis.management.analytics) return MANAGEMENT_SUB_TABS.ANALYTICS;
   if (vis.management.view && opts?.showViewTab !== false) return MANAGEMENT_SUB_TABS.VIEW;
   if (vis.management.manage) return MANAGEMENT_SUB_TABS.MANAGE;
@@ -264,6 +271,7 @@ export function defaultManagementSubTab(
 
 export function defaultDiarySubTab(vis: StaffBranchVisibility): DiarySubTabId {
   if (vis.diary.myDiary) return DIARY_SUB_TABS.MY_DIARY;
+  if (vis.diary.diarySettings) return DIARY_SUB_TABS.DIARY_SETTINGS;
   return DIARY_SUB_TABS.ALL_APPOINTMENTS;
 }
 
@@ -275,6 +283,7 @@ export function defaultViewSubTab(vis: StaffBranchVisibility): ViewSubTabId {
 
 export function defaultFinanceSubTab(vis: StaffBranchVisibility): FinanceSubTabId {
   if (vis.finance.myCommission) return FINANCE_SUB_TABS.MY_COMMISSION;
+  if (vis.finance.commissionStatements) return FINANCE_SUB_TABS.COMMISSION_STATEMENTS;
   if (vis.finance.commissionMgmt) return FINANCE_SUB_TABS.COMMISSION_MGMT;
   if (vis.finance.networkStatements) return FINANCE_SUB_TABS.NETWORK_STATEMENTS;
   return FINANCE_SUB_TABS.FINANCE_REPORT;

@@ -47,11 +47,11 @@ import {
   RafLinksAccessCard,
 } from "@/components/staff/panels";
 import { ViewBranchPanel } from "@/components/staff/panels/management/ViewBranchPanel";
-import { AdvisorCommissionStatementsPanel } from "@/components/staff/panels/management/AdvisorCommissionStatementsPanel";
 import { JourneyAnalyticsPanel } from "@/components/staff/panels/management/JourneyAnalyticsPanel";
 import { TeamRolesPanel } from "@/components/staff/panels/management/TeamRolesPanel";
 import { DiaryTabsPanel } from "@/components/staff/panels/diary/DiaryTabsPanel";
 import { NetworkStatementsPanel } from "@/components/staff/panels/finance/NetworkStatementsPanel";
+import { AdvisorCommissionStatementsPanel } from "@/components/staff/panels/management/AdvisorCommissionStatementsPanel";
 import { CommsScriptsPanel } from "@/components/staff/panels/marketing/CommsScriptsPanel";
 import { getAdvisorView } from "@/lib/advisor-view";
 import { HubSubNav, type HubSubNavTab } from "@/components/ui/tabs";
@@ -97,15 +97,6 @@ function ManagementBranchPanel({
       label: "Analytics",
       icon: <BarChart3 className="w-4 h-4 shrink-0" />,
       content: <JourneyAnalyticsPanel />,
-    });
-  }
-
-  if (visibility.management.advisorCommission) {
-    tabs.push({
-      id: MANAGEMENT_SUB_TABS.ADVISOR_COMMISSION,
-      label: "Commission statements",
-      icon: <PoundSterling className="w-4 h-4 shrink-0" />,
-      content: <AdvisorCommissionStatementsPanel />,
     });
   }
 
@@ -237,6 +228,15 @@ function FinanceBranchPanel({ visibility, staff }: { visibility: StaffBranchVisi
       label: "My commission",
       icon: <PoundSterling className="w-4 h-4 shrink-0" />,
       content: <MyCommissionBranchPanel />,
+    });
+  }
+
+  if (visibility.finance.commissionStatements) {
+    tabs.push({
+      id: FINANCE_SUB_TABS.COMMISSION_STATEMENTS,
+      label: "Commission statements",
+      icon: <PoundSterling className="w-4 h-4 shrink-0" />,
+      content: <AdvisorCommissionStatementsPanel />,
     });
   }
 

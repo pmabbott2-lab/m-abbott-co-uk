@@ -86,11 +86,9 @@ export function resolveManagementSubDefault(
   }
   const stored = readStorage(MANAGEMENT_SUB_KEY) as ManagementSubTabId | null;
   if (stored === MANAGEMENT_SUB_TABS.ANALYTICS && vis.management.analytics) return stored;
-  if (stored === MANAGEMENT_SUB_TABS.ADVISOR_COMMISSION && vis.management.advisorCommission) return stored;
   if (stored === MANAGEMENT_SUB_TABS.VIEW && vis.management.view && opts?.showViewTab !== false) return stored;
   if (stored === MANAGEMENT_SUB_TABS.MANAGE && vis.management.manage) return stored;
   if (stored === MANAGEMENT_SUB_TABS.ADMIN_ACCESS && vis.management.adminAccess) return stored;
-  if (vis.management.advisorCommission) return MANAGEMENT_SUB_TABS.ADVISOR_COMMISSION;
   if (vis.management.analytics) return MANAGEMENT_SUB_TABS.ANALYTICS;
   if (vis.management.view && opts?.showViewTab !== false) return MANAGEMENT_SUB_TABS.VIEW;
   if (vis.management.manage) return MANAGEMENT_SUB_TABS.MANAGE;

@@ -1,4 +1,4 @@
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, Settings } from "lucide-react";
 import {
   defaultDiarySubTab,
   DIARY_SUB_TABS,
@@ -8,6 +8,7 @@ import {
 } from "@/lib/staff-branch-nav";
 import { AdvisorDiaryPanel } from "@/components/staff/panels/diary/AdvisorDiaryPanel";
 import { AllAppointmentsGridPanel } from "@/components/staff/panels/diary/AllAppointmentsGridPanel";
+import { DiarySettingsPanel } from "@/components/staff/panels/diary/DiarySettingsPanel";
 import { HubSubNav, type HubSubNavTab } from "@/components/ui/tabs";
 
 type DiaryTabsPanelProps = {
@@ -42,6 +43,20 @@ export function DiaryTabsPanel({
               : "Filter by advisor name or code to view confirmed upcoming appointments."
           }
           teamsSearch={teamsSearch}
+        />
+      ),
+    });
+  }
+
+  if (visibility.diary.diarySettings) {
+    tabs.push({
+      id: DIARY_SUB_TABS.DIARY_SETTINGS,
+      label: "Diary settings",
+      icon: <Settings className="w-4 h-4 shrink-0" />,
+      content: (
+        <DiarySettingsPanel
+          viewAsAdvisorId={viewAsAdvisorId}
+          allowAdvisorFilter={!isStaffAdvisor && !viewAsAdvisorId}
         />
       ),
     });

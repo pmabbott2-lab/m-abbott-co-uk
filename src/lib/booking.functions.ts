@@ -244,8 +244,6 @@ async function computeAdvisorFreeSlots(
   dateKey: string,
 ): Promise<string[]> {
   const dayOfWeek = londonWeekdayIndex(dateKey);
-  // Weekends never have Hub demo / default hours.
-  if (dayOfWeek === 0 || dayOfWeek === 6) return [];
 
   if (advisor.isTest) {
     await ensureTestAdvisorDemoDiary(advisor.id);
@@ -255,23 +253,53 @@ async function computeAdvisorFreeSlots(
 
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-  let startMin = parseTimeToMinutes(TEST_DIARY_START);
-  let endMin = parseTimeToMinutes(TEST_DIARY_END);
-  let slotSize = SLOT_MINUTES;
+  const { data: exception } = await supabaseAdmin
+    .from("advisor_diary_exceptions")
+    .select("unavailable")
+    .eq("advisor_id", advisor.id)
+    .eq("exception_date", dateKey)
+    .maybeSingle();
+  if (exception?.unavailable) return [];
 
-  if (!advisor.isTest) {
-    const { data: availability, error: availErr } = await supabaseAdmin
+  const { data: settings } = await supabaseAdmin
+    .from("advisor_diary_settings")
+    .select("slot_minutes, buffer_minutes, min_notice_minutes, max_horizon_days")
+    .eq("advisor_id", advisor.id)
+    .maybeSingle();
+
+  let slotSize = settings?.slot_minutes ?? SLOT_MINUTES;
+  const bufferMinutes = settings?.buffer_minutes ?? 0;
+  const minNoticeMinutes = settings?.min_notice_minutes ?? 0;
+  const horizonDays = settings?.max_horizon_days ?? BOOKING_HORIZON_DAYS;
+
+  type Window = { startMin: number; endMin: number };
+  let windows: Window[] = [];
+
+  if (advisor.isTest) {
+    if (dayOfWeek === 0 || dayOfWeek === 6) return [];
+    windows = [
+      {
+        startMin: parseTimeToMinutes(TEST_DIARY_START),
+        endMin: parseTimeToMinutes(TEST_DIARY_END),
+      },
+    ];
+    slotSize = SLOT_MINUTES;
+  } else {
+    const { data: availabilityRows, error: availErr } = await supabaseAdmin
       .from("advisor_availability")
       .select("*")
       .eq("advisor_id", advisor.id)
       .eq("day_of_week", dayOfWeek)
-      .eq("active", true)
-      .maybeSingle();
+      .eq("active", true);
     if (availErr) throw new Error(availErr.message);
-    if (!availability) return [];
-    startMin = parseTimeToMinutes(String(availability.start_time).slice(0, 5));
-    endMin = parseTimeToMinutes(String(availability.end_time).slice(0, 5));
-    slotSize = availability.slot_minutes ?? SLOT_MINUTES;
+    if (!availabilityRows?.length) return [];
+    windows = availabilityRows.map((availability) => ({
+      startMin: parseTimeToMinutes(String(availability.start_time).slice(0, 5)),
+      endMin: parseTimeToMinutes(String(availability.end_time).slice(0, 5)),
+    }));
+    if (!settings?.slot_minutes) {
+      slotSize = availabilityRows[0]?.slot_minutes ?? SLOT_MINUTES;
+    }
   }
 
   const dayStart = londonWallToUtc(dateKey, "00:00");
@@ -285,7 +313,10 @@ async function computeAdvisorFreeSlots(
     .lte("starts_at", dayEnd.toISOString());
   if (bookedErr) throw new Error(bookedErr.message);
 
-  const bookedStarts = new Set((booked ?? []).map((b) => new Date(b.starts_at).toISOString()));
+  const bookedIntervals = (booked ?? []).map((b) => ({
+    start: new Date(b.starts_at),
+    end: new Date(b.ends_at),
+  }));
 
   let outlookBusy: Array<{ start: Date; end: Date }> = [];
   let slotOverlapsBusy: (
@@ -304,18 +335,31 @@ async function computeAdvisorFreeSlots(
   }
 
   const now = new Date();
-  const horizon = new Date(now.getTime() + BOOKING_HORIZON_DAYS * 24 * 60 * 60 * 1000);
+  const earliest = new Date(now.getTime() + minNoticeMinutes * 60 * 1000);
+  const horizon = new Date(now.getTime() + horizonDays * 24 * 60 * 60 * 1000);
+  const bufferMs = bufferMinutes * 60 * 1000;
   const slots: string[] = [];
 
-  for (let t = startMin; t + slotSize <= endMin; t += slotSize) {
-    const time = minutesToTime(t);
-    const startsAt = londonWallToUtc(dateKey, time);
-    if (startsAt <= now) continue;
-    if (startsAt > horizon) continue;
-    if (bookedStarts.has(startsAt.toISOString())) continue;
-    const endsAt = new Date(startsAt.getTime() + slotSize * 60 * 1000);
-    if (!advisor.isTest && slotOverlapsBusy(startsAt, endsAt, outlookBusy)) continue;
-    slots.push(startsAt.toISOString());
+  const overlapsBuffered = (slotStart: Date, slotEnd: Date) => {
+    for (const b of bookedIntervals) {
+      const busyStart = new Date(b.start.getTime() - bufferMs);
+      const busyEnd = new Date(b.end.getTime() + bufferMs);
+      if (slotStart < busyEnd && slotEnd > busyStart) return true;
+    }
+    return false;
+  };
+
+  for (const window of windows) {
+    for (let t = window.startMin; t + slotSize <= window.endMin; t += slotSize) {
+      const time = minutesToTime(t);
+      const startsAt = londonWallToUtc(dateKey, time);
+      if (startsAt <= earliest) continue;
+      if (startsAt > horizon) continue;
+      const endsAt = new Date(startsAt.getTime() + slotSize * 60 * 1000);
+      if (overlapsBuffered(startsAt, endsAt)) continue;
+      if (!advisor.isTest && slotOverlapsBusy(startsAt, endsAt, outlookBusy)) continue;
+      slots.push(startsAt.toISOString());
+    }
   }
   return slots;
 }
@@ -382,6 +426,24 @@ async function getAdvisorName(advisorId: string): Promise<string> {
   } catch {
     return "your advisor";
   }
+}
+
+async function getAdvisorSlotMinutes(advisorId: string): Promise<number> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: settings } = await supabaseAdmin
+    .from("advisor_diary_settings")
+    .select("slot_minutes")
+    .eq("advisor_id", advisorId)
+    .maybeSingle();
+  if (settings?.slot_minutes) return settings.slot_minutes;
+  const { data: avail } = await supabaseAdmin
+    .from("advisor_availability")
+    .select("slot_minutes")
+    .eq("advisor_id", advisorId)
+    .eq("active", true)
+    .limit(1)
+    .maybeSingle();
+  return avail?.slot_minutes ?? SLOT_MINUTES;
 }
 
 async function ensureDefaultAvailability(advisorId: string) {
@@ -822,7 +884,8 @@ async function bookAppointment(
     }
   }
   const startsAt = new Date(data.startsAt);
-  const endsAt = new Date(startsAt.getTime() + SLOT_MINUTES * 60 * 1000);
+  const slotMinutes = await getAdvisorSlotMinutes(advisorId);
+  const endsAt = new Date(startsAt.getTime() + slotMinutes * 60 * 1000);
 
   const introducer = await resolveIntroducer(data.slug);
   let leadSource: "referral_link" | "introducer_portal" | "web" = "web";
@@ -3447,7 +3510,8 @@ export const rescheduleAppointment = createServerFn({ method: "POST" })
     if (!allowed) throw new Error("Forbidden");
 
     const startsAt = new Date(data.startsAt);
-    const endsAt = new Date(startsAt.getTime() + SLOT_MINUTES * 60 * 1000);
+    const slotMinutes = await getAdvisorSlotMinutes(appt.advisor_id);
+    const endsAt = new Date(startsAt.getTime() + slotMinutes * 60 * 1000);
 
     const { data: conflict } = await supabaseAdmin
       .from("appointments")

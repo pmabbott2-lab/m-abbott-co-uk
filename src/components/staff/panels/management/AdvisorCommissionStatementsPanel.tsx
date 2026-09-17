@@ -6,7 +6,7 @@ import { MyCommissionBranchPanel } from "@/components/MyCommissionStatementPanel
 import { Label } from "@/components/ui/label";
 import { listAdvisors } from "@/lib/sessions.functions";
 
-/** Management → Advisor commission statements — filter by advisor (owner/supervisor/admin). */
+/** Finance → Advisor commission statements — filter by advisor (owner/supervisor/admin). */
 export function AdvisorCommissionStatementsPanel() {
   const advisorsFn = useServerFn(listAdvisors);
   const advisorsQ = useQuery({
