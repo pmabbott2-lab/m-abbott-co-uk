@@ -108,6 +108,11 @@ jobs:
     permissions:
       id-token: write #This is required for requesting the JWT
       contents: read #This is required for actions/checkout
+    env:
+      # Map secrets to env so step `if:` can test them (secrets.* is illegal in if expressions).
+      SUPABASE_URL_SECRET: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_PUBLISHABLE_KEY_SECRET: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY_SECRET: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
     steps:
       - name: Download artifact from build job
@@ -165,7 +170,7 @@ jobs:
       # When GitHub secrets are present, overwrite Azure Supabase keys so Auth Admin
       # never runs with a publishable key (that yields “valid Bearer token” errors).
       - name: Sync Supabase keys to Azure (when GitHub secrets exist)
-        if: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY != '' && secrets.SUPABASE_URL != '' && secrets.SUPABASE_PUBLISHABLE_KEY != '' }}
+        if: ${{ env.SUPABASE_SERVICE_ROLE_KEY_SECRET != '' && env.SUPABASE_URL_SECRET != '' && env.SUPABASE_PUBLISHABLE_KEY_SECRET != '' }}
         uses: azure/appservice-settings@v1
         with:
           app-name: Mortgagehub-prod
@@ -174,27 +179,27 @@ jobs:
             [
               {
                 "name": "SUPABASE_URL",
-                "value": "${{ secrets.SUPABASE_URL }}",
+                "value": "${{ env.SUPABASE_URL_SECRET }}",
                 "slotSetting": false
               },
               {
                 "name": "VITE_SUPABASE_URL",
-                "value": "${{ secrets.SUPABASE_URL }}",
+                "value": "${{ env.SUPABASE_URL_SECRET }}",
                 "slotSetting": false
               },
               {
                 "name": "SUPABASE_PUBLISHABLE_KEY",
-                "value": "${{ secrets.SUPABASE_PUBLISHABLE_KEY }}",
+                "value": "${{ env.SUPABASE_PUBLISHABLE_KEY_SECRET }}",
                 "slotSetting": false
               },
               {
                 "name": "VITE_SUPABASE_PUBLISHABLE_KEY",
-                "value": "${{ secrets.SUPABASE_PUBLISHABLE_KEY }}",
+                "value": "${{ env.SUPABASE_PUBLISHABLE_KEY_SECRET }}",
                 "slotSetting": false
               },
               {
                 "name": "SUPABASE_SERVICE_ROLE_KEY",
-                "value": "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}",
+                "value": "${{ env.SUPABASE_SERVICE_ROLE_KEY_SECRET }}",
                 "slotSetting": false
               }
             ]
