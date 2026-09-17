@@ -1,22 +1,24 @@
 # Mortgage Hub — Multi-tenant Phase 0 (revised)
 
-**Status:** Phase 0 approved · **Gate G1 complete** · post-G1 EXTERNAL data-wall design pending approval · **G2 not started**  
-**Revised:** 2026-09-17 (post-G1 checkpoint)  
-**Do not** start G2, backfill, RLS cutover, MFA, Super Owner conversion, or Azure deploy without explicit authorisation.
+**Status:** Phase 0 approved · **G1 + G1A complete** · **G2 not started**  
+**Revised:** 2026-09-17 (Gate G1A)  
+**Do not** start G2, backfill, RLS cutover, MFA, Super Owner conversion, feature route enforcement, or Azure deploy without explicit authorisation.
 
 | Document | Role |
 |----------|------|
 | This file | Authoritative Phase 0 + gated plan |
 | `docs/SUPER_OWNER_RECOVERY.md` | Super Owner MFA recovery (design) |
-| `docs/TENANT_CLASSIFICATION_AND_DATA_WALL.md` | **GROUP/EXTERNAL data wall** (post-G1 design — approve before helper/RLS work) |
+| `docs/TENANT_CLASSIFICATION_AND_DATA_WALL.md` | GROUP/EXTERNAL data wall |
+| `docs/TENANT_FEATURES_AND_JOURNEYS.md` | Features & Journeys catalogue |
 
 | Baseline | Value |
 |----------|--------|
 | Pre-MT Git tag | `pre-multitenant-baseline` @ `244ceaa` |
-| Post-G1 Git tag | `post-g1-multitenant-scaffolding` (see latest commit) |
+| Post-G1 Git tag | `post-g1-multitenant-scaffolding` |
+| Post-G1A Git tag | `post-g1a-tenant-controls` (see latest commit) |
 | Immediate logical dump | `backups/pre-phase1-immediate-baseline-20260917T164555Z/` (**gitignored**) |
 
-**G1 note:** Platform tables + nullable `tenant_id` exist. `can_access_tenant()` currently treats Super Owner as universal tenant access — **must be split** into administer vs data-access helpers before EXTERNAL RLS (see data-wall doc).
+**G1A:** `tenant_type`, administer/data helpers, support/emergency grant tables, `feature_catalogue` / `tenant_features`, Susan 001 enabled / 002 disabled. Live app routes **not** yet enforcing features.
 
 ---
 

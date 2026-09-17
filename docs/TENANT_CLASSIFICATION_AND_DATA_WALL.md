@@ -1,7 +1,7 @@
 # Mortgage Hub — Tenant classification & EXTERNAL data wall
 
-**Status:** Design checkpoint only · **G2 not started** · **no production schema change**  
-**Revised:** 2026-09-17  
+**Status:** Design approved · **Gate G1A schema applied** · **G2 not started** · no business backfill  
+**Revised:** 2026-09-17 (G1A)  
 **Depends on:** Gate G1 scaffolding (`post-g1-multitenant-scaffolding`) · `docs/MULTI_TENANT_PHASE0.md`
 
 This document amends the approved multi-tenant architecture **before Gate G2**.  
@@ -242,7 +242,8 @@ Create Company
   → tenant_type: GROUP | EXTERNAL   (required)
   → company_code, slug, names, status
   → branding, regulatory, website, contact
-  → features / licensing
+  → Features & Journeys             (catalogue; see TENANT_FEATURES_AND_JOURNEYS.md)
+  → features / licensing entitlements
   → communications defaults
   → security / data-access defaults
        EXTERNAL → strongest isolation profile
@@ -252,12 +253,15 @@ Create Company
   → activate
 ```
 
+Features & Journeys is **orthogonal** to GROUP/EXTERNAL (an EXTERNAL tenant may enable Susan; a GROUP tenant may disable Susan).
+
 EXTERNAL defaults:
 
 - `tenant_type = EXTERNAL`
 - no Super Owner data access without grant
 - Super Admin grants default `platform_admin`
 - support access requires Owner approval (policy flag on tenant_settings)
+- conservative feature defaults (Susan **not** auto-enabled)
 
 ---
 
