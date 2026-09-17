@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/lib/auth-middleware";
-import { canAmend, canView, resolveAdminAccess } from "@/lib/admin-access";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { canAmend, canView } from "@/lib/admin-access";
+import { resolveAdminAccess } from "@/lib/admin.functions";
 import {
   clearCommunicationSettingsCache,
   type CommunicationTemplateRow,
