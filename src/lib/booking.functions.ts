@@ -36,17 +36,11 @@ function minutesToTime(total: number): string {
 }
 
 async function getPrimaryAdvisorId(): Promise<string> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data: advisors, error } = await supabaseAdmin
-    .from("user_roles")
-    .select("user_id")
-    .eq("role", "advisor");
-  if (error) throw new Error(error.message);
-  const ids = [...new Set((advisors ?? []).map((a) => a.user_id).filter(Boolean))];
-  if (ids.length === 0) {
+  const pool = await listBookableAdvisors();
+  if (pool.length === 0) {
     throw new Error("No advisor configured. Add an advisor role in Supabase first.");
   }
-  if (ids.length === 1) return ids[0]!;
+  if (pool.length === 1) return pool[0]!.id;
 
   // Prefer ADMIN_EMAILS owners who also hold the advisor role (stable “home” diary).
   const adminEmails = (process.env.ADMIN_EMAILS ?? "")
@@ -54,29 +48,201 @@ async function getPrimaryAdvisorId(): Promise<string> {
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);
   if (adminEmails.length > 0) {
-    const { data: profiles } = await supabaseAdmin
-      .from("profiles")
-      .select("id, email")
-      .in("id", ids);
-    const owner = (profiles ?? []).find(
+    const owner = pool.find(
       (p) => p.email && adminEmails.includes(p.email.trim().toLowerCase()),
     );
-    if (owner?.id) return owner.id;
+    if (owner) return owner.id;
   }
 
-  // Prefer an advisor with Teams calendar linked so bookings land where Outlook sync works.
-  const { data: linked } = await supabaseAdmin
-    .from("advisor_profiles")
-    .select("user_id")
-    .in("user_id", ids)
-    .eq("teams_calendar_enabled", true)
-    .order("teams_calendar_linked_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (linked?.user_id) return linked.user_id;
+  // Prefer a live advisor with Teams linked.
+  const linked = pool.find((p) => !p.isTest && p.teamsLinked);
+  if (linked) return linked.id;
 
-  // Deterministic fallback (Postgres limit(1) without ORDER BY is not stable).
-  return [...ids].sort()[0]!;
+  // Deterministic fallback.
+  return [...pool].sort((a, b) => a.id.localeCompare(b.id))[0]!.id;
+}
+
+export type BookableAdvisor = {
+  id: string;
+  fullName: string;
+  email: string | null;
+  isTest: boolean;
+  teamsLinked: boolean;
+};
+
+/**
+ * Advisors who can receive customer bookings.
+ * - Live advisors: Teams/Outlook must be linked (availability defaults to Outlook).
+ * - Test advisor accounts: included while live, Hub diary only (no Outlook required).
+ */
+async function listBookableAdvisors(): Promise<BookableAdvisor[]> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { isTestAccountEmail } = await import("@/lib/test-accounts");
+
+  const { data: advisors, error } = await supabaseAdmin
+    .from("user_roles")
+    .select("user_id")
+    .eq("role", "advisor");
+  if (error) throw new Error(error.message);
+  const ids = [...new Set((advisors ?? []).map((a) => a.user_id).filter(Boolean))];
+  if (ids.length === 0) return [];
+
+  const { data: profiles } = await supabaseAdmin
+    .from("profiles")
+    .select("id, full_name, email")
+    .in("id", ids);
+
+  const { data: advProfiles } = await supabaseAdmin
+    .from("advisor_profiles")
+    .select("user_id, deleted_at, teams_calendar_enabled, ms_refresh_token")
+    .in("user_id", ids);
+
+  const advById = new Map(
+    (advProfiles ?? []).map((r) => [
+      r.user_id,
+      r as {
+        user_id: string;
+        deleted_at?: string | null;
+        teams_calendar_enabled?: boolean | null;
+        ms_refresh_token?: string | null;
+      },
+    ]),
+  );
+
+  const out: BookableAdvisor[] = [];
+  for (const p of profiles ?? []) {
+    const ap = advById.get(p.id);
+    if (ap?.deleted_at) continue;
+    const email = p.email ?? null;
+    const isTest = isTestAccountEmail(email);
+    const teamsLinked = Boolean(ap?.teams_calendar_enabled && ap?.ms_refresh_token);
+    if (!isTest && !teamsLinked) continue;
+    out.push({
+      id: p.id,
+      fullName: (p.full_name ?? "").trim() || email || "Advisor",
+      email,
+      isTest,
+      teamsLinked,
+    });
+  }
+  return out.sort((a, b) => a.fullName.localeCompare(b.fullName));
+}
+
+async function countAdvisorAppointmentsOnDay(
+  advisorId: string,
+  dateKey: string,
+): Promise<number> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const dayStart = new Date(`${dateKey}T00:00:00`);
+  const dayEnd = new Date(`${dateKey}T23:59:59`);
+  const { count, error } = await supabaseAdmin
+    .from("appointments")
+    .select("id", { count: "exact", head: true })
+    .eq("advisor_id", advisorId)
+    .eq("status", "confirmed")
+    .gte("starts_at", dayStart.toISOString())
+    .lte("starts_at", dayEnd.toISOString());
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
+async function computeAdvisorFreeSlots(
+  advisor: BookableAdvisor,
+  dateKey: string,
+): Promise<string[]> {
+  await ensureDefaultAvailability(advisor.id);
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const day = new Date(`${dateKey}T12:00:00`);
+  const dayOfWeek = day.getDay();
+
+  const { data: availability, error: availErr } = await supabaseAdmin
+    .from("advisor_availability")
+    .select("*")
+    .eq("advisor_id", advisor.id)
+    .eq("day_of_week", dayOfWeek)
+    .eq("active", true)
+    .maybeSingle();
+  if (availErr) throw new Error(availErr.message);
+  if (!availability) return [];
+
+  const dayStart = new Date(`${dateKey}T00:00:00`);
+  const dayEnd = new Date(`${dateKey}T23:59:59`);
+  const { data: booked, error: bookedErr } = await supabaseAdmin
+    .from("appointments")
+    .select("starts_at, ends_at")
+    .eq("advisor_id", advisor.id)
+    .eq("status", "confirmed")
+    .gte("starts_at", dayStart.toISOString())
+    .lte("starts_at", dayEnd.toISOString());
+  if (bookedErr) throw new Error(bookedErr.message);
+
+  const bookedStarts = new Set((booked ?? []).map((b) => new Date(b.starts_at).toISOString()));
+
+  let outlookBusy: Array<{ start: Date; end: Date }> = [];
+  if (!advisor.isTest) {
+    const {
+      listAdvisorBusyIntervalsInOutlook,
+    } = await import("@/lib/teams-calendar.server");
+    outlookBusy = await listAdvisorBusyIntervalsInOutlook(advisor.id, dayStart, dayEnd);
+  }
+
+  const startMin = parseTimeToMinutes(availability.start_time.slice(0, 5));
+  const endMin = parseTimeToMinutes(availability.end_time.slice(0, 5));
+  const slotSize = availability.slot_minutes ?? SLOT_MINUTES;
+  const now = new Date();
+  const horizon = new Date();
+  horizon.setDate(horizon.getDate() + BOOKING_HORIZON_DAYS);
+  const slots: string[] = [];
+
+  const { slotOverlapsBusy } = await import("@/lib/teams-calendar.server");
+
+  for (let t = startMin; t + slotSize <= endMin; t += slotSize) {
+    const time = minutesToTime(t);
+    const startsAt = new Date(`${dateKey}T${time}:00`);
+    if (startsAt <= now) continue;
+    if (startsAt > horizon) continue;
+    if (bookedStarts.has(startsAt.toISOString())) continue;
+    const endsAt = new Date(startsAt.getTime() + slotSize * 60 * 1000);
+    if (!advisor.isTest && slotOverlapsBusy(startsAt, endsAt, outlookBusy)) continue;
+    slots.push(startsAt.toISOString());
+  }
+  return slots;
+}
+
+/** Calendar day (Europe/London) for Hub booking slots. */
+function londonDateKey(isoOrDate: string | Date): string {
+  const d = typeof isoOrDate === "string" ? new Date(isoOrDate) : isoOrDate;
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+/** Pick the free advisor with the fewest confirmed appointments that day. */
+async function pickLeastLoadedAdvisorForSlot(
+  startsAtIso: string,
+  candidates?: BookableAdvisor[],
+): Promise<string> {
+  const dateKey = londonDateKey(startsAtIso);
+  const pool = candidates ?? (await listBookableAdvisors());
+  const free: BookableAdvisor[] = [];
+  for (const advisor of pool) {
+    const slots = await computeAdvisorFreeSlots(advisor, dateKey);
+    if (slots.includes(startsAtIso)) free.push(advisor);
+  }
+  if (free.length === 0) {
+    throw new Error("That time slot is no longer available. Please choose another.");
+  }
+  const scored = await Promise.all(
+    free.map(async (a) => ({
+      advisor: a,
+      load: await countAdvisorAppointmentsOnDay(a.id, dateKey),
+    })),
+  );
+  scored.sort((a, b) => a.load - b.load || a.advisor.id.localeCompare(b.advisor.id));
+  return scored[0]!.advisor.id;
 }
 
 async function resolveBookingAdvisorId(staffUserId?: string): Promise<string> {
@@ -154,60 +320,75 @@ export const getAvailableSlots = createServerFn({ method: "GET" })
     z
       .object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        /** When set, only that advisor’s diary. When omitted, pool of bookable advisors. */
         advisorId: z.string().uuid().optional(),
+        /** Use the full bookable pool (Teams-linked live + live test advisors). */
+        pool: z.boolean().optional(),
       })
       .parse(d),
   )
   .handler(async ({ data }) => {
-    const advisorId = data.advisorId ?? (await getPrimaryAdvisorId());
-    await ensureDefaultAvailability(advisorId);
+    const usePool = data.pool === true || !data.advisorId;
+    const pool = await listBookableAdvisors();
+    if (pool.length === 0) {
+      return {
+        slots: [] as string[],
+        advisorsBySlot: {} as Record<
+          string,
+          Array<{ id: string; fullName: string; isTest: boolean }>
+        >,
+        advisorId: null as string | null,
+      };
+    }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const day = new Date(`${data.date}T12:00:00`);
-    const dayOfWeek = day.getDay();
+    let advisors: BookableAdvisor[] = data.advisorId
+      ? pool.filter((a) => a.id === data.advisorId)
+      : usePool
+        ? pool
+        : pool.slice(0, 1);
 
-    const { data: availability, error: availErr } = await supabaseAdmin
-      .from("advisor_availability")
-      .select("*")
-      .eq("advisor_id", advisorId)
-      .eq("day_of_week", dayOfWeek)
-      .eq("active", true)
-      .maybeSingle();
-    if (availErr) throw new Error(availErr.message);
-    if (!availability) return { slots: [] as string[], advisorId };
-
-    const dayStart = new Date(`${data.date}T00:00:00`);
-    const dayEnd = new Date(`${data.date}T23:59:59`);
-    const { data: booked, error: bookedErr } = await supabaseAdmin
-      .from("appointments")
-      .select("starts_at, ends_at")
-      .eq("advisor_id", advisorId)
-      .eq("status", "confirmed")
-      .gte("starts_at", dayStart.toISOString())
-      .lte("starts_at", dayEnd.toISOString());
-    if (bookedErr) throw new Error(bookedErr.message);
-
-    const bookedStarts = new Set((booked ?? []).map((b) => new Date(b.starts_at).toISOString()));
-
-    const startMin = parseTimeToMinutes(availability.start_time.slice(0, 5));
-    const endMin = parseTimeToMinutes(availability.end_time.slice(0, 5));
-    const slotSize = availability.slot_minutes ?? SLOT_MINUTES;
-    const now = new Date();
-    const slots: string[] = [];
-
-    for (let t = startMin; t + slotSize <= endMin; t += slotSize) {
-      const time = minutesToTime(t);
-      const startsAt = new Date(`${data.date}T${time}:00`);
-      if (startsAt <= now) continue;
-      const horizon = new Date();
-      horizon.setDate(horizon.getDate() + BOOKING_HORIZON_DAYS);
-      if (startsAt > horizon) continue;
-      if (!bookedStarts.has(startsAt.toISOString())) {
-        slots.push(startsAt.toISOString());
+    // Single-advisor lock path when caller passed a specific id not in pool (e.g. staff self).
+    if (data.advisorId && advisors.length === 0) {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { isTestAccountEmail } = await import("@/lib/test-accounts");
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, email")
+        .eq("id", data.advisorId)
+        .maybeSingle();
+      if (profile) {
+        advisors.push({
+          id: profile.id,
+          fullName: (profile.full_name ?? "").trim() || profile.email || "Advisor",
+          email: profile.email,
+          isTest: isTestAccountEmail(profile.email),
+          teamsLinked: false,
+        });
       }
     }
 
-    return { slots, advisorId };
+    const advisorsBySlot: Record<
+      string,
+      Array<{ id: string; fullName: string; isTest: boolean }>
+    > = {};
+    const slotSet = new Set<string>();
+
+    for (const advisor of advisors) {
+      const free = await computeAdvisorFreeSlots(advisor, data.date);
+      for (const slot of free) {
+        slotSet.add(slot);
+        const list = advisorsBySlot[slot] ?? [];
+        list.push({ id: advisor.id, fullName: advisor.fullName, isTest: advisor.isTest });
+        advisorsBySlot[slot] = list;
+      }
+    }
+
+    const slots = [...slotSet].sort();
+    return {
+      slots,
+      advisorsBySlot,
+      advisorId: data.advisorId ?? null,
+    };
   });
 
 const appointmentInput = z.object({
@@ -216,6 +397,8 @@ const appointmentInput = z.object({
   sessionId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
   advisorId: z.string().uuid().optional(),
+  /** When true (or advisorId omitted on public booking), assign least-loaded free advisor. */
+  preferAnyAdvisor: z.boolean().optional(),
   channel: z.enum(["voice", "text", "direct_booking"]).optional(),
   customerName: z.string().min(2),
   customerPhone: z.string().min(7),
@@ -443,7 +626,25 @@ async function bookAppointment(
   data: z.infer<typeof appointmentInput>,
   actingUserId?: string,
 ) {
-  const advisorId = data.advisorId ?? (await resolveBookingAdvisorId(actingUserId));
+  let advisorId = data.advisorId ?? null;
+  if (data.preferAnyAdvisor) {
+    advisorId = await pickLeastLoadedAdvisorForSlot(data.startsAt);
+  } else if (!advisorId) {
+    if (actingUserId) {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { data: roles } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", actingUserId);
+      if ((roles ?? []).some((r) => r.role === "advisor")) {
+        advisorId = actingUserId;
+      } else {
+        advisorId = await pickLeastLoadedAdvisorForSlot(data.startsAt);
+      }
+    } else {
+      advisorId = await pickLeastLoadedAdvisorForSlot(data.startsAt);
+    }
+  }
   const startsAt = new Date(data.startsAt);
   const endsAt = new Date(startsAt.getTime() + SLOT_MINUTES * 60 * 1000);
 
@@ -640,6 +841,8 @@ const customerAppointmentSignupInput = z.object({
   customerPhone: z.string().min(7),
   customerEmail: z.string().email().optional().or(z.literal("")),
   startsAt: z.string().datetime(),
+  advisorId: z.string().uuid().optional(),
+  preferAnyAdvisor: z.boolean().optional(),
   password: z.string().min(6).optional(),
   journey: z.enum(["voice", "chat", "book"]).optional(),
   slug: z.string().min(1).optional(),
@@ -680,6 +883,8 @@ export const customerAppointmentSignup = createServerFn({ method: "POST" })
         customerPhone: data.customerPhone,
         customerEmail: emailRaw,
         startsAt: data.startsAt,
+        advisorId: data.advisorId,
+        preferAnyAdvisor: data.preferAnyAdvisor ?? !data.advisorId,
         channel,
         slug: data.slug,
       },
@@ -734,6 +939,8 @@ export const bookSessionAppointment = createServerFn({ method: "POST" })
         customerPhone: z.string().min(7),
         customerEmail: z.string().email().optional().or(z.literal("")),
         startsAt: z.string().datetime(),
+        advisorId: z.string().uuid().optional(),
+        preferAnyAdvisor: z.boolean().optional(),
         // Referral slug captured from the introducer link (introducer_ref cookie).
         // Keeps the introducer attached to self-serve bookings.
         slug: z.string().min(1).optional(),
@@ -757,6 +964,8 @@ export const bookSessionAppointment = createServerFn({ method: "POST" })
         customerPhone: data.customerPhone,
         customerEmail: data.customerEmail,
         startsAt: data.startsAt,
+        advisorId: data.advisorId,
+        preferAnyAdvisor: data.preferAnyAdvisor ?? !data.advisorId,
         slug: data.slug,
       },
       context.userId,
@@ -780,6 +989,8 @@ export const bookCustomerAppointmentAsStaff = createServerFn({ method: "POST" })
         customerPhone: z.string().min(7),
         customerEmail: z.string().email(),
         startsAt: z.string().datetime(),
+        advisorId: z.string().uuid().optional(),
+        preferAnyAdvisor: z.boolean().optional(),
         notes: z.string().max(500).optional(),
         sendSms: z.boolean().optional(),
       })
@@ -835,13 +1046,12 @@ export const bookCustomerAppointmentAsStaff = createServerFn({ method: "POST" })
       }
     }
 
-    const advisorId = await resolveBookingAdvisorId(context.userId);
-
     return bookAppointment(
       {
         sessionId: sessionId ?? undefined,
         customerId: data.customerId,
-        advisorId,
+        advisorId: data.advisorId,
+        preferAnyAdvisor: data.preferAnyAdvisor ?? !data.advisorId,
         channel: "direct_booking",
         customerName: data.customerName,
         customerPhone: data.customerPhone,
@@ -863,6 +1073,7 @@ export const bookCaseFollowUpAppointment = createServerFn({ method: "POST" })
         sessionId: z.string().uuid(),
         customerId: z.string().uuid(),
         advisorId: z.string().uuid().optional(),
+        preferAnyAdvisor: z.boolean().optional(),
         customerName: z.string().min(2),
         customerPhone: z.string().min(7),
         customerEmail: z.string().email().optional().or(z.literal("")),
@@ -896,7 +1107,7 @@ export const bookCaseFollowUpAppointment = createServerFn({ method: "POST" })
     }
 
     let advisorId = data.advisorId ?? null;
-    if (!advisorId) {
+    if (!data.preferAnyAdvisor && !advisorId) {
       const { data: alloc } = await supabaseAdmin
         .from("session_advisors")
         .select("advisor_id")
@@ -905,15 +1116,13 @@ export const bookCaseFollowUpAppointment = createServerFn({ method: "POST" })
         .maybeSingle();
       advisorId = alloc?.advisor_id ?? null;
     }
-    if (!advisorId) {
-      advisorId = await resolveBookingAdvisorId(context.userId);
-    }
 
     return bookAppointment(
       {
         sessionId: data.sessionId,
         customerId: data.customerId,
-        advisorId,
+        advisorId: advisorId ?? undefined,
+        preferAnyAdvisor: data.preferAnyAdvisor ?? !advisorId,
         channel: "direct_booking",
         customerName: data.customerName,
         customerPhone: data.customerPhone,
@@ -2676,6 +2885,8 @@ export const bookNewCustomerAsStaff = createServerFn({ method: "POST" })
         customerPhone: z.string().min(7),
         customerEmail: z.string().email(),
         startsAt: z.string().datetime(),
+        advisorId: z.string().uuid().optional(),
+        preferAnyAdvisor: z.boolean().optional(),
         notes: z.string().max(500).optional(),
         sendSms: z.boolean().optional(),
       })
@@ -2688,11 +2899,11 @@ export const bookNewCustomerAsStaff = createServerFn({ method: "POST" })
       customerPhone: data.customerPhone,
       customerEmail: data.customerEmail,
     });
-    const advisorId = await resolveBookingAdvisorId(context.userId);
     return bookAppointment(
       {
         customerId,
-        advisorId,
+        advisorId: data.advisorId,
+        preferAnyAdvisor: data.preferAnyAdvisor ?? !data.advisorId,
         channel: "direct_booking",
         customerName: data.customerName,
         customerPhone: data.customerPhone,
@@ -2804,6 +3015,7 @@ export const bookNewCustomerAsIntroducer = createServerFn({ method: "POST" })
         customerEmail: z.string().email(),
         startsAt: z.string().datetime(),
         advisorId: z.string().uuid().optional(),
+        preferAnyAdvisor: z.boolean().optional(),
         notes: z.string().max(500).optional(),
         sendSms: z.boolean().optional(),
         viewAsIntroducerUserId: z.string().uuid().optional(),
@@ -2832,11 +3044,11 @@ export const bookNewCustomerAsIntroducer = createServerFn({ method: "POST" })
       customerPhone: data.customerPhone,
       customerEmail: data.customerEmail,
     });
-    const advisorId = data.advisorId ?? (await getPrimaryAdvisorId());
     const result = await bookAppointment(
       {
         customerId,
-        advisorId,
+        advisorId: data.advisorId,
+        preferAnyAdvisor: data.preferAnyAdvisor ?? !data.advisorId,
         channel: "direct_booking",
         customerName: data.customerName,
         customerPhone: data.customerPhone,

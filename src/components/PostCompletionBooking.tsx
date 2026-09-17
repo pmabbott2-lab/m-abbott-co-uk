@@ -13,6 +13,11 @@ import {
   requestSessionCallback,
 } from "@/lib/booking.functions";
 import { getReferralSlug } from "@/lib/referral";
+import {
+  BookingAdvisorPicker,
+  advisorChoiceToPayload,
+  type AdvisorChoice,
+} from "@/components/BookingAdvisorPicker";
 
 type Props = {
   sessionId: string;
@@ -55,6 +60,7 @@ export function PostCompletionBooking({
   const [mode, setMode] = useState<"appointment" | "callback">(initialMode);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [advisorChoice, setAdvisorChoice] = useState<AdvisorChoice>("any");
   const [customerName, setCustomerName] = useState(defaultName);
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerEmail, setCustomerEmail] = useState(defaultEmail);
@@ -68,14 +74,20 @@ export function PostCompletionBooking({
 
   const dateKey = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null;
   const slotsQ = useQuery({
-    queryKey: ["available-slots", dateKey],
-    queryFn: () => slotsFn({ data: { date: dateKey! } }),
+    queryKey: ["available-slots", dateKey, "pool"],
+    queryFn: () => slotsFn({ data: { date: dateKey!, pool: true } }),
     enabled: Boolean(dateKey) && mode === "appointment",
   });
 
+  const advisorsForSlot =
+    selectedSlot && slotsQ.data?.advisorsBySlot
+      ? (slotsQ.data.advisorsBySlot[selectedSlot] ?? [])
+      : [];
+
   const book = useMutation({
-    mutationFn: () =>
-      bookFn({
+    mutationFn: () => {
+      const adv = advisorChoiceToPayload(advisorChoice);
+      return bookFn({
         data: {
           sessionId,
           channel,
@@ -84,8 +96,10 @@ export function PostCompletionBooking({
           customerEmail,
           startsAt: selectedSlot!,
           slug: getReferralSlug() ?? undefined,
+          ...adv,
         },
-      }),
+      });
+    },
     onSuccess: () => onComplete(),
   });
 
@@ -162,6 +176,7 @@ export function PostCompletionBooking({
               onSelect={(d) => {
                 setSelectedDate(d);
                 setSelectedSlot(null);
+                setAdvisorChoice("any");
               }}
               disabled={{ before: new Date() }}
             />
@@ -186,13 +201,23 @@ export function PostCompletionBooking({
                     type="button"
                     variant={selectedSlot === slot ? "default" : "outline"}
                     size="sm"
-                    onClick={() => setSelectedSlot(slot)}
+                    onClick={() => {
+                      setSelectedSlot(slot);
+                      setAdvisorChoice("any");
+                    }}
                   >
                     {format(new Date(slot), "HH:mm")}
                   </Button>
                 ))}
               </div>
             </div>
+
+            <BookingAdvisorPicker
+              selectedSlot={selectedSlot}
+              advisorsForSlot={advisorsForSlot}
+              value={advisorChoice}
+              onChange={setAdvisorChoice}
+            />
 
             <DetailsFields
               customerName={customerName}

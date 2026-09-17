@@ -11,6 +11,11 @@ import {
   customerAppointmentSignup,
   getAvailableSlots,
 } from "@/lib/booking.functions";
+import {
+  BookingAdvisorPicker,
+  advisorChoiceToPayload,
+  type AdvisorChoice,
+} from "@/components/BookingAdvisorPicker";
 import { verifyAppointmentSignupSms } from "@/lib/auth.functions";
 import { getReferralSlug } from "@/lib/referral";
 import { isValidUkMobile, normaliseUkPhone } from "@/lib/phone";
@@ -54,6 +59,7 @@ export function CustomerAppointmentSignup({
 
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [advisorChoice, setAdvisorChoice] = useState<AdvisorChoice>("any");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
@@ -68,10 +74,14 @@ export function CustomerAppointmentSignup({
 
   const dateKey = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null;
   const slotsQ = useQuery({
-    queryKey: ["appointment-signup-slots", dateKey],
-    queryFn: () => slotsFn({ data: { date: dateKey! } }),
+    queryKey: ["appointment-signup-slots", dateKey, "pool"],
+    queryFn: () => slotsFn({ data: { date: dateKey!, pool: true } }),
     enabled: Boolean(dateKey),
   });
+  const advisorsForSlot =
+    selectedSlot && slotsQ.data?.advisorsBySlot
+      ? (slotsQ.data.advisorsBySlot[selectedSlot] ?? [])
+      : [];
 
   const finishSession = async (session: { access_token: string; refresh_token: string; user?: { id: string } }) => {
     const { error } = await supabase.auth.setSession({
@@ -124,6 +134,7 @@ export function CustomerAppointmentSignup({
         throw new Error("Enter your email if you want to set a password — or leave password blank.");
       }
 
+      const adv = advisorChoiceToPayload(advisorChoice);
       const result = await signupFn({
         data: {
           customerName: customerName.trim(),
@@ -133,6 +144,7 @@ export function CustomerAppointmentSignup({
           password: passwordTrim || undefined,
           journey,
           slug: getReferralSlug() ?? undefined,
+          ...adv,
         },
       });
 
@@ -274,6 +286,7 @@ export function CustomerAppointmentSignup({
             onSelect={(d) => {
               setSelectedDate(d);
               setSelectedSlot(null);
+              setAdvisorChoice("any");
             }}
             disabled={{ before: new Date() }}
             className="mx-auto"
@@ -296,13 +309,22 @@ export function CustomerAppointmentSignup({
                   type="button"
                   variant={selectedSlot === slot ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setSelectedSlot(slot)}
+                  onClick={() => {
+                    setSelectedSlot(slot);
+                    setAdvisorChoice("any");
+                  }}
                 >
                   {format(new Date(slot), "HH:mm")}
                 </Button>
               ))}
             </div>
           </div>
+          <BookingAdvisorPicker
+            selectedSlot={selectedSlot}
+            advisorsForSlot={advisorsForSlot}
+            value={advisorChoice}
+            onChange={setAdvisorChoice}
+          />
         </div>
 
         <div className="rounded-2xl border bg-card p-4 sm:p-5 space-y-4">

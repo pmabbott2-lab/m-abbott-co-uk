@@ -75,11 +75,29 @@ export function TestAccountsCard() {
     mutationFn: () => revokeFn(),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["test-account-status"] });
-      toast.success(`Revoked bypass on ${res.revoked.length} accounts. You can delete profiles when ready.`);
+      qc.invalidateQueries({ queryKey: ["admins"] });
+      qc.invalidateQueries({ queryKey: ["users-for-admin-grant"] });
+      const failed = res.errors?.length ?? 0;
+      if (failed) {
+        toast.error(
+          `Removed ${res.revoked.length} test accounts; ${failed} failed: ${res.errors!.map((e) => e.email).join(", ")}`,
+        );
+      } else {
+        toast.success(
+          `Removed ${res.revoked.length} test accounts and all related Hub data. Platform is clean.`,
+        );
+      }
     },
     onError: (e: unknown) =>
       toast.error(e instanceof Error ? e.message : "Could not revoke test accounts"),
   });
+
+  const confirmRevoke = () => {
+    const ok = window.confirm(
+      "Revoke all test accounts? This permanently deletes 1@–13@test.co.uk, their fact-finds, appointments, commission rates, and related Hub data. This cannot be undone (re-provision creates fresh accounts).",
+    );
+    if (ok) revoke.mutate();
+  };
 
   const reset = useMutation({
     mutationFn: (email: string) => resetFn({ data: { email } }),
@@ -120,11 +138,12 @@ export function TestAccountsCard() {
           <h3 className="font-medium">Test accounts</h3>
           <p className="text-sm text-muted-foreground break-words">
             Owner-only. Provisions {TEST_ACCOUNTS.length} accounts: 1–3 introducers, 4–5 advisors,
-            6–12 customers, and <strong>13@test.co.uk</strong> (general admin). Shared phone{" "}
+            6–12 customers, and             <strong>13@test.co.uk</strong> (general admin). Shared phone{" "}
             <span className="font-mono">{TEST_ACCOUNT_PHONE}</span>, password{" "}
             <span className="font-mono break-all">{TEST_ACCOUNT_PASSWORD}</span>. Use{" "}
             <strong>Reset</strong> on a row to wipe that account&apos;s Hub activity and start again.
-            Revoke before deleting profiles.
+            <strong> Revoke</strong> permanently deletes all test accounts and their Hub data for a
+            clean platform.
           </p>
         </div>
       </div>
@@ -137,11 +156,11 @@ export function TestAccountsCard() {
         <Button
           className="w-full sm:w-auto"
           variant="outline"
-          disabled={revoke.isPending || !anyBypass}
-          onClick={() => revoke.mutate()}
+          disabled={revoke.isPending || (!anyBypass && !rows.some((r) => r.exists))}
+          onClick={confirmRevoke}
         >
           <ShieldOff className="w-4 h-4 mr-2" />
-          {revoke.isPending ? "Revoking…" : "Revoke test accounts"}
+          {revoke.isPending ? "Removing…" : "Revoke & purge test data"}
         </Button>
       </div>
 

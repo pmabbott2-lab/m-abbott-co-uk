@@ -19,8 +19,12 @@ import {
   bookCaseFollowUpAppointment,
   bookCustomerAppointmentAsStaff,
   getAvailableSlots,
-  getStaffBookingAdvisorId,
 } from "@/lib/booking.functions";
+import {
+  BookingAdvisorPicker,
+  advisorChoiceToPayload,
+  type AdvisorChoice,
+} from "@/components/BookingAdvisorPicker";
 import { promoteSessionToCaseAsStaff } from "@/lib/sessions.functions";
 import type { CustomerHubFactFind } from "@/lib/sessions.functions";
 import { CalendarCheck, CheckCircle2 } from "lucide-react";
@@ -56,7 +60,6 @@ export function CustomerHubBookingDialog({
   onBooked,
 }: Props) {
   const slotsFn = useServerFn(getAvailableSlots);
-  const advisorFn = useServerFn(getStaffBookingAdvisorId);
   const bookFn = useServerFn(bookCustomerAppointmentAsStaff);
   const followUpFn = useServerFn(bookCaseFollowUpAppointment);
   const promoteFn = useServerFn(promoteSessionToCaseAsStaff);
@@ -64,18 +67,12 @@ export function CustomerHubBookingDialog({
   const [open, setOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [advisorChoice, setAdvisorChoice] = useState<AdvisorChoice>("any");
   const [name, setName] = useState(customerName);
   const [phone, setPhone] = useState(customerPhone ?? "");
   const [email, setEmail] = useState(customerEmail ?? "");
   const [sessionId, setSessionId] = useState(initialSessionId ?? "");
   const [bookedAt, setBookedAt] = useState<Date | null>(null);
-
-  const advisorQ = useQuery({
-    queryKey: ["staff-booking-advisor"],
-    queryFn: () => advisorFn(),
-    enabled: open,
-  });
-  const advisorId = advisorQ.data?.advisorId;
 
   useEffect(() => {
     if (!open) return;
@@ -85,20 +82,26 @@ export function CustomerHubBookingDialog({
     setSessionId(initialSessionId ?? "");
     setSelectedDate(undefined);
     setSelectedSlot(null);
+    setAdvisorChoice("any");
     setBookedAt(null);
   }, [open, customerName, customerPhone, customerEmail, initialSessionId]);
 
   const dateKey = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null;
   const slotsQ = useQuery({
-    queryKey: ["available-slots", dateKey, advisorId],
-    queryFn: () => slotsFn({ data: { date: dateKey!, advisorId } }),
-    enabled: open && Boolean(dateKey) && Boolean(advisorId),
+    queryKey: ["available-slots", dateKey, "pool"],
+    queryFn: () => slotsFn({ data: { date: dateKey!, pool: true } }),
+    enabled: open && Boolean(dateKey),
   });
+  const advisorsForSlot =
+    selectedSlot && slotsQ.data?.advisorsBySlot
+      ? (slotsQ.data.advisorsBySlot[selectedSlot] ?? [])
+      : [];
 
   const bookableFactFinds = factFinds.filter((ff) => !ff.hasAppointment);
 
   const book = useMutation({
     mutationFn: async () => {
+      const adv = advisorChoiceToPayload(advisorChoice);
       if (reengageExistingSession) {
         if (!sessionId) throw new Error("Missing fact-find to re-engage.");
         await promoteFn({ data: { sessionId, customerId } });
@@ -111,6 +114,7 @@ export function CustomerHubBookingDialog({
             customerEmail: email || undefined,
             startsAt: selectedSlot!,
             notes: "Abandoned lead re-engagement",
+            ...adv,
           },
         });
       }
@@ -122,6 +126,7 @@ export function CustomerHubBookingDialog({
           customerPhone: phone,
           customerEmail: email,
           startsAt: selectedSlot!,
+          ...adv,
         },
       });
     },
@@ -190,6 +195,7 @@ export function CustomerHubBookingDialog({
                   onSelect={(d) => {
                     setSelectedDate(d);
                     setSelectedSlot(null);
+                    setAdvisorChoice("any");
                   }}
                   disabled={{ before: new Date() }}
                 />
@@ -214,13 +220,23 @@ export function CustomerHubBookingDialog({
                         type="button"
                         variant={selectedSlot === slot ? "default" : "outline"}
                         size="sm"
-                        onClick={() => setSelectedSlot(slot)}
+                        onClick={() => {
+                          setSelectedSlot(slot);
+                          setAdvisorChoice("any");
+                        }}
                       >
                         {format(new Date(slot), "HH:mm")}
                       </Button>
                     ))}
                   </div>
                 </div>
+                <BookingAdvisorPicker
+                  selectedSlot={selectedSlot}
+                  advisorsForSlot={advisorsForSlot}
+                  value={advisorChoice}
+                  onChange={setAdvisorChoice}
+                />
+
 
                 {bookableFactFinds.length > 0 && (
                   <div className="space-y-1.5">

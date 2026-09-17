@@ -1,4 +1,4 @@
-/** Test accounts — owner-provisioned only. Revoke before deleting profiles. */
+/** Test accounts — owner-provisioned only. Revoke purges accounts + Hub data. */
 
 export const TEST_ACCOUNT_PHONE = "07123456789";
 export const TEST_ACCOUNT_PASSWORD = "TestHub2026!";

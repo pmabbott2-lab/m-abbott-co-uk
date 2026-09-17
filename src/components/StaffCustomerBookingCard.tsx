@@ -18,15 +18,18 @@ import {
 import {
   bookNewCustomerAsStaff,
   getAvailableSlots,
-  getStaffBookingAdvisorId,
   sendStaffCustomerBookingLink,
 } from "@/lib/booking.functions";
+import {
+  BookingAdvisorPicker,
+  advisorChoiceToPayload,
+  type AdvisorChoice,
+} from "@/components/BookingAdvisorPicker";
 import { CalendarCheck, CheckCircle2, Mail, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 
 export function StaffCustomerBookingCard({ onBooked }: { onBooked?: () => void }) {
   const slotsFn = useServerFn(getAvailableSlots);
-  const advisorFn = useServerFn(getStaffBookingAdvisorId);
   const bookFn = useServerFn(bookNewCustomerAsStaff);
   const linkFn = useServerFn(sendStaffCustomerBookingLink);
 
@@ -34,43 +37,45 @@ export function StaffCustomerBookingCard({ onBooked }: { onBooked?: () => void }
   const [mode, setMode] = useState<"book" | "link">("book");
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [advisorChoice, setAdvisorChoice] = useState<AdvisorChoice>("any");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [bookedAt, setBookedAt] = useState<Date | null>(null);
   const [sentLink, setSentLink] = useState<string | null>(null);
 
-  const advisorQ = useQuery({
-    queryKey: ["staff-booking-advisor"],
-    queryFn: () => advisorFn(),
-    enabled: open,
-  });
-  const advisorId = advisorQ.data?.advisorId;
-
   const dateKey = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null;
   const slotsQ = useQuery({
-    queryKey: ["staff-new-slots", dateKey, advisorId],
-    queryFn: () => slotsFn({ data: { date: dateKey!, advisorId } }),
-    enabled: open && mode === "book" && Boolean(dateKey) && Boolean(advisorId),
+    queryKey: ["staff-new-slots", dateKey, "pool"],
+    queryFn: () => slotsFn({ data: { date: dateKey!, pool: true } }),
+    enabled: open && mode === "book" && Boolean(dateKey),
   });
+  const advisorsForSlot =
+    selectedSlot && slotsQ.data?.advisorsBySlot
+      ? (slotsQ.data.advisorsBySlot[selectedSlot] ?? [])
+      : [];
 
   const resetForm = () => {
     setSelectedDate(undefined);
     setSelectedSlot(null);
+    setAdvisorChoice("any");
     setBookedAt(null);
     setSentLink(null);
   };
 
   const book = useMutation({
-    mutationFn: () =>
-      bookFn({
+    mutationFn: () => {
+      const adv = advisorChoiceToPayload(advisorChoice);
+      return bookFn({
         data: {
           customerName: name,
           customerPhone: phone,
           customerEmail: email,
           startsAt: selectedSlot!,
+          ...adv,
         },
-      }),
+      });
+    },
     onSuccess: () => {
       setBookedAt(selectedSlot ? new Date(selectedSlot) : null);
       onBooked?.();
@@ -205,41 +210,53 @@ export function StaffCustomerBookingCard({ onBooked }: { onBooked?: () => void }
             </div>
 
             {mode === "book" && (
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="rounded-xl border p-3">
-                  <h4 className="text-sm font-medium mb-2">Date</h4>
-                  <Calendar
-                    mode="single"
-                    selected={selectedDate}
-                    onSelect={(d) => {
-                      setSelectedDate(d);
-                      setSelectedSlot(null);
-                    }}
-                    disabled={{ before: new Date() }}
-                  />
-                </div>
-                <div>
-                  <h4 className="text-sm font-medium mb-2">Time</h4>
-                  {!selectedDate && (
-                    <p className="text-sm text-muted-foreground">Select a date first.</p>
-                  )}
-                  {selectedDate && slotsQ.isLoading && (
-                    <p className="text-sm text-muted-foreground">Loading slots…</p>
-                  )}
-                  <div className="grid grid-cols-2 gap-2">
-                    {(slotsQ.data?.slots ?? []).map((slot) => (
-                      <Button
-                        key={slot}
-                        type="button"
-                        variant={selectedSlot === slot ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => setSelectedSlot(slot)}
-                      >
-                        {format(new Date(slot), "HH:mm")}
-                      </Button>
-                    ))}
+              <div className="space-y-4">
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="rounded-xl border p-3">
+                    <h4 className="text-sm font-medium mb-2">Date</h4>
+                    <Calendar
+                      mode="single"
+                      selected={selectedDate}
+                      onSelect={(d) => {
+                        setSelectedDate(d);
+                        setSelectedSlot(null);
+                        setAdvisorChoice("any");
+                      }}
+                      disabled={{ before: new Date() }}
+                    />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-medium mb-2">Time</h4>
+                    {!selectedDate && (
+                      <p className="text-sm text-muted-foreground">Select a date first.</p>
+                    )}
+                    {selectedDate && slotsQ.isLoading && (
+                      <p className="text-sm text-muted-foreground">Loading slots…</p>
+                    )}
+                    <div className="grid grid-cols-2 gap-2">
+                      {(slotsQ.data?.slots ?? []).map((slot) => (
+                        <Button
+                          key={slot}
+                          type="button"
+                          variant={selectedSlot === slot ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => {
+                            setSelectedSlot(slot);
+                            setAdvisorChoice("any");
+                          }}
+                        >
+                          {format(new Date(slot), "HH:mm")}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
                 </div>
+                <BookingAdvisorPicker
+                  selectedSlot={selectedSlot}
+                  advisorsForSlot={advisorsForSlot}
+                  value={advisorChoice}
+                  onChange={setAdvisorChoice}
+                />
               </div>
             )}
 

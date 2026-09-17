@@ -499,33 +499,89 @@ export async function getTeamsLinkStatus(advisorUserId: string): Promise<{
   }
 }
 
+type GraphCalendarEvent = {
+  isCancelled?: boolean;
+  showAs?: string;
+  start?: { dateTime?: string; timeZone?: string };
+  end?: { dateTime?: string; timeZone?: string };
+};
+
+function isBusyShowAs(showAs?: string): boolean {
+  const v = (showAs ?? "busy").toLowerCase();
+  return v === "busy" || v === "oof" || v === "workingelsewhere";
+}
+
+/** Parse Graph calendar dateTime into the same wall-clock Date style Hub slots use. */
+function parseGraphWallDateTime(dt: string): Date {
+  const m = dt.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::(\d{2}))?/);
+  if (!m) return new Date(dt);
+  return new Date(`${m[1]}T${m[2]}:${m[3] ?? "00"}`);
+}
+
+/** Busy intervals from Outlook/Teams for a calendar day (requires linked Teams). */
+export async function listAdvisorBusyIntervalsInOutlook(
+  advisorUserId: string,
+  dayStart: Date,
+  dayEnd: Date,
+): Promise<Array<{ start: Date; end: Date }>> {
+  const token = await ensureAccessToken(advisorUserId);
+  if (!token) return [];
+
+  const path =
+    `/me/calendarView?startDateTime=${encodeURIComponent(dayStart.toISOString())}` +
+    `&endDateTime=${encodeURIComponent(dayEnd.toISOString())}` +
+    `&$select=id,subject,isCancelled,showAs,start,end&$top=100&$orderby=start/dateTime`;
+
+  try {
+    const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Prefer: 'outlook.timezone="Europe/London"',
+      },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Graph calendarView failed: ${text.slice(0, 300)}`);
+    }
+    const page = (await res.json()) as { value?: GraphCalendarEvent[] };
+    const out: Array<{ start: Date; end: Date }> = [];
+    for (const ev of page.value ?? []) {
+      if (ev.isCancelled || !isBusyShowAs(ev.showAs)) continue;
+      const startRaw = ev.start?.dateTime;
+      const endRaw = ev.end?.dateTime;
+      if (!startRaw || !endRaw) continue;
+      const start = parseGraphWallDateTime(startRaw);
+      const end = parseGraphWallDateTime(endRaw);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) continue;
+      out.push({ start, end });
+    }
+    return out;
+  } catch (e) {
+    console.error("Outlook calendarView day busy check failed", e);
+    return [];
+  }
+}
+
+export function slotOverlapsBusy(
+  slotStart: Date,
+  slotEnd: Date,
+  busy: Array<{ start: Date; end: Date }>,
+): boolean {
+  return busy.some((b) => slotStart < b.end && slotEnd > b.start);
+}
+
 /** True if Outlook calendar has an event covering `at` (requires linked Teams calendar). */
 export async function isAdvisorBusyInOutlookCalendar(
   advisorUserId: string,
   at: Date = new Date(),
 ): Promise<boolean> {
-  const token = await ensureAccessToken(advisorUserId);
-  if (!token) return false;
-
-  const start = new Date(at.getTime() - 60_000).toISOString();
-  const end = new Date(at.getTime() + 60_000).toISOString();
-  const path =
-    `/me/calendarView?startDateTime=${encodeURIComponent(start)}&endDateTime=${encodeURIComponent(end)}` +
-    `&$select=id,subject,isCancelled,showAs,start,end&$top=10`;
-
-  try {
-    const page = await graphGet<{
-      value?: Array<{ isCancelled?: boolean; showAs?: string }>;
-    }>(token, path);
-    return (page.value ?? []).some((ev) => {
-      if (ev.isCancelled) return false;
-      const showAs = (ev.showAs ?? "busy").toLowerCase();
-      return showAs === "busy" || showAs === "oof" || showAs === "workingelsewhere";
-    });
-  } catch (e) {
-    console.error("Outlook calendarView busy check failed", e);
-    return false;
-  }
+  const dayStart = new Date(at);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(at);
+  dayEnd.setHours(23, 59, 59, 999);
+  const busy = await listAdvisorBusyIntervalsInOutlook(advisorUserId, dayStart, dayEnd);
+  const slotEnd = new Date(at.getTime() + 30 * 60 * 1000);
+  return slotOverlapsBusy(at, slotEnd, busy);
 }
 
 function escapeHtml(s: string): string {
