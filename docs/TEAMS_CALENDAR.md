@@ -22,8 +22,11 @@ Or apply migration `20260713230000_teams_calendar_link.sql`.
    ```
 
    Examples:
+   - Production: `https://mymortgagehub.uk/api/teams/callback`
    - Local: `http://localhost:8080/api/teams/callback`
-   - Public: `https://another-selector-ranged.ngrok-free.dev/api/teams/callback`
+   - Demo tunnel: `https://another-selector-ranged.ngrok-free.dev/api/teams/callback`
+
+   Add **all** URIs you use (Entra allows multiple redirect URIs).
 
 5. **Certificates & secrets** → new client secret
 6. **API permissions** (Delegated):
@@ -42,9 +45,23 @@ TEAMS_CLIENT_ID=...
 TEAMS_CLIENT_SECRET=...
 TEAMS_TENANT_ID=common   # or your directory (tenant) ID
 VITE_APP_URL=https://your-app-url   # must match redirect origin
+APP_BASE_URL=https://your-app-url   # production / Azure App Setting
 ```
 
-Restart the site after editing `.env` (`npm run refresh:site`).
+### Azure (mymortgagehub.uk)
+
+In **Azure Portal → Mortgagehub-prod → Configuration → Application settings**, set the same three `TEAMS_*` values as on your laptop `.env`, plus:
+
+```
+APP_BASE_URL=https://mymortgagehub.uk
+VITE_APP_URL=https://mymortgagehub.uk
+```
+
+Or add GitHub Actions secrets `TEAMS_CLIENT_ID`, `TEAMS_CLIENT_SECRET`, `TEAMS_TENANT_ID` — the deploy workflow writes them into App Settings.
+
+In Entra, add redirect URI: `https://mymortgagehub.uk/api/teams/callback`.
+
+Restart / redeploy after changing settings.
 
 ## 4. Advisor flow
 

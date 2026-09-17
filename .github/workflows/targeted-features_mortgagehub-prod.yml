@@ -123,7 +123,7 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_6CDE810C6DD942AA83AAB86938AE38AC }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_0BB4606FADAC49DCB1511B23EE738AAB }}
 
-      - name: Ensure ADMIN_EMAILS owner App Setting
+      - name: Ensure production App Settings (owner + Teams + public URL)
         uses: azure/appservice-settings@v1
         with:
           app-name: Mortgagehub-prod
@@ -133,6 +133,31 @@ jobs:
               {
                 "name": "ADMIN_EMAILS",
                 "value": "pmabbott2@aol.com",
+                "slotSetting": false
+              },
+              {
+                "name": "APP_BASE_URL",
+                "value": "https://mymortgagehub.uk",
+                "slotSetting": false
+              },
+              {
+                "name": "VITE_APP_URL",
+                "value": "https://mymortgagehub.uk",
+                "slotSetting": false
+              },
+              {
+                "name": "TEAMS_CLIENT_ID",
+                "value": "${{ secrets.TEAMS_CLIENT_ID }}",
+                "slotSetting": false
+              },
+              {
+                "name": "TEAMS_CLIENT_SECRET",
+                "value": "${{ secrets.TEAMS_CLIENT_SECRET }}",
+                "slotSetting": false
+              },
+              {
+                "name": "TEAMS_TENANT_ID",
+                "value": "${{ secrets.TEAMS_TENANT_ID }}",
                 "slotSetting": false
               }
             ]
