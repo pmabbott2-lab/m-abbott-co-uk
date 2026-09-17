@@ -127,3 +127,49 @@ await twilioPost(`/IncomingPhoneNumbers/${match.sid}.json`, {
 
 console.log(`Landline ${phoneNumber}`);
 console.log(`  Inbound URL: ${inboundUrl}`);
+
+// ── SMS: all Hub numbers + Messaging Service → MMH inbound webhook ────────────
+const smsInboundUrl = `${appBaseUrl}/api/sms/inbound`;
+const allNums = await twilioGet(`/IncomingPhoneNumbers.json?PageSize=50`);
+for (const n of allNums.incoming_phone_numbers ?? []) {
+  const patch = {
+    SmsUrl: smsInboundUrl,
+    SmsMethod: "POST",
+  };
+  // Also point voice at MMH if this number was still on an old tunnel.
+  if ((n.voice_url || "").includes("ngrok") || !(n.voice_url || "").includes(appBaseUrl)) {
+    patch.VoiceUrl = inboundUrl;
+    patch.VoiceMethod = "POST";
+    patch.StatusCallback = `${appBaseUrl}/api/twilio/voice/status`;
+    patch.StatusCallbackMethod = "POST";
+  }
+  await twilioPost(`/IncomingPhoneNumbers/${n.sid}.json`, patch);
+  console.log(`Number ${n.phone_number}`);
+  console.log(`  SMS URL: ${smsInboundUrl}`);
+  if (patch.VoiceUrl) console.log(`  Voice URL: ${inboundUrl}`);
+}
+
+const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID?.trim();
+if (messagingServiceSid) {
+  const res = await fetch(`https://messaging.twilio.com/v1/Services/${messagingServiceSid}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${auth}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      InboundRequestUrl: smsInboundUrl,
+      InboundMethod: "POST",
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    console.warn(`Messaging Service update failed (${res.status}): ${text.slice(0, 300)}`);
+  } else {
+    console.log(`Messaging Service ${messagingServiceSid}`);
+    console.log(`  Inbound URL: ${smsInboundUrl}`);
+  }
+}
+
+console.log(`\nDone. Twilio now targets ${appBaseUrl}`);
+console.log("Ensure Azure App Settings APP_BASE_URL / VITE_APP_URL are https://mymortgagehub.uk");
