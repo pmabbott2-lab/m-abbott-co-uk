@@ -46,6 +46,7 @@ export type ViewSubTabId = (typeof VIEW_SUB_TABS)[keyof typeof VIEW_SUB_TABS];
 
 export const MARKETING_SUB_TABS = {
   REFER_A_FRIEND: "refer-a-friend",
+  COMMS_SCRIPTS: "comms-scripts",
 } as const;
 
 export type MarketingSubTabId = (typeof MARKETING_SUB_TABS)[keyof typeof MARKETING_SUB_TABS];
@@ -113,6 +114,7 @@ export type StaffBranchVisibility = {
   };
   marketing: {
     referAFriend: boolean;
+    commsScripts: boolean;
   };
   diary: {
     myDiary: boolean;
@@ -152,7 +154,9 @@ export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranc
 
   const manageInvites = canView(adminAccess, "invites");
   const marketingRaf = canView(adminAccess, "raf");
-  const marketing = isMainAdmin && marketingRaf;
+  const marketingScripts =
+    isOwner || isSupervisor || canView(adminAccess, "comms_templates");
+  const marketing = isMainAdmin && (marketingRaf || marketingScripts);
 
   const adminAccessTab = isOwner || isSupervisor;
   const analytics = isOwner || isSupervisor;
@@ -212,6 +216,7 @@ export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranc
     },
     marketing: {
       referAFriend: marketingRaf,
+      commsScripts: marketingScripts,
     },
     diary: {
       myDiary: diaryMy,
@@ -273,6 +278,11 @@ export function defaultFinanceSubTab(vis: StaffBranchVisibility): FinanceSubTabI
   if (vis.finance.commissionMgmt) return FINANCE_SUB_TABS.COMMISSION_MGMT;
   if (vis.finance.networkStatements) return FINANCE_SUB_TABS.NETWORK_STATEMENTS;
   return FINANCE_SUB_TABS.FINANCE_REPORT;
+}
+
+export function defaultMarketingSubTab(vis: StaffBranchVisibility): MarketingSubTabId {
+  if (vis.marketing.referAFriend) return MARKETING_SUB_TABS.REFER_A_FRIEND;
+  return MARKETING_SUB_TABS.COMMS_SCRIPTS;
 }
 
 export function countStaffBranches(vis: StaffBranchVisibility): number {

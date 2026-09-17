@@ -70,6 +70,9 @@ export async function sendSms(opts: {
   const to = normaliseUkPhone(opts.to);
   const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
 
+  const { withSmsRegulatoryFooter } = await import("@/lib/comms.server");
+  const body = await withSmsRegulatoryFooter(opts.body);
+
   const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
     method: "POST",
     headers: {
@@ -79,7 +82,7 @@ export async function sendSms(opts: {
     body: new URLSearchParams({
       To: to,
       MessagingServiceSid: messagingServiceSid,
-      Body: opts.body,
+      Body: body,
     }),
   });
 
@@ -101,13 +104,13 @@ export function getAppBaseUrl(): string {
   return "http://localhost:5173";
 }
 
-export function bookingConfirmationMessage(opts: {
+export async function bookingConfirmationMessage(opts: {
   customerName: string;
   startsAt: Date;
   advisorName?: string;
   bookingUrl?: string;
-}): string {
-  const when = opts.startsAt.toLocaleString("en-GB", {
+}): Promise<string> {
+  const whenParts = opts.startsAt.toLocaleString("en-GB", {
     weekday: "short",
     day: "numeric",
     month: "short",
@@ -115,15 +118,39 @@ export function bookingConfirmationMessage(opts: {
     minute: "2-digit",
     timeZone: "Europe/London",
   });
+  const dateOnly = opts.startsAt.toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "Europe/London",
+  });
+  const timeOnly = opts.startsAt.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/London",
+  });
   const advisor = opts.advisorName?.trim();
-  const lines = [
-    advisor
-      ? `Hi ${opts.customerName}, your mortgage appointment is confirmed — you will meet ${advisor} on ${when}.`
-      : `Hi ${opts.customerName}, your mortgage appointment is confirmed for ${when}.`,
-    "Reply HELP for assistance.",
-  ];
-  if (opts.bookingUrl) lines.splice(1, 0, opts.bookingUrl);
-  return lines.join("\n");
+  const firstName = opts.customerName.trim().split(/\s+/)[0] || opts.customerName;
+  const fallback = advisor
+    ? `Hi ${firstName}, your mortgage appointment is confirmed — you will meet ${advisor} on ${whenParts}.\n${opts.bookingUrl ?? ""}\nWe look forward to speaking with you.`
+    : `Hi ${firstName}, your mortgage appointment is confirmed for ${whenParts}.\n${opts.bookingUrl ?? ""}\nWe look forward to speaking with you.`;
+
+  const { renderSmsFromTemplate } = await import("@/lib/comms.server");
+  return renderSmsFromTemplate(
+    "sms_appointment_confirmation",
+    {
+      customer_first_name: firstName,
+      customer_full_name: opts.customerName,
+      appointment_date: dateOnly,
+      appointment_time: timeOnly,
+      appointment_when: whenParts,
+      adviser_name: advisor ?? "",
+      adviser_clause: advisor ? ` — you will meet ${advisor}` : "",
+      booking_url: opts.bookingUrl ?? "",
+      company_name: "MortgageEasy",
+    },
+    fallback,
+  );
 }
 
 /** The three call-back windows, with their human wording for the SMS. */
@@ -139,44 +166,84 @@ export function callbackWindowLabel(window: string): string {
   return CALLBACK_WINDOWS[window as CallbackWindow] ?? window;
 }
 
-export function callbackConfirmationMessage(opts: {
+export async function callbackConfirmationMessage(opts: {
   customerName: string;
   window: string;
   advisorName?: string;
-}): string {
-  const advisor = opts.advisorName?.trim() || "your advisor";
-  return [
-    `Hi ${opts.customerName}, thanks for completing your mortgage fact-find.`,
-    `${advisor} will give you a call between ${callbackWindowLabel(opts.window)}.`,
-    "Reply HELP for assistance.",
+}): Promise<string> {
+  const advisor = opts.advisorName?.trim() || "your adviser";
+  const firstName = opts.customerName.trim().split(/\s+/)[0] || opts.customerName;
+  const fallback = [
+    `Hi ${firstName}, thank you for completing your mortgage fact-find.`,
+    `${advisor} will call you between ${callbackWindowLabel(opts.window)}.`,
   ].join("\n");
+  const { renderSmsFromTemplate } = await import("@/lib/comms.server");
+  return renderSmsFromTemplate(
+    "sms_callback_confirmation",
+    {
+      customer_first_name: firstName,
+      adviser_name: advisor,
+      callback_window: callbackWindowLabel(opts.window),
+      company_name: "MortgageEasy",
+    },
+    fallback,
+  );
 }
 
-export function interviewCompleteMessage(opts: {
+export async function interviewCompleteMessage(opts: {
   name: string;
   summaryUrl: string;
-}): string {
-  return [
-    `Hi ${opts.name}, thanks for completing your mortgage fact-find.`,
-    `View your summary here: ${opts.summaryUrl}`,
-    "Reply HELP for assistance.",
+}): Promise<string> {
+  const fallback = [
+    `Hi ${opts.name}, thank you for completing your mortgage fact-find.`,
+    `You can view your summary here: ${opts.summaryUrl}`,
   ].join("\n");
+  const { renderSmsFromTemplate } = await import("@/lib/comms.server");
+  return renderSmsFromTemplate(
+    "sms_factfind_complete",
+    {
+      customer_first_name: opts.name,
+      session_url: opts.summaryUrl,
+      company_name: "MortgageEasy",
+    },
+    fallback,
+  );
 }
 
-export function textChannelInviteMessage(opts: {
+export async function textChannelInviteMessage(opts: {
   customerName: string;
   bookUrl: string;
   introducerName: string;
-}): string {
-  return `Hi ${opts.customerName}, ${opts.introducerName} has referred you for a mortgage appointment. Book a time here: ${opts.bookUrl}`;
+}): Promise<string> {
+  const firstName = opts.customerName.trim().split(/\s+/)[0] || opts.customerName;
+  const fallback = `Hi ${firstName}, ${opts.introducerName} has referred you for a mortgage appointment. Book a convenient time here: ${opts.bookUrl}`;
+  const { renderSmsFromTemplate } = await import("@/lib/comms.server");
+  return renderSmsFromTemplate(
+    "sms_booking_invite",
+    {
+      customer_first_name: firstName,
+      introducer_name: opts.introducerName,
+      booking_url: opts.bookUrl,
+      company_name: "MortgageEasy",
+    },
+    fallback,
+  );
 }
 
-const JOURNEY_MILESTONE_SMS: Record<string, string> = {
-  appointment_seen: "We've noted your appointment in our system and look forward to speaking with you.",
-  id_confirmed: "Your identity check has been confirmed — thank you.",
-  aip_completed: "Great news — your Agreement in Principle (AIP) is complete.",
-  offer_received: "Great news — your mortgage offer has been received.",
-  completion: "Congratulations — your mortgage completion has been recorded.",
+const JOURNEY_MILESTONE_KEYS: Record<string, string> = {
+  appointment_seen: "sms_journey_appointment_seen",
+  id_confirmed: "sms_journey_id_confirmed",
+  aip_completed: "sms_journey_aip_completed",
+  offer_received: "sms_journey_offer_received",
+  completion: "sms_journey_completion",
+};
+
+const JOURNEY_MILESTONE_FALLBACK: Record<string, string> = {
+  appointment_seen: "we have noted your appointment and look forward to speaking with you.",
+  id_confirmed: "your identity check has been confirmed — thank you.",
+  aip_completed: "great news — your Agreement in Principle (AIP) is complete.",
+  offer_received: "great news — your mortgage offer has been received.",
+  completion: "congratulations — your mortgage completion has been recorded.",
 };
 
 export async function sendJourneyMilestoneSms(
@@ -186,8 +253,9 @@ export async function sendJourneyMilestoneSms(
 ): Promise<void> {
   try {
     if (!isTwilioConfigured()) return;
-    const line = JOURNEY_MILESTONE_SMS[milestoneKey];
-    if (!line) return;
+    const templateKey = JOURNEY_MILESTONE_KEYS[milestoneKey];
+    const line = JOURNEY_MILESTONE_FALLBACK[milestoneKey];
+    if (!templateKey || !line) return;
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: profile } = await supabaseAdmin
@@ -199,7 +267,17 @@ export async function sendJourneyMilestoneSms(
     if (!phone) return;
 
     const firstName = profile?.full_name?.trim().split(/\s+/)[0] || "there";
-    const body = `Hi ${firstName}, ${line} View your file: ${getAppBaseUrl()}/sessions/${sessionId}`;
+    const sessionUrl = `${getAppBaseUrl()}/sessions/${sessionId}`;
+    const { renderSmsFromTemplate } = await import("@/lib/comms.server");
+    const body = await renderSmsFromTemplate(
+      templateKey,
+      {
+        customer_first_name: firstName,
+        session_url: sessionUrl,
+        company_name: "MortgageEasy",
+      },
+      `Hi ${firstName}, ${line}\nView your file: ${sessionUrl}`,
+    );
 
     const { sid } = await sendSms({ to: phone, body });
     try {
@@ -219,11 +297,7 @@ export async function sendJourneyMilestoneSms(
 }
 
 // Best-effort SMS confirming the fact-find is complete, with a direct link to
-// the summary page. Never throws into the caller's happy path: skips silently if
-// Twilio is unconfigured or the customer has no phone, and logs on failure.
-// Shared by both completion paths (natural completion in the interview-step API
-// and the explicit submitSession) so the text fires whichever way the customer
-// finishes.
+// the summary page. Never throws into the caller's happy path.
 export async function sendInterviewCompleteSms(customerId: string, sessionId: string): Promise<void> {
   try {
     if (!isTwilioConfigured()) return;
@@ -238,7 +312,7 @@ export async function sendInterviewCompleteSms(customerId: string, sessionId: st
 
     const firstName = profile?.full_name?.trim().split(/\s+/)[0] || "there";
     const summaryUrl = `${getAppBaseUrl()}/sessions/${sessionId}`;
-    const body = interviewCompleteMessage({ name: firstName, summaryUrl });
+    const body = await interviewCompleteMessage({ name: firstName, summaryUrl });
 
     const { sid } = await sendSms({ to: phone, body });
     try {

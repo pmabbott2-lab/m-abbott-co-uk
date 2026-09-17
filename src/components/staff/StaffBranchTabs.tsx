@@ -5,6 +5,7 @@ import {
   History,
   Inbox,
   Link2,
+  MessageSquareText,
   PoundSterling,
   Settings,
   ShieldCheck,
@@ -16,6 +17,7 @@ import {
 import {
   CUSTOMERS_SUB_TABS,
   defaultFinanceSubTab,
+  defaultMarketingSubTab,
   FINANCE_SUB_TABS,
   MANAGEMENT_SUB_TABS,
   MARKETING_SUB_TABS,
@@ -31,6 +33,7 @@ import {
   writeStaffNavStorage,
 } from "@/lib/staff-nav-persistence";
 import type { AdminAccess } from "@/lib/admin-access";
+import { canAmend, canEditAdminPermissions } from "@/lib/admin-access";
 import { CommissionPayoutsPanel } from "@/components/CommissionPayoutsPanel";
 import { RelationshipManagementPanel } from "@/components/RelationshipManagementPanel";
 import { MyCommissionBranchPanel } from "@/components/MyCommissionStatementPanel";
@@ -49,8 +52,8 @@ import { JourneyAnalyticsPanel } from "@/components/staff/panels/management/Jour
 import { TeamRolesPanel } from "@/components/staff/panels/management/TeamRolesPanel";
 import { DiaryTabsPanel } from "@/components/staff/panels/diary/DiaryTabsPanel";
 import { NetworkStatementsPanel } from "@/components/staff/panels/finance/NetworkStatementsPanel";
+import { CommsScriptsPanel } from "@/components/staff/panels/marketing/CommsScriptsPanel";
 import { getAdvisorView } from "@/lib/advisor-view";
-import { canEditAdminPermissions } from "@/lib/admin-access";
 import { HubSubNav, type HubSubNavTab } from "@/components/ui/tabs";
 
 export type StaffBranchContext = {
@@ -267,6 +270,43 @@ function FinanceBranchPanel({ visibility, staff }: { visibility: StaffBranchVisi
   return <HubSubNav tabs={tabs} defaultValue={defaultFinanceSubTab(visibility)} />;
 }
 
+function MarketingBranchPanel({
+  visibility,
+  staff,
+}: {
+  visibility: StaffBranchVisibility;
+  staff: StaffBranchContext;
+}) {
+  const tabs: HubSubNavTab[] = [];
+
+  if (visibility.marketing.referAFriend) {
+    tabs.push({
+      id: MARKETING_SUB_TABS.REFER_A_FRIEND,
+      label: "RAF",
+      icon: <Gift className="w-4 h-4 shrink-0" />,
+      content: <RafLinksAccessCard />,
+    });
+  }
+
+  if (visibility.marketing.commsScripts) {
+    tabs.push({
+      id: MARKETING_SUB_TABS.COMMS_SCRIPTS,
+      label: "Email / Text / Voice Scripts",
+      icon: <MessageSquareText className="w-4 h-4 shrink-0" />,
+      content: (
+        <CommsScriptsPanel
+          canAmend={
+            Boolean(staff.isOwner || staff.isSupervisor || canAmend(staff.adminAccess, "comms_templates"))
+          }
+        />
+      ),
+    });
+  }
+
+  if (tabs.length === 1) return <div className="space-y-4">{tabs[0].content}</div>;
+  return <HubSubNav tabs={tabs} defaultValue={defaultMarketingSubTab(visibility)} />;
+}
+
 export function StaffBranchTabs({ visibility, staff }: StaffBranchTabsProps) {
   const branchTabs: HubSubNavTab[] = [];
 
@@ -308,7 +348,7 @@ export function StaffBranchTabs({ visibility, staff }: StaffBranchTabsProps) {
       id: STAFF_BRANCHES.MARKETING,
       label: "Marketing",
       icon: <Gift className="w-4 h-4 shrink-0" />,
-      content: <RafLinksAccessCard />,
+      content: <MarketingBranchPanel visibility={visibility} staff={staff} />,
     });
   }
 

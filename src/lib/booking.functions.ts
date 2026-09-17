@@ -13,7 +13,7 @@ import {
 } from "@/lib/sms.server";
 import { clearSessionAttention, assertStaffCanAccessCustomer } from "@/lib/sessions.functions";
 
-const SLOT_MINUTES = 30;
+const SLOT_MINUTES = 90;
 const BOOKING_HORIZON_DAYS = 28;
 /** Demo diary hours for test advisors (Europe/London wall clock). */
 const TEST_DIARY_START = "09:00";
@@ -766,7 +766,7 @@ async function sendBookingConfirmations(opts: {
   const setupUrl = opts.sessionId
     ? `${getAppBaseUrl()}/sessions/${opts.sessionId}`
     : `${getAppBaseUrl()}/home`;
-  const message = bookingConfirmationMessage({
+  const message = await bookingConfirmationMessage({
     customerName: opts.customerName,
     startsAt: opts.startsAt,
     advisorName: opts.advisorName,
@@ -790,8 +790,10 @@ async function sendBookingConfirmations(opts: {
   }
 
   if (opts.customerEmail) {
+    // Email delivery is not wired yet (no mail provider on MMH). Keep a clear server log
+    // so operators can see the intended confirmation; SMS remains the live channel.
     console.info(
-      `[booking-email] To: ${opts.customerEmail} | ${opts.customerName} | ${setupUrl}`,
+      `[booking-email] NOT SENT (no email provider configured) | To: ${opts.customerEmail} | ${opts.customerName} | ${setupUrl}`,
     );
   }
 }
@@ -1682,7 +1684,7 @@ async function createCallbackRequest(
   if (isTwilioConfigured()) {
     try {
       const advisorName = await getAdvisorName(advisorId);
-      const message = callbackConfirmationMessage({
+      const message = await callbackConfirmationMessage({
         customerName: data.customerName,
         window: data.window,
         advisorName,
@@ -2969,7 +2971,7 @@ export const sendLeadBookingSms = createServerFn({ method: "POST" })
     if (!lead.customer_phone) throw new Error("Lead has no phone number.");
 
     const bookUrl = `${getAppBaseUrl()}/book/${introducer.slug}?lead=${lead.id}`;
-    const body = textChannelInviteMessage({
+    const body = await textChannelInviteMessage({
       customerName: lead.customer_name,
       bookUrl,
       introducerName: introducer.company_name,
@@ -3133,7 +3135,7 @@ export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
     if (leadErr) throw new Error(leadErr.message);
 
     const bookUrl = `${getAppBaseUrl()}/book/${introducer.slug}?lead=${lead.id}`;
-    const body = textChannelInviteMessage({
+    const body = await textChannelInviteMessage({
       customerName: data.customerName,
       bookUrl,
       introducerName: introducer.company_name ?? "Your advisor",
@@ -3344,7 +3346,7 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
     if (leadErr) throw new Error(leadErr.message);
 
     const bookUrl = `${getAppBaseUrl()}/book/${introducer.slug}?lead=${lead.id}`;
-    const body = textChannelInviteMessage({
+    const body = await textChannelInviteMessage({
       customerName: data.customerName,
       bookUrl,
       introducerName: introducer.company_name ?? "Your introducer",
