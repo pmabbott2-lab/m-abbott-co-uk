@@ -28,11 +28,29 @@ function isMissingTable(error: { code?: string; message?: string } | null): bool
   );
 }
 
+/**
+ * Firm owner emails. ADMIN_EMAILS App Setting / .env is preferred; the builtin
+ * list keeps production owner access working if Azure is missing that setting.
+ */
+const BUILTIN_OWNER_EMAILS = ["pmabbott2@aol.com"];
+
 function parseOwnerEmails(): string[] {
-  return (process.env.ADMIN_EMAILS ?? "")
+  const fromEnv = (process.env.ADMIN_EMAILS ?? "")
     .split(",")
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);
+  if (fromEnv.length) return fromEnv;
+  return [...BUILTIN_OWNER_EMAILS];
+}
+
+function ownerAccess(): AdminAccess {
+  return {
+    isAdmin: true,
+    adminLevel: "owner",
+    isOwner: true,
+    isSupervisor: true,
+    permissions: fullPermissions(),
+  };
 }
 
 function isOwnerEmail(email: string | undefined | null): boolean {
@@ -91,12 +109,20 @@ async function ensureOwnerBootstrap(userId: string, email: string | undefined): 
   if (!isOwnerEmail(email)) return;
 
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  await supabaseAdmin
-    .from("user_roles")
-    .upsert({ user_id: userId, role: "advisor" }, { onConflict: "user_id,role" });
+  // Original owner design: admin + advisor roles, admin_profiles.level = owner.
+  // Staff nav already hides advisor-only "My commission" when isMainAdmin.
   await supabaseAdmin
     .from("user_roles")
     .upsert({ user_id: userId, role: "admin" }, { onConflict: "user_id,role" });
+  await supabaseAdmin
+    .from("user_roles")
+    .upsert({ user_id: userId, role: "advisor" }, { onConflict: "user_id,role" });
+  // Strip roles that pollute owner nav (introducer portal / customer home).
+  await supabaseAdmin
+    .from("user_roles")
+    .delete()
+    .eq("user_id", userId)
+    .in("role", ["customer", "introducer"]);
 
   const { error } = await supabaseAdmin.from("admin_profiles").upsert(
     { user_id: userId, level: "owner", updated_at: new Date().toISOString() },
@@ -112,6 +138,11 @@ export async function resolveAdminAccess(
 ): Promise<AdminAccess> {
   const email = await resolveAuthEmail(userId, claimsEmail);
   if (email) await ensureOwnerBootstrap(userId, email);
+
+  // Owner emails always get full owner access (Finance, Management, Admin access, etc.).
+  if (isOwnerEmail(email)) {
+    return ownerAccess();
+  }
 
   const roles = await getRoles(userId);
   const isAdmin = roles.includes("admin");
@@ -132,13 +163,22 @@ export async function resolveAdminAccess(
     .eq("user_id", userId)
     .maybeSingle();
 
-  // Pre-migration: treat any admin as supervisor-equivalent (full access).
-  if (error && isMissingTable(error)) {
-    const owner = isOwnerEmail(email);
+  // Pre-migration / lookup failure: never silently demote — that hides Finance/Admin.
+  if (error) {
+    if (isMissingTable(error)) {
+      return {
+        isAdmin: true,
+        adminLevel: "supervisor",
+        isOwner: false,
+        isSupervisor: true,
+        permissions: fullPermissions(),
+      };
+    }
+    console.error("admin_profiles lookup failed", error);
     return {
       isAdmin: true,
-      adminLevel: owner ? "owner" : "supervisor",
-      isOwner: owner,
+      adminLevel: "supervisor",
+      isOwner: false,
       isSupervisor: true,
       permissions: fullPermissions(),
     };
@@ -146,17 +186,16 @@ export async function resolveAdminAccess(
 
   let level = (profile?.level as AdminLevel | undefined) ?? "general";
 
-  // Owner emails always win.
-  if (isOwnerEmail(email)) {
-    level = "owner";
+  if (level === "owner") {
+    return ownerAccess();
   }
 
-  if (level === "owner" || level === "supervisor") {
+  if (level === "supervisor") {
     return {
       isAdmin: true,
-      adminLevel: level,
-      isOwner: level === "owner",
-      isSupervisor: level === "supervisor" || level === "owner",
+      adminLevel: "supervisor",
+      isOwner: false,
+      isSupervisor: true,
       permissions: fullPermissions(),
     };
   }

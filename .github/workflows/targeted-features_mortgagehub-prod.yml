@@ -123,6 +123,20 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_6CDE810C6DD942AA83AAB86938AE38AC }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_0BB4606FADAC49DCB1511B23EE738AAB }}
 
+      - name: Ensure ADMIN_EMAILS owner App Setting
+        uses: azure/appservice-settings@v1
+        with:
+          app-name: Mortgagehub-prod
+          slot-name: Production
+          app-settings-json: |
+            [
+              {
+                "name": "ADMIN_EMAILS",
+                "value": "pmabbott2@aol.com",
+                "slotSetting": false
+              }
+            ]
+
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
