@@ -141,6 +141,8 @@ export const listSessionFees = createServerFn({ method: "GET" })
     const access = await resolveAdminAccess(context.userId, email);
     if (!canView(access, "finance_customer")) throw new Error("Forbidden");
     const authorised = await resolveSoleMembershipTenant(context.userId);
+    const { requireTenantFeature } = await import("@/lib/tenant-features.server");
+    await requireTenantFeature(authorised.tenant.id, "staff_finance");
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"

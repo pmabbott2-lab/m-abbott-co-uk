@@ -737,6 +737,8 @@ export const sendMyReferralLink = createServerFn({ method: "POST" })
       "@/lib/tenant-assert.server"
     );
     const authorised = await resolveSoleMembershipTenant(context.userId);
+    const { requireTenantFeature } = await import("@/lib/tenant-features.server");
+    await requireTenantFeature(authorised.tenant.id, "refer_a_friend");
 
     const { data: existing } = await supabaseAdmin
       .from("referral_codes")
@@ -786,7 +788,8 @@ export const sendMyReferralLink = createServerFn({ method: "POST" })
       .maybeSingle();
 
     const baseUrl = getAppBaseUrl();
-    const link = `${baseUrl.replace(/\/$/, "")}/raf/${code}`;
+    const { buildTenantUrl } = await import("@/lib/tenant-url");
+    const link = buildTenantUrl(authorised.tenant.slug, `/raf/${code}`, baseUrl);
     const message = rafShareMessage(profile?.full_name ?? null, code, baseUrl);
 
     if (data.channel === "sms") {

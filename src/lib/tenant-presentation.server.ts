@@ -37,7 +37,8 @@ export async function loadTenantPresentationBySlug(slug: string): Promise<Tenant
   const ctx = await getTenantContextBySlug(normalised);
   const tenant = ctx.tenant;
 
-  const [{ data: full }, { data: branding }, { data: feature }] = await Promise.all([
+  const { getTenantFeatureFlags } = await import("@/lib/tenant-features.server");
+  const [{ data: full }, { data: branding }, features] = await Promise.all([
     db
       .from("tenants")
       .select(
@@ -50,12 +51,7 @@ export async function loadTenantPresentationBySlug(slug: string): Promise<Tenant
       .select("logo_path, primary_colour, secondary_colour")
       .eq("tenant_id", tenant.id)
       .maybeSingle(),
-    db
-      .from("tenant_features")
-      .select("state")
-      .eq("tenant_id", tenant.id)
-      .eq("feature_key", "susan_ai_journey")
-      .maybeSingle(),
+    getTenantFeatureFlags(tenant.id),
   ]);
 
   if (!full) {
@@ -82,7 +78,8 @@ export async function loadTenantPresentationBySlug(slug: string): Promise<Tenant
     logoUrl,
     primaryColour: primary,
     secondaryColour: secondary,
-    susanEnabled: feature?.state === "enabled",
+    features,
+    susanEnabled: features.susan_ai_journey === true,
     usedNeutralFallback,
     pageTitle: buildTenantPageTitle(full.trading_name || full.company_name),
   };

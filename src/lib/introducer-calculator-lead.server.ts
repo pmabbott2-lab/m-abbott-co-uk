@@ -106,6 +106,9 @@ export async function captureIntroducerCalculatorLead(
       "Introducer is not bound to a tenant.",
     );
   }
+  const { requireTenantFeature } = await import("@/lib/tenant-features.server");
+  await requireTenantFeature(introducer.tenant_id, "introducer_calculator_lead");
+  await requireTenantFeature(introducer.tenant_id, "introducer_journey");
 
   const oneHourAgo = new Date(Date.now() - RATE_WINDOW_MS).toISOString();
   const { data: recentLead } = await supabaseAdmin

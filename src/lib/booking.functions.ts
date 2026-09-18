@@ -614,8 +614,10 @@ export const getAvailableSlots = createServerFn({ method: "GET" })
     let tenantId: string | null = null;
     if (data.tenantSlug) {
       const { getTenantContextBySlug } = await import("@/lib/tenant-assert.server");
+      const { requireTenantFeature } = await import("@/lib/tenant-features.server");
       const ctx = await getTenantContextBySlug(data.tenantSlug);
       tenantId = ctx.tenant.id;
+      await requireTenantFeature(tenantId, "appointment_booking");
     }
 
     const empty = {
@@ -770,6 +772,23 @@ const appointmentInput = z.object({
   notes: z.string().max(500).optional(),
   sendSms: z.boolean().optional(),
 });
+
+
+async function buildIntroducerBookUrl(introducer: { slug: string; tenant_id?: string | null }, leadId: string): Promise<string> {
+  const { buildCanonicalBookPath, buildTenantUrl } = await import("@/lib/tenant-url");
+  const { getAppBaseUrl } = await import("@/lib/sms.server");
+  let tenantSlug: string | null = null;
+  if (introducer.tenant_id) {
+    const { supabaseAdminUntyped: admin } = await import("@/integrations/supabase/client.server");
+    const { data: ten } = await admin.from("tenants").select("slug").eq("id", introducer.tenant_id).maybeSingle();
+    tenantSlug = ten?.slug ?? null;
+  }
+  if (!tenantSlug) {
+    // Legacy fallback path only when tenant unknown — keep flat link for 001-era resources
+    return `${getAppBaseUrl()}/book/${introducer.slug}?lead=${leadId}`;
+  }
+  return buildTenantUrl(tenantSlug, `/book/${introducer.slug}?lead=${encodeURIComponent(leadId)}`);
+}
 
 async function resolveIntroducer(slug?: string) {
   if (!slug) return null;
@@ -1020,6 +1039,9 @@ async function bookAppointment(
     advisorId: data.advisorId ?? null,
   });
   rejectMismatchedClientTenantId(tenantId, data.tenant_id);
+
+  const { requireTenantFeature } = await import("@/lib/tenant-features.server");
+  await requireTenantFeature(tenantId, "appointment_booking");
 
   let advisorId = data.advisorId ?? null;
   if (data.preferAnyAdvisor) {
@@ -1918,6 +1940,8 @@ async function createCallbackRequest(
     }));
   const advisorId = await getPrimaryAdvisorId(tenantId);
   await assertAdvisorInTenant(advisorId, tenantId);
+  const { requireTenantFeature } = await import("@/lib/tenant-features.server");
+  await requireTenantFeature(tenantId, "request_callback");
   const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
@@ -3291,7 +3315,7 @@ export const sendLeadBookingSms = createServerFn({ method: "POST" })
     if (leadErr) throw new Error(leadErr.message);
     if (!lead.customer_phone) throw new Error("Lead has no phone number.");
 
-    const bookUrl = `${getAppBaseUrl()}/book/${introducer.slug}?lead=${lead.id}`;
+    const bookUrl = await buildIntroducerBookUrl(introducer, lead.id);
     const body = await textChannelInviteMessage({
       customerName: lead.customer_name,
       bookUrl,
@@ -3461,7 +3485,7 @@ export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
       .single();
     if (leadErr) throw new Error(leadErr.message);
 
-    const bookUrl = `${getAppBaseUrl()}/book/${introducer.slug}?lead=${lead.id}`;
+    const bookUrl = await buildIntroducerBookUrl(introducer, lead.id);
     const body = await textChannelInviteMessage({
       customerName: data.customerName,
       bookUrl,
@@ -3678,7 +3702,7 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
       .single();
     if (leadErr) throw new Error(leadErr.message);
 
-    const bookUrl = `${getAppBaseUrl()}/book/${introducer.slug}?lead=${lead.id}`;
+    const bookUrl = await buildIntroducerBookUrl(introducer, lead.id);
     const body = await textChannelInviteMessage({
       customerName: data.customerName,
       bookUrl,

@@ -2,6 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { requireApiAuth } from "@/lib/api-auth.server";
 import { synthesizeSpeech, SUSAN_AZURE_VOICE } from "@/lib/azure.server";
 import { getCachedTts, setCachedTts } from "@/lib/tts-cache.server";
+import {
+  readTenantHints,
+  requireSusanApiAccess,
+  susanDeniedResponse,
+} from "@/lib/susan-feature-guard.server";
 
 export const Route = createFileRoute("/api/tts")({
   server: {
@@ -10,7 +15,20 @@ export const Route = createFileRoute("/api/tts")({
         const auth = await requireApiAuth(request);
         if (!auth.ok) return auth.response;
 
-        const { text } = (await request.json()) as { text: string };
+        const body = (await request.json()) as { text: string; tenantSlug?: string; tenantId?: string };
+        const hints = readTenantHints(request, body as Record<string, unknown>);
+        try {
+          await requireSusanApiAccess({
+            actingUserId: auth.userId,
+            tenantSlug: hints.tenantSlug,
+            tenantId: hints.tenantId,
+            featureKey: "susan_ai_journey",
+          });
+        } catch (e) {
+          return susanDeniedResponse(e);
+        }
+
+        const { text } = body;
         if (!text || text.length > 4000) return new Response("Bad request", { status: 400 });
 
         const cached = getCachedTts(text);

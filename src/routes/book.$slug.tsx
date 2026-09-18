@@ -17,6 +17,7 @@ import {
 import { resolveReferralSlug } from "@/lib/introducer.functions";
 import { setReferralCookie } from "@/lib/referral";
 import { CalendarCheck, CheckCircle2 } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 
 type BookSearch = {
   lead?: string;
@@ -36,6 +37,7 @@ function DirectBookingPage() {
   const slotsFn = useServerFn(getAvailableSlots);
   const leadFn = useServerFn(getLeadForBooking);
   const bookFn = useServerFn(createAppointment);
+  const navigate = useNavigate();
 
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
@@ -54,6 +56,17 @@ function DirectBookingPage() {
     if (introducerQ.data?.slug) setReferralCookie(introducerQ.data.slug);
   }, [introducerQ.data?.slug]);
 
+  // G5: prefer canonical /{tenantSlug}/book/{introducerSlug} when tenant is known.
+  useEffect(() => {
+    const ts = (introducerQ.data as { tenantSlug?: string | null } | undefined)?.tenantSlug;
+    if (!ts) return;
+    void navigate({
+      to: "/$tenantSlug/book/$introducerSlug",
+      params: { tenantSlug: ts, introducerSlug: slug },
+      search: leadId ? { lead: leadId } : {},
+    } as never);
+  }, [introducerQ.data, slug, leadId, navigate]);
+
   const leadQ = useQuery({
     queryKey: ["lead-for-booking", leadId, slug],
     queryFn: () => (leadId ? leadFn({ data: { leadId, slug } }) : null),
@@ -71,7 +84,14 @@ function DirectBookingPage() {
   const dateKey = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null;
   const slotsQ = useQuery({
     queryKey: ["available-slots", dateKey, "pool"],
-    queryFn: () => slotsFn({ data: { date: dateKey!, pool: true } }),
+    queryFn: () =>
+      slotsFn({
+        data: {
+          date: dateKey!,
+          pool: true,
+          tenantSlug: (introducerQ.data as { tenantSlug?: string } | undefined)?.tenantSlug,
+        },
+      }),
     enabled: Boolean(dateKey),
   });
   const advisorsForSlot =
@@ -85,6 +105,7 @@ function DirectBookingPage() {
       return bookFn({
         data: {
           slug,
+          tenantSlug: (introducerQ.data as { tenantSlug?: string } | undefined)?.tenantSlug,
           leadId,
           customerName,
           customerPhone,

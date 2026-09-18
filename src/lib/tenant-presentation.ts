@@ -19,7 +19,9 @@ export type TenantPresentation = {
   logoUrl: string | null;
   primaryColour: string | null;
   secondaryColour: string | null;
-  /** From tenant_features — read-only at G4; enforcement is G5. */
+  /** Effective feature flags (G5). */
+  features: Record<string, boolean>;
+  /** Convenience: features.susan_ai_journey */
   susanEnabled: boolean;
   /** True when branding used platform-neutral fallback (not another tenant's brand). */
   usedNeutralFallback: boolean;

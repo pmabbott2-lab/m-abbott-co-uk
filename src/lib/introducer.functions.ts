@@ -62,24 +62,69 @@ async function uniqueSlug(base: string): Promise<string> {
 }
 
 export const resolveReferralSlug = createServerFn({ method: "GET" })
-  .inputValidator((d: unknown) => z.object({ slug: z.string().min(1) }).parse(d))
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        slug: z.string().min(1),
+        /** When set, introducer must belong to this tenant slug. */
+        tenantSlug: z.string().min(1).max(64).optional(),
+      })
+      .parse(d),
+  )
   .handler(async ({ data }) => {
     const slug = data.slug.trim().toLowerCase();
+    const { requireTenantFeature } = await import("@/lib/tenant-features.server");
+    const { getTenantContextBySlug } = await import("@/lib/tenant-assert.server");
+
+    let requiredTenantId: string | null = null;
+    let tenantSlugOut: string | null = null;
+    if (data.tenantSlug?.trim()) {
+      const ctx = await getTenantContextBySlug(data.tenantSlug.trim());
+      requiredTenantId = ctx.tenant.id;
+      tenantSlugOut = ctx.tenant.slug;
+      await requireTenantFeature(requiredTenantId, "appointment_booking");
+      await requireTenantFeature(requiredTenantId, "introducer_journey");
+    }
 
     // Prefer service-role (bypasses RLS). Fall back to public booking view so
     // /book/:slug still works if Azure SERVICE_ROLE_KEY is missing/mis-set.
     try {
-      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-      const { data: introducer, error } = await supabaseAdmin
+      const { supabaseAdminUntyped: supabaseAdmin } = await import(
+        "@/integrations/supabase/client.server"
+      );
+      let q = supabaseAdmin
         .from("introducers")
-        .select("id, company_name, slug")
+        .select("id, company_name, slug, tenant_id")
         .eq("slug", slug)
-        .eq("active", true)
-        .maybeSingle();
-      if (!error && introducer) return introducer;
+        .eq("active", true);
+      if (requiredTenantId) q = q.eq("tenant_id", requiredTenantId);
+      const { data: introducer, error } = await q.maybeSingle();
+      if (!error && introducer) {
+        if (!tenantSlugOut && introducer.tenant_id) {
+          const { data: ten } = await supabaseAdmin
+            .from("tenants")
+            .select("slug")
+            .eq("id", introducer.tenant_id)
+            .maybeSingle();
+          tenantSlugOut = ten?.slug ?? null;
+          if (introducer.tenant_id) {
+            await requireTenantFeature(introducer.tenant_id, "appointment_booking");
+          }
+        }
+        return {
+          id: introducer.id,
+          company_name: introducer.company_name,
+          slug: introducer.slug,
+          tenantId: introducer.tenant_id ?? null,
+          tenantSlug: tenantSlugOut,
+        };
+      }
+      if (requiredTenantId) return null;
     } catch (e) {
       console.error("resolveReferralSlug admin lookup failed", e);
     }
+
+    if (requiredTenantId) return null;
 
     const { createClient } = await import("@supabase/supabase-js");
     const { getPublicSupabaseEnv } = await import("@/lib/supabase-public-env");
@@ -94,7 +139,9 @@ export const resolveReferralSlug = createServerFn({ method: "GET" })
       .eq("slug", slug)
       .maybeSingle();
     if (pubErr) throw new Error(pubErr.message);
-    return row;
+    return row
+      ? { ...row, tenantId: null as string | null, tenantSlug: null as string | null }
+      : null;
   });
 
 export const checkIsIntroducer = createServerFn({ method: "GET" })

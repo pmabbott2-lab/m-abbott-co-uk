@@ -1,17 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { requireApiAuth } from "@/lib/api-auth.server";
 import { createSimliSessionToken, getSimliConfig } from "@/lib/simli.server";
+import {
+  readTenantHints,
+  requireSusanApiAccess,
+  susanDeniedResponse,
+} from "@/lib/susan-feature-guard.server";
 
 /**
  * Mints a short-lived Simli session token for the realtime avatar.
- * Mirrors the auth pattern in `src/routes/api/tts.ts` (requireApiAuth). The
- * SIMLI_API_KEY stays server-side; the browser only receives the session token.
- *
- * Responses:
- *   200 { session_token }  — ready to start a Simli WebRTC session
- *   401                    — not authenticated
- *   501                    — realtime avatar not configured (client falls back)
- *   502                    — upstream Simli error (client falls back)
+ * G5: requires susan_ai_journey for the resolved tenant.
  */
 export const Route = createFileRoute("/api/avatar-token")({
   server: {
@@ -19,6 +17,24 @@ export const Route = createFileRoute("/api/avatar-token")({
       POST: async ({ request }) => {
         const auth = await requireApiAuth(request);
         if (!auth.ok) return auth.response;
+
+        let body: Record<string, unknown> | null = null;
+        try {
+          body = (await request.clone().json()) as Record<string, unknown>;
+        } catch {
+          body = null;
+        }
+        const hints = readTenantHints(request, body);
+        try {
+          await requireSusanApiAccess({
+            actingUserId: auth.userId,
+            tenantSlug: hints.tenantSlug,
+            tenantId: hints.tenantId,
+            featureKey: "susan_ai_journey",
+          });
+        } catch (e) {
+          return susanDeniedResponse(e);
+        }
 
         if (!getSimliConfig()) {
           return new Response("Realtime avatar not configured", { status: 501 });

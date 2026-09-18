@@ -10,6 +10,12 @@ import { isInternalAnswerKey } from "@/lib/interview-opening";
 import { createClient } from "@supabase/supabase-js";
 import { sendInterviewCompleteSms } from "@/lib/sms.server";
 import type { Database } from "@/integrations/supabase/types";
+import {
+  readTenantHints,
+  requireSusanApiAccess,
+  susanDeniedResponse,
+} from "@/lib/susan-feature-guard.server";
+import { supabaseAdminUntyped } from "@/integrations/supabase/client.server";
 
 interface Body {
   sessionId: string;
@@ -68,6 +74,40 @@ export const Route = createFileRoute("/api/interview-step")({
         const body = (await request.json()) as Body;
         if (!body.sessionId || typeof body.transcript !== "string") {
           return new Response("Bad request", { status: 400 });
+        }
+
+        // G5: Susan interview requires tenant feature (no cross-tenant fallback).
+        {
+          const { data: sessRow } = await supabaseAdminUntyped
+            .from("interview_sessions")
+            .select("id, tenant_id, customer_id")
+            .eq("id", body.sessionId)
+            .maybeSingle();
+          if (!sessRow) {
+            return new Response("Not found", { status: 404 });
+          }
+          const hints = readTenantHints(request, body as unknown as Record<string, unknown>);
+          try {
+            const { data: userData } = await createClient(
+              process.env.SUPABASE_URL!,
+              process.env.SUPABASE_PUBLISHABLE_KEY!,
+              {
+                global: { headers: { Authorization: `Bearer ${token}` } },
+                auth: { persistSession: false, autoRefreshToken: false, storage: undefined },
+              },
+            ).auth.getUser();
+            const userId = userData.user?.id;
+            if (!userId) return new Response("Unauthorized", { status: 401 });
+            await requireSusanApiAccess({
+              actingUserId: userId,
+              tenantSlug: hints.tenantSlug,
+              tenantId: hints.tenantId,
+              sessionTenantId: sessRow.tenant_id ?? null,
+              featureKey: "susan_ai_journey",
+            });
+          } catch (e) {
+            return susanDeniedResponse(e);
+          }
         }
 
         const supabase = createClient<Database>(

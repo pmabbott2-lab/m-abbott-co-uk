@@ -13,7 +13,10 @@ export function TenantPublicShell({
 }) {
   const displayName = tenant.tradingName || tenant.companyName;
   const accent = tenant.primaryColour || "#1e293b";
-  const website = tenant.websiteUrl?.trim() || null;
+  const website =
+    tenant.features?.external_website_links && tenant.websiteUrl?.trim()
+      ? tenant.websiteUrl.trim()
+      : null;
 
   return (
     <div

@@ -1,5 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { requireApiAuth } from "@/lib/api-auth.server";
+import {
+  readTenantHints,
+  requireSusanApiAccess,
+  susanDeniedResponse,
+} from "@/lib/susan-feature-guard.server";
 import { transcribeAudio } from "@/lib/openai.server";
 
 function toAudioFile(entry: FormDataEntryValue | null): File | null {
@@ -19,6 +24,17 @@ export const Route = createFileRoute("/api/stt")({
       POST: async ({ request }) => {
         const auth = await requireApiAuth(request);
         if (!auth.ok) return auth.response;
+        try {
+          const hints = readTenantHints(request);
+          await requireSusanApiAccess({
+            actingUserId: auth.userId,
+            tenantSlug: hints.tenantSlug,
+            tenantId: hints.tenantId,
+            featureKey: "susan_ai_journey",
+          });
+        } catch (e) {
+          return susanDeniedResponse(e);
+        }
 
         const form = await request.formData();
         const file = toAudioFile(form.get("file"));

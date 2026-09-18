@@ -42,6 +42,7 @@ import { Route as AuthenticatedInterviewSessionIdRouteImport } from './routes/_a
 import { Route as AuthenticatedCustomersCustomerIdRouteImport } from './routes/_authenticated/customers.$customerId'
 import { Route as AuthenticatedChatSessionIdRouteImport } from './routes/_authenticated/chat.$sessionId'
 import { Route as TenantSlugRefIntroducerRefRouteImport } from './routes/$tenantSlug/ref.$introducerRef'
+import { Route as TenantSlugBookIntroducerSlugRouteImport } from './routes/$tenantSlug/book.$introducerSlug'
 import { Route as ApiTwilioVoiceVoicemailDoneRouteImport } from './routes/api/twilio/voice/voicemail-done'
 import { Route as ApiTwilioVoiceSusanPromptRouteImport } from './routes/api/twilio/voice/susan-prompt'
 import { Route as ApiTwilioVoiceStatusRouteImport } from './routes/api/twilio/voice/status'
@@ -225,6 +226,12 @@ const TenantSlugRefIntroducerRefRoute =
     path: '/ref/$introducerRef',
     getParentRoute: () => TenantSlugRouteRoute,
   } as any)
+const TenantSlugBookIntroducerSlugRoute =
+  TenantSlugBookIntroducerSlugRouteImport.update({
+    id: '/book/$introducerSlug',
+    path: '/book/$introducerSlug',
+    getParentRoute: () => TenantSlugRouteRoute,
+  } as any)
 const ApiTwilioVoiceVoicemailDoneRoute =
   ApiTwilioVoiceVoicemailDoneRouteImport.update({
     id: '/api/twilio/voice/voicemail-done',
@@ -291,6 +298,7 @@ export interface FileRoutesByFullPath {
   '/go/$slug': typeof GoSlugRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug/': typeof TenantSlugIndexRoute
+  '/$tenantSlug/book/$introducerSlug': typeof TenantSlugBookIntroducerSlugRoute
   '/$tenantSlug/ref/$introducerRef': typeof TenantSlugRefIntroducerRefRoute
   '/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
@@ -332,6 +340,7 @@ export interface FileRoutesByTo {
   '/go/$slug': typeof GoSlugRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug': typeof TenantSlugIndexRoute
+  '/$tenantSlug/book/$introducerSlug': typeof TenantSlugBookIntroducerSlugRoute
   '/$tenantSlug/ref/$introducerRef': typeof TenantSlugRefIntroducerRefRoute
   '/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
@@ -376,6 +385,7 @@ export interface FileRoutesById {
   '/go/$slug': typeof GoSlugRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug/': typeof TenantSlugIndexRoute
+  '/$tenantSlug/book/$introducerSlug': typeof TenantSlugBookIntroducerSlugRoute
   '/$tenantSlug/ref/$introducerRef': typeof TenantSlugRefIntroducerRefRoute
   '/_authenticated/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/_authenticated/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
@@ -420,6 +430,7 @@ export interface FileRouteTypes {
     | '/go/$slug'
     | '/raf/$code'
     | '/$tenantSlug/'
+    | '/$tenantSlug/book/$introducerSlug'
     | '/$tenantSlug/ref/$introducerRef'
     | '/chat/$sessionId'
     | '/customers/$customerId'
@@ -461,6 +472,7 @@ export interface FileRouteTypes {
     | '/go/$slug'
     | '/raf/$code'
     | '/$tenantSlug'
+    | '/$tenantSlug/book/$introducerSlug'
     | '/$tenantSlug/ref/$introducerRef'
     | '/chat/$sessionId'
     | '/customers/$customerId'
@@ -504,6 +516,7 @@ export interface FileRouteTypes {
     | '/go/$slug'
     | '/raf/$code'
     | '/$tenantSlug/'
+    | '/$tenantSlug/book/$introducerSlug'
     | '/$tenantSlug/ref/$introducerRef'
     | '/_authenticated/chat/$sessionId'
     | '/_authenticated/customers/$customerId'
@@ -788,6 +801,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TenantSlugRefIntroducerRefRouteImport
       parentRoute: typeof TenantSlugRouteRoute
     }
+    '/$tenantSlug/book/$introducerSlug': {
+      id: '/$tenantSlug/book/$introducerSlug'
+      path: '/book/$introducerSlug'
+      fullPath: '/$tenantSlug/book/$introducerSlug'
+      preLoaderRoute: typeof TenantSlugBookIntroducerSlugRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
     '/api/twilio/voice/voicemail-done': {
       id: '/api/twilio/voice/voicemail-done'
       path: '/api/twilio/voice/voicemail-done'
@@ -851,6 +871,7 @@ interface TenantSlugRouteRouteChildren {
   TenantSlugLoginRoute: typeof TenantSlugLoginRoute
   TenantSlugWorkspaceRoute: typeof TenantSlugWorkspaceRoute
   TenantSlugIndexRoute: typeof TenantSlugIndexRoute
+  TenantSlugBookIntroducerSlugRoute: typeof TenantSlugBookIntroducerSlugRoute
   TenantSlugRefIntroducerRefRoute: typeof TenantSlugRefIntroducerRefRoute
 }
 
@@ -858,6 +879,7 @@ const TenantSlugRouteRouteChildren: TenantSlugRouteRouteChildren = {
   TenantSlugLoginRoute: TenantSlugLoginRoute,
   TenantSlugWorkspaceRoute: TenantSlugWorkspaceRoute,
   TenantSlugIndexRoute: TenantSlugIndexRoute,
+  TenantSlugBookIntroducerSlugRoute: TenantSlugBookIntroducerSlugRoute,
   TenantSlugRefIntroducerRefRoute: TenantSlugRefIntroducerRefRoute,
 }
 

@@ -76,6 +76,8 @@ export const getTelephonyControlPanel = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<TelephonyControlSnapshot> => {
     await requireOwner(context.userId, context.claims as { email?: string });
     const authorised = await resolveSoleMembershipTenant(context.userId);
+    const { requireTenantFeature } = await import("@/lib/tenant-features.server");
+    await requireTenantFeature(authorised.tenant.id, "telephone_voice");
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );

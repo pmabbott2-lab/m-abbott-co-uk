@@ -944,17 +944,47 @@ export const updateCustomerContact = createServerFn({ method: "POST" })
 
 export const createSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        mode: z.enum(["voice", "chat"]).optional(),
+        tenantSlug: z.string().min(1).max(64).optional(),
+      })
+      .optional()
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const { data, error } = await supabaseAdmin
+    const { resolveSoleMembershipTenant, withForcedTenantId } = await import(
+      "@/lib/tenant-assert.server"
+    );
+    const { requireTenantFeature } = await import("@/lib/tenant-features.server");
+    const authorised = data?.tenantSlug
+      ? await (async () => {
+          const { requireAuthenticatedTenantBySlug } = await import("@/lib/tenant-assert.server");
+          return requireAuthenticatedTenantBySlug(context.userId, data.tenantSlug!);
+        })()
+      : await resolveSoleMembershipTenant(context.userId);
+    const mode = data?.mode ?? "voice";
+    await requireTenantFeature(
+      authorised.tenant.id,
+      mode === "chat" ? "susan_chat_journey" : "susan_ai_journey",
+    );
+    await requireTenantFeature(authorised.tenant.id, "customer_portal");
+    const { data: row, error } = await supabaseAdmin
       .from("interview_sessions")
-      .insert({ customer_id: context.userId, status: "in_progress" })
+      .insert(
+        withForcedTenantId(
+          { customer_id: context.userId, status: "in_progress" },
+          authorised.tenant.id,
+        ),
+      )
       .select()
       .single();
     if (error) throw new Error(error.message);
-    return data;
+    return row;
   });
 
 export const getSession = createServerFn({ method: "POST" })

@@ -52,6 +52,17 @@ function TenantLanding() {
               </Button>
             </Link>
           ) : null}
+          {tenant.features?.appointment_booking ? (
+            <Link
+              to="/$tenantSlug/login"
+              params={{ tenantSlug: tenant.slug }}
+              search={{ join: true, start: "book" } as never}
+            >
+              <Button size="lg" variant="secondary">
+                Book an appointment
+              </Button>
+            </Link>
+          ) : null}
         </div>
         {!tenant.susanEnabled ? (
           <p className="text-sm text-muted-foreground">

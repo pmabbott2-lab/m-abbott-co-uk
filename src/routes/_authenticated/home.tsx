@@ -597,7 +597,7 @@ function Home() {
 
 
   const create = useMutation({
-    mutationFn: async (mode: "voice" | "chat") => ({ session: await createFn(), mode }),
+    mutationFn: async (mode: "voice" | "chat") => ({ session: await createFn({ data: { mode } }), mode }),
     onSuccess: ({ session, mode }) =>
       navigate({
         to: mode === "chat" ? "/chat/$sessionId" : "/interview/$sessionId",
