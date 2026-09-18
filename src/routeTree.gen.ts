@@ -26,6 +26,7 @@ import { Route as ApiAvatarTokenRouteImport } from './routes/api/avatar-token'
 import { Route as AuthenticatedIntroducerRouteImport } from './routes/_authenticated/introducer'
 import { Route as AuthenticatedHomeRouteImport } from './routes/_authenticated/home'
 import { Route as AuthenticatedDiaryRouteImport } from './routes/_authenticated/diary'
+import { Route as AuthenticatedCompaniesRouteImport } from './routes/_authenticated/companies'
 import { Route as AuthenticatedCasesRouteImport } from './routes/_authenticated/cases'
 import { Route as AuthenticatedBookingRouteImport } from './routes/_authenticated/booking'
 import { Route as TenantSlugWorkspaceRouteImport } from './routes/$tenantSlug/workspace'
@@ -134,6 +135,11 @@ const AuthenticatedHomeRoute = AuthenticatedHomeRouteImport.update({
 const AuthenticatedDiaryRoute = AuthenticatedDiaryRouteImport.update({
   id: '/diary',
   path: '/diary',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedCompaniesRoute = AuthenticatedCompaniesRouteImport.update({
+  id: '/companies',
+  path: '/companies',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedCasesRoute = AuthenticatedCasesRouteImport.update({
@@ -286,6 +292,7 @@ export interface FileRoutesByFullPath {
   '/$tenantSlug/workspace': typeof TenantSlugWorkspaceRoute
   '/booking': typeof AuthenticatedBookingRoute
   '/cases': typeof AuthenticatedCasesRoute
+  '/companies': typeof AuthenticatedCompaniesRoute
   '/diary': typeof AuthenticatedDiaryRoute
   '/home': typeof AuthenticatedHomeRoute
   '/introducer': typeof AuthenticatedIntroducerRoute
@@ -328,6 +335,7 @@ export interface FileRoutesByTo {
   '/$tenantSlug/workspace': typeof TenantSlugWorkspaceRoute
   '/booking': typeof AuthenticatedBookingRoute
   '/cases': typeof AuthenticatedCasesRoute
+  '/companies': typeof AuthenticatedCompaniesRoute
   '/diary': typeof AuthenticatedDiaryRoute
   '/home': typeof AuthenticatedHomeRoute
   '/introducer': typeof AuthenticatedIntroducerRoute
@@ -373,6 +381,7 @@ export interface FileRoutesById {
   '/$tenantSlug/workspace': typeof TenantSlugWorkspaceRoute
   '/_authenticated/booking': typeof AuthenticatedBookingRoute
   '/_authenticated/cases': typeof AuthenticatedCasesRoute
+  '/_authenticated/companies': typeof AuthenticatedCompaniesRoute
   '/_authenticated/diary': typeof AuthenticatedDiaryRoute
   '/_authenticated/home': typeof AuthenticatedHomeRoute
   '/_authenticated/introducer': typeof AuthenticatedIntroducerRoute
@@ -418,6 +427,7 @@ export interface FileRouteTypes {
     | '/$tenantSlug/workspace'
     | '/booking'
     | '/cases'
+    | '/companies'
     | '/diary'
     | '/home'
     | '/introducer'
@@ -460,6 +470,7 @@ export interface FileRouteTypes {
     | '/$tenantSlug/workspace'
     | '/booking'
     | '/cases'
+    | '/companies'
     | '/diary'
     | '/home'
     | '/introducer'
@@ -504,6 +515,7 @@ export interface FileRouteTypes {
     | '/$tenantSlug/workspace'
     | '/_authenticated/booking'
     | '/_authenticated/cases'
+    | '/_authenticated/companies'
     | '/_authenticated/diary'
     | '/_authenticated/home'
     | '/_authenticated/introducer'
@@ -687,6 +699,13 @@ declare module '@tanstack/react-router' {
       path: '/diary'
       fullPath: '/diary'
       preLoaderRoute: typeof AuthenticatedDiaryRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/companies': {
+      id: '/_authenticated/companies'
+      path: '/companies'
+      fullPath: '/companies'
+      preLoaderRoute: typeof AuthenticatedCompaniesRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/cases': {
@@ -890,6 +909,7 @@ const TenantSlugRouteRouteWithChildren = TenantSlugRouteRoute._addFileChildren(
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedBookingRoute: typeof AuthenticatedBookingRoute
   AuthenticatedCasesRoute: typeof AuthenticatedCasesRoute
+  AuthenticatedCompaniesRoute: typeof AuthenticatedCompaniesRoute
   AuthenticatedDiaryRoute: typeof AuthenticatedDiaryRoute
   AuthenticatedHomeRoute: typeof AuthenticatedHomeRoute
   AuthenticatedIntroducerRoute: typeof AuthenticatedIntroducerRoute
@@ -903,6 +923,7 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedBookingRoute: AuthenticatedBookingRoute,
   AuthenticatedCasesRoute: AuthenticatedCasesRoute,
+  AuthenticatedCompaniesRoute: AuthenticatedCompaniesRoute,
   AuthenticatedDiaryRoute: AuthenticatedDiaryRoute,
   AuthenticatedHomeRoute: AuthenticatedHomeRoute,
   AuthenticatedIntroducerRoute: AuthenticatedIntroducerRoute,

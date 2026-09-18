@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
-import { Palette, Phone, TestTube2, UserPlus, Users } from "lucide-react";
+import { Building2, Palette, Phone, TestTube2, UserPlus, Users } from "lucide-react";
 import { ThemeProfilePicker } from "@/components/ThemeProfilePicker";
 import { TestAccountsCard } from "@/components/TestAccountsCard";
 import { TelephonyManagePanel } from "@/components/TelephonyManagePanel";
+import { CompanySettingsPanel } from "@/components/company/CompanySettingsPanel";
 import { HubSubNav } from "@/components/ui/tabs";
 
 /** Stable Manage sub-tab ids under Management → Manage. */
 export const MANAGE_SUB_TABS = {
+  COMPANY_SETTINGS: "company-settings",
   TEAM_ROLES: "team-roles",
   COLOUR_SCHEME: "colour-scheme",
   TEST_ACCOUNTS: "test-accounts",
@@ -19,6 +21,7 @@ export type ManageSubTabId = (typeof MANAGE_SUB_TABS)[keyof typeof MANAGE_SUB_TA
 
 type ManageTabPanelProps = {
   isOwner: boolean;
+  isSupervisor?: boolean;
   showTeamRoles: boolean;
   showInvites: boolean;
   teamRolesPanel: ReactNode;
@@ -34,12 +37,22 @@ type SubTabDef = {
 
 export function ManageTabPanel({
   isOwner,
+  isSupervisor = false,
   showTeamRoles,
   showInvites,
   teamRolesPanel,
   invitesPanel,
 }: ManageTabPanelProps) {
   const tabs: SubTabDef[] = [];
+
+  if (isOwner || isSupervisor) {
+    tabs.push({
+      id: MANAGE_SUB_TABS.COMPANY_SETTINGS,
+      label: "Company settings",
+      icon: <Building2 className="w-4 h-4 shrink-0" />,
+      content: <CompanySettingsPanel />,
+    });
+  }
 
   if (showTeamRoles) {
     tabs.push({

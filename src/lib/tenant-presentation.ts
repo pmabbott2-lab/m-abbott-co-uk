@@ -55,6 +55,10 @@ export const RESERVED_TENANT_SLUGS = new Set([
   "text",
   "assets",
   "tenant-branding",
+  "companies",
+  "settings",
+  "workspace",
+  "login",
 ]);
 
 export function isReservedTenantSlug(slug: string): boolean {

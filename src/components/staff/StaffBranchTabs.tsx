@@ -128,6 +128,7 @@ function ManagementBranchPanel({
       content: (
         <ManageTabPanel
           isOwner={staff.isOwner}
+          isSupervisor={staff.isSupervisor}
           showTeamRoles={visibility.management.manageTeamRoles}
           showInvites={visibility.management.manageInvites}
           teamRolesPanel={

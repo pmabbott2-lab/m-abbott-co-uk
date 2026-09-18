@@ -200,12 +200,14 @@ export async function provisionTenantInternal(
     }
 
     const expires = new Date(Date.now() + 7 * 24 * 3600_000).toISOString();
+    // app_role has no 'owner' — use admin + membership_role=owner (G6).
     const { data: invite, error: iErr } = await db
       .from("staff_invitations")
       .insert(
         withForcedTenantId(
           {
-            role: "owner",
+            role: "admin",
+            membership_role: "owner",
             email: input.initialOwner.email.toLowerCase(),
             create_company: false,
             company_code: null,
