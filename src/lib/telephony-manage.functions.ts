@@ -3,6 +3,11 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { normaliseUkPhone } from "@/lib/sms.server";
 import { resolveAdminAccess } from "@/lib/admin.functions";
+import {
+  requireTenantMembership,
+  resolveSoleMembershipTenant,
+  withForcedTenantId,
+} from "@/lib/tenant-assert.server";
 
 async function requireOwner(userId: string, claims?: { email?: string } | null) {
   const access = await resolveAdminAccess(userId, claims?.email);
@@ -70,13 +75,22 @@ export const getTelephonyControlPanel = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<TelephonyControlSnapshot> => {
     await requireOwner(context.userId, context.claims as { email?: string });
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
-    const { data: numbers, error: numErr } = await supabaseAdmin
+    let numbersQuery = supabaseAdmin
       .from("telephony_numbers")
       .select("id, e164, label, kind, is_firm_inbound, allocated_user_id, active")
       .order("kind")
       .order("e164");
+    // Mortgage Easy alone may read historical 001 rows that pre-date tenant_id.
+    numbersQuery =
+      authorised.tenant.slug === "mortgageeasy"
+        ? numbersQuery.or(`tenant_id.eq.${authorised.tenant.id},tenant_id.is.null`)
+        : numbersQuery.eq("tenant_id", authorised.tenant.id);
+    const { data: numbers, error: numErr } = await numbersQuery;
     if (numErr) throw new Error(numErr.message);
 
     const allocatedIds = (numbers ?? []).map((n) => n.allocated_user_id).filter(Boolean) as string[];
@@ -100,11 +114,16 @@ export const getTelephonyControlPanel = createServerFn({ method: "GET" })
       };
     });
 
-    const { data: agents, error: agentErr } = await supabaseAdmin
+    let agentsQuery = supabaseAdmin
       .from("advisor_telephony")
       .select(
         "user_id, enabled, ring_softphone, ring_allocated_mobile, ring_personal_mobile, use_personal_reroute_as_fallback, respect_outlook_busy, respect_hub_appointments, personal_reroute_e164, allocated_mobile_number_id, notes",
       );
+    agentsQuery =
+      authorised.tenant.slug === "mortgageeasy"
+        ? agentsQuery.or(`tenant_id.eq.${authorised.tenant.id},tenant_id.is.null`)
+        : agentsQuery.eq("tenant_id", authorised.tenant.id);
+    const { data: agents, error: agentErr } = await agentsQuery;
     if (agentErr) throw new Error(agentErr.message);
 
     const agentIds = (agents ?? []).map((a) => a.user_id);
@@ -156,13 +175,16 @@ export const getTelephonyControlPanel = createServerFn({ method: "GET" })
       .from("telephony_routing_settings")
       .select("*")
       .eq("id", 1)
+      .eq("tenant_id", authorised.tenant.id)
       .maybeSingle();
     if (setErr) throw new Error(setErr.message);
 
     const { data: roleRows } = await supabaseAdmin
-      .from("user_roles")
+      .from("tenant_memberships")
       .select("user_id, role")
-      .in("role", ["advisor", "admin"]);
+      .eq("tenant_id", authorised.tenant.id)
+      .eq("active", true)
+      .in("role", ["owner", "supervisor", "general", "adviser"]);
     const staffIds = Array.from(new Set((roleRows ?? []).map((r) => r.user_id)));
     const { data: staffProfiles } = staffIds.length
       ? await supabaseAdmin.from("profiles").select("id, email, full_name").in("id", staffIds)
@@ -212,7 +234,14 @@ export const provisionAdvisorTelephony = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await requireOwner(context.userId, context.claims as { email?: string });
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    await requireTenantMembership(data.userId, authorised.tenant.id);
+    if (data.cloneFromUserId) {
+      await requireTenantMembership(data.cloneFromUserId, authorised.tenant.id);
+    }
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     let template: {
       ring_softphone: boolean;
@@ -237,6 +266,7 @@ export const provisionAdvisorTelephony = createServerFn({ method: "POST" })
           "ring_softphone, ring_allocated_mobile, ring_personal_mobile, use_personal_reroute_as_fallback, respect_outlook_busy, respect_hub_appointments",
         )
         .eq("user_id", data.cloneFromUserId)
+        .eq("tenant_id", authorised.tenant.id)
         .maybeSingle();
       if (src) {
         template = {
@@ -246,12 +276,13 @@ export const provisionAdvisorTelephony = createServerFn({ method: "POST" })
       }
     }
 
-    let mobileId = data.mobileNumberId ?? null;
+    const mobileId = data.mobileNumberId ?? null;
     if (mobileId) {
       const { data: mobile, error } = await supabaseAdmin
         .from("telephony_numbers")
         .select("id, kind, allocated_user_id")
         .eq("id", mobileId)
+        .eq("tenant_id", authorised.tenant.id)
         .maybeSingle();
       if (error) throw new Error(error.message);
       if (!mobile || mobile.kind !== "mobile") throw new Error("Select a mobile number.");
@@ -261,25 +292,36 @@ export const provisionAdvisorTelephony = createServerFn({ method: "POST" })
       await supabaseAdmin
         .from("telephony_numbers")
         .update({ allocated_user_id: data.userId, updated_at: new Date().toISOString() })
-        .eq("id", mobileId);
+        .eq("id", mobileId)
+        .eq("tenant_id", authorised.tenant.id);
     }
 
     const personal = data.personalRerouteE164?.trim()
       ? normaliseUkPhone(data.personalRerouteE164)
       : null;
 
-    const { error: upsertErr } = await supabaseAdmin.from("advisor_telephony").upsert(
-      {
-        user_id: data.userId,
-        allocated_mobile_number_id: mobileId,
-        personal_reroute_e164: personal,
-        enabled: true,
-        ...template,
-        notes: "Provisioned from telephony control panel (cloneable agent-mobile template)",
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" },
-    );
+    const advisorPayload = withForcedTenantId({
+      user_id: data.userId,
+      allocated_mobile_number_id: mobileId,
+      personal_reroute_e164: personal,
+      enabled: true,
+      ...template,
+      notes: "Provisioned from telephony control panel (cloneable agent-mobile template)",
+      updated_at: new Date().toISOString(),
+    }, authorised.tenant.id);
+    const { data: existingAdvisor } = await supabaseAdmin
+      .from("advisor_telephony")
+      .select("user_id")
+      .eq("user_id", data.userId)
+      .eq("tenant_id", authorised.tenant.id)
+      .maybeSingle();
+    const { error: upsertErr } = existingAdvisor
+      ? await supabaseAdmin
+          .from("advisor_telephony")
+          .update(advisorPayload)
+          .eq("user_id", data.userId)
+          .eq("tenant_id", authorised.tenant.id)
+      : await supabaseAdmin.from("advisor_telephony").insert(advisorPayload);
     if (upsertErr) throw new Error(upsertErr.message);
     return { ok: true as const };
   });
@@ -304,7 +346,11 @@ export const updateAdvisorTelephony = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await requireOwner(context.userId, context.claims as { email?: string });
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    await requireTenantMembership(data.userId, authorised.tenant.id);
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     if (data.allocatedMobileNumberId !== undefined) {
       // Clear previous allocation for this user
@@ -312,13 +358,15 @@ export const updateAdvisorTelephony = createServerFn({ method: "POST" })
         .from("telephony_numbers")
         .update({ allocated_user_id: null, updated_at: new Date().toISOString() })
         .eq("allocated_user_id", data.userId)
-        .eq("kind", "mobile");
+        .eq("kind", "mobile")
+        .eq("tenant_id", authorised.tenant.id);
 
       if (data.allocatedMobileNumberId) {
         const { data: mobile, error } = await supabaseAdmin
           .from("telephony_numbers")
           .select("id, kind, allocated_user_id")
           .eq("id", data.allocatedMobileNumberId)
+          .eq("tenant_id", authorised.tenant.id)
           .maybeSingle();
         if (error) throw new Error(error.message);
         if (!mobile || mobile.kind !== "mobile") throw new Error("Select a mobile number.");
@@ -328,7 +376,8 @@ export const updateAdvisorTelephony = createServerFn({ method: "POST" })
         await supabaseAdmin
           .from("telephony_numbers")
           .update({ allocated_user_id: data.userId, updated_at: new Date().toISOString() })
-          .eq("id", data.allocatedMobileNumberId);
+          .eq("id", data.allocatedMobileNumberId)
+          .eq("tenant_id", authorised.tenant.id);
       }
     }
 
@@ -353,10 +402,23 @@ export const updateAdvisorTelephony = createServerFn({ method: "POST" })
       patch.allocated_mobile_number_id = data.allocatedMobileNumberId;
     }
 
-    const { error } = await supabaseAdmin.from("advisor_telephony").upsert(
+    const { data: existingAdvisor } = await supabaseAdmin
+      .from("advisor_telephony")
+      .select("user_id")
+      .eq("user_id", data.userId)
+      .eq("tenant_id", authorised.tenant.id)
+      .maybeSingle();
+    const advisorPayload = withForcedTenantId(
       { user_id: data.userId, ...patch },
-      { onConflict: "user_id" },
+      authorised.tenant.id,
     );
+    const { error } = existingAdvisor
+      ? await supabaseAdmin
+          .from("advisor_telephony")
+          .update(advisorPayload)
+          .eq("user_id", data.userId)
+          .eq("tenant_id", authorised.tenant.id)
+      : await supabaseAdmin.from("advisor_telephony").insert(advisorPayload);
     if (error) throw new Error(error.message);
     return { ok: true as const };
   });
@@ -378,7 +440,10 @@ export const updateTelephonyRoutingSettings = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await requireOwner(context.userId, context.claims as { email?: string });
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (data.voiceBrand) patch.voice_brand = data.voiceBrand;
     if (data.outOfHoursAction) patch.out_of_hours_action = data.outOfHoursAction;
@@ -388,7 +453,11 @@ export const updateTelephonyRoutingSettings = createServerFn({ method: "POST" })
     if (data.fallbackUserId !== undefined) patch.fallback_user_id = data.fallbackUserId;
     if (data.ringTimeoutSeconds !== undefined) patch.ring_timeout_seconds = data.ringTimeoutSeconds;
 
-    const { error } = await supabaseAdmin.from("telephony_routing_settings").update(patch).eq("id", 1);
+    const { error } = await supabaseAdmin
+      .from("telephony_routing_settings")
+      .update(patch)
+      .eq("id", 1)
+      .eq("tenant_id", authorised.tenant.id);
     if (error) throw new Error(error.message);
     return { ok: true as const };
   });
@@ -400,15 +469,18 @@ export const addTelephonyMobileNumber = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await requireOwner(context.userId, context.claims as { email?: string });
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const e164 = normaliseUkPhone(data.e164);
-    const { error } = await supabaseAdmin.from("telephony_numbers").insert({
+    const { error } = await supabaseAdmin.from("telephony_numbers").insert(withForcedTenantId({
       e164,
       label: data.label?.trim() || "Agent mobile",
       kind: "mobile",
       is_firm_inbound: false,
       active: true,
-    });
+    }, authorised.tenant.id));
     if (error) throw new Error(error.message);
     return { ok: true as const, e164 };
   });
@@ -429,12 +501,22 @@ export const allocateTelephonyNumber = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await requireOwner(context.userId, context.claims as { email?: string });
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    if (data.userId) {
+      await requireTenantMembership(data.userId, authorised.tenant.id);
+    }
+    if (data.cloneFromUserId) {
+      await requireTenantMembership(data.cloneFromUserId, authorised.tenant.id);
+    }
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     const { data: mobile, error: mobileErr } = await supabaseAdmin
       .from("telephony_numbers")
       .select("id, kind, allocated_user_id, e164")
       .eq("id", data.numberId)
+      .eq("tenant_id", authorised.tenant.id)
       .maybeSingle();
     if (mobileErr) throw new Error(mobileErr.message);
     if (!mobile || mobile.kind !== "mobile") throw new Error("Select a mobile number.");
@@ -447,14 +529,16 @@ export const allocateTelephonyNumber = createServerFn({ method: "POST" })
       await supabaseAdmin
         .from("telephony_numbers")
         .update({ allocated_user_id: null, updated_at: now })
-        .eq("id", data.numberId);
+        .eq("id", data.numberId)
+        .eq("tenant_id", authorised.tenant.id);
 
       if (previousOwnerId) {
         await supabaseAdmin
           .from("advisor_telephony")
           .update({ allocated_mobile_number_id: null, updated_at: now })
           .eq("user_id", previousOwnerId)
-          .eq("allocated_mobile_number_id", data.numberId);
+          .eq("allocated_mobile_number_id", data.numberId)
+          .eq("tenant_id", authorised.tenant.id);
       }
       return { ok: true as const, allocatedUserId: null };
     }
@@ -467,7 +551,8 @@ export const allocateTelephonyNumber = createServerFn({ method: "POST" })
         .from("advisor_telephony")
         .update({ allocated_mobile_number_id: null, updated_at: now })
         .eq("user_id", previousOwnerId)
-        .eq("allocated_mobile_number_id", data.numberId);
+        .eq("allocated_mobile_number_id", data.numberId)
+        .eq("tenant_id", authorised.tenant.id);
     }
 
     // Clear any other mobile currently held by the target advisor
@@ -476,19 +561,22 @@ export const allocateTelephonyNumber = createServerFn({ method: "POST" })
       .update({ allocated_user_id: null, updated_at: now })
       .eq("allocated_user_id", targetUserId)
       .eq("kind", "mobile")
+      .eq("tenant_id", authorised.tenant.id)
       .neq("id", data.numberId);
 
     await supabaseAdmin
       .from("advisor_telephony")
       .update({ allocated_mobile_number_id: null, updated_at: now })
       .eq("user_id", targetUserId)
+      .eq("tenant_id", authorised.tenant.id)
       .neq("allocated_mobile_number_id", data.numberId);
 
     // Assign number row
     const { error: assignErr } = await supabaseAdmin
       .from("telephony_numbers")
       .update({ allocated_user_id: targetUserId, updated_at: now })
-      .eq("id", data.numberId);
+      .eq("id", data.numberId)
+      .eq("tenant_id", authorised.tenant.id);
     if (assignErr) throw new Error(assignErr.message);
 
     // Ensure advisor telephony profile exists (clone template if new)
@@ -496,6 +584,7 @@ export const allocateTelephonyNumber = createServerFn({ method: "POST" })
       .from("advisor_telephony")
       .select("user_id")
       .eq("user_id", targetUserId)
+      .eq("tenant_id", authorised.tenant.id)
       .maybeSingle();
 
     let template: {
@@ -522,6 +611,7 @@ export const allocateTelephonyNumber = createServerFn({ method: "POST" })
           "ring_softphone, ring_allocated_mobile, ring_personal_mobile, use_personal_reroute_as_fallback, respect_outlook_busy, respect_hub_appointments",
         )
         .eq("user_id", cloneFrom)
+        .eq("tenant_id", authorised.tenant.id)
         .maybeSingle();
       if (src) {
         template = {
@@ -552,9 +642,14 @@ export const allocateTelephonyNumber = createServerFn({ method: "POST" })
       upsertRow.personal_reroute_e164 = personal;
     }
 
-    const { error: upsertErr } = await supabaseAdmin.from("advisor_telephony").upsert(upsertRow, {
-      onConflict: "user_id",
-    });
+    const advisorPayload = withForcedTenantId(upsertRow, authorised.tenant.id);
+    const { error: upsertErr } = existing
+      ? await supabaseAdmin
+          .from("advisor_telephony")
+          .update(advisorPayload)
+          .eq("user_id", targetUserId)
+          .eq("tenant_id", authorised.tenant.id)
+      : await supabaseAdmin.from("advisor_telephony").insert(advisorPayload);
     if (upsertErr) throw new Error(upsertErr.message);
 
     return { ok: true as const, allocatedUserId: targetUserId };

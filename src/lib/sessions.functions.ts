@@ -31,7 +31,9 @@ function randomAdvisorCode(): string {
 // Ensure the given advisor has a unique code, generating one on first use.
 // Returns null if the advisor_profiles table doesn't exist yet (pre-migration).
 export async function ensureAdvisorCode(userId: string): Promise<string | null> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { data: existing, error: existingErr } = await supabaseAdmin
     .from("advisor_profiles")
     .select("code")
@@ -70,7 +72,9 @@ export async function ensureAdvisorCode(userId: string): Promise<string | null> 
 
 // Resolve an advisor code (case-insensitive) to its advisor user_id.
 async function resolveAdvisorIdByCode(code: string): Promise<string | null> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { data, error } = await supabaseAdmin
     .from("advisor_profiles")
     .select("user_id")
@@ -105,7 +109,9 @@ function isMissingTableError(error: { code?: string; message?: string } | null):
 }
 
 async function getRolesForUser(userId: string): Promise<string[]> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { data } = await supabaseAdmin.from("user_roles").select("role").eq("user_id", userId);
   return (data ?? []).map((r) => r.role);
 }
@@ -119,7 +125,9 @@ export async function assertStaffCanAccessCustomer(
   const isMainAdmin = roles.includes("admin");
   const isAdvisor = roles.includes("advisor");
 
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { resolveAdminAccess } = await import("@/lib/admin.functions");
   const { canAmend } = await import("@/lib/admin-access");
   const { data: staffProfile } = await supabaseAdmin
@@ -470,7 +478,9 @@ function caseRefMigrationRequiredError(): Error {
 
 /** Assigns a case reference when a fact-find progresses to an appointment (idempotent). */
 export async function promoteSessionToCase(sessionId: string): Promise<string> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { data: session, error: readErr } = await supabaseAdmin
     .from("interview_sessions")
     .select("case_ref")
@@ -502,7 +512,9 @@ export const promoteSessionToCaseAsStaff = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertStaffCanAccessCustomer(context.userId, data.customerId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: session, error } = await supabaseAdmin
       .from("interview_sessions")
       .select("id, customer_id, case_ref")
@@ -521,7 +533,9 @@ export const promoteSessionToCaseAsStaff = createServerFn({ method: "POST" })
 export async function createCaseSessionForCustomer(
   customerId: string,
 ): Promise<{ id: string; case_ref: string | null }> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const caseRef = await allocateNextCaseRef(supabaseAdmin);
   const { data, error } = await supabaseAdmin
     .from("interview_sessions")
@@ -579,7 +593,9 @@ export const listMyCases = createServerFn({ method: "GET" })
       customerId = data.viewAsCustomerUserId;
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: sessions, error } = await supabaseAdmin
       .from("interview_sessions")
       .select("id, case_ref, status, started_at, submitted_at, summary")
@@ -656,7 +672,9 @@ export const updateCaseRef = createServerFn({ method: "POST" })
     }
 
     const ref = data.caseRef.trim().toUpperCase();
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: existing } = await supabaseAdmin
       .from("interview_sessions")
       .select("case_ref")
@@ -704,7 +722,9 @@ export const getCustomerHub = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertStaffCanAccessCustomer(context.userId, data.customerId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     const { data: sessions, error: sessErr } = await supabaseAdmin
       .from("interview_sessions")
@@ -890,7 +910,9 @@ export const updateCustomerContact = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertStaffCanAccessCustomer(context.userId, data.customerId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { normaliseUkPhone } = await import("@/lib/sms.server");
 
     const patch: Record<string, string | null> = {};
@@ -923,7 +945,9 @@ export const updateCustomerContact = createServerFn({ method: "POST" })
 export const createSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data, error } = await supabaseAdmin
       .from("interview_sessions")
       .insert({ customer_id: context.userId, status: "in_progress" })
@@ -966,7 +990,9 @@ export const getSession = createServerFn({ method: "POST" })
       const isAdvisor = roles.includes("advisor");
       if (!isMainAdmin) {
         if (!isAdvisor) throw new Error("Forbidden");
-        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
         let allowed = false;
         const { data: alloc, error: allocErr } = await supabaseAdmin
           .from("session_advisors")
@@ -1072,7 +1098,9 @@ export const deleteSession = createServerFn({ method: "POST" })
       throw new Error("You do not have permission to delete this record.");
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: session, error: sErr } = await supabaseAdmin
       .from("interview_sessions")
       .select("id, deleted_at, case_ref")
@@ -1107,7 +1135,9 @@ export const restoreSession = createServerFn({ method: "POST" })
       throw new Error("Only the Owner or an Admin Supervisor can restore customers.");
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { error } = await supabaseAdmin
       .from("interview_sessions")
       .update({ deleted_at: null, deleted_by: null, updated_at: new Date().toISOString() })
@@ -1185,7 +1215,9 @@ export const getMyRole = createServerFn({ method: "GET" })
     // Keep roles array in sync after owner bootstrap.
     if (adminAccess.isAdmin && !roles.includes("admin")) roles = [...roles, "admin"];
     if (adminAccess.isOwner && !roles.includes("advisor")) {
-      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
       await supabaseAdmin
         .from("user_roles")
         .upsert({ user_id: context.userId, role: "advisor" }, { onConflict: "user_id,role" });
@@ -1226,7 +1258,9 @@ export const listUsersWithRoles = createServerFn({ method: "GET" })
     const isAdvisor = (myRoles ?? []).some((r) => r.role === "advisor");
     if (!isAdvisor && !adminAccess.isAdmin) throw new Error("Forbidden");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: profiles, error } = await supabaseAdmin
       .from("profiles")
       .select("id, full_name, email")
@@ -1301,8 +1335,11 @@ async function grantIntroducerRole(
   userId: string,
   companyMode: "new" | "join" | undefined,
   companyCode: string | undefined,
+  tenantId?: string,
 ): Promise<string> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
   // Resolve the target company (code + name). Join copies an existing
   // company's identity; new mints a fresh unique code.
@@ -1310,12 +1347,12 @@ async function grantIntroducerRole(
   let joinedCompanyName: string | null = null;
   if (companyMode === "join") {
     if (!companyCode) throw new Error("Enter the 4-digit company code to join.");
-    const { data: company, error: companyErr } = await supabaseAdmin
+    let companyQuery = supabaseAdmin
       .from("introducers")
       .select("company_name, company_code")
-      .eq("company_code", companyCode)
-      .limit(1)
-      .maybeSingle();
+      .eq("company_code", companyCode);
+    if (tenantId) companyQuery = companyQuery.eq("tenant_id", tenantId);
+    const { data: company, error: companyErr } = await companyQuery.limit(1).maybeSingle();
     if (companyErr && !isMissingTableError(companyErr)) throw new Error(companyErr.message);
     if (!company) throw new Error(`No company found with code ${companyCode}.`);
     resolvedCode = companyCode;
@@ -1330,11 +1367,12 @@ async function grantIntroducerRole(
   if (error) throw new Error(error.message);
 
   // Ensure an introducer profile exists so the portal + referral links work.
-  const { data: existing } = await supabaseAdmin
+  let existingQuery = supabaseAdmin
     .from("introducers")
     .select("id, active")
-    .eq("user_id", userId)
-    .maybeSingle();
+    .eq("user_id", userId);
+  if (tenantId) existingQuery = existingQuery.eq("tenant_id", tenantId);
+  const { data: existing } = await existingQuery.maybeSingle();
   if (existing) {
     const patch: {
       active?: boolean;
@@ -1427,7 +1465,9 @@ export const setIntroducerRole = createServerFn({ method: "POST" })
       return { ok: true, companyCode };
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { error } = await supabaseAdmin
       .from("user_roles")
       .delete()
@@ -1454,7 +1494,9 @@ export const setAdvisorRole = createServerFn({ method: "POST" })
     if (!data.makeAdvisor && data.userId === context.userId) {
       throw new Error("You can't remove your own advisor access.");
     }
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     if (data.makeAdvisor) {
       const { error } = await supabaseAdmin
         .from("user_roles")
@@ -1534,7 +1576,9 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "POST" })
 
     const effectiveUserId = viewAsMode ? data.viewAsAdvisorId! : context.userId;
     const isMainAdmin = !viewAsMode && roles.includes("admin") && adminAccess.isAdmin;
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     // Pull every allocation row up front (used to augment + to scope regular
     // advisors). Degrade gracefully if the table doesn't exist yet.
@@ -1771,7 +1815,9 @@ export const listAdvisors = createServerFn({ method: "GET" })
     const roles = await getRolesForUser(context.userId);
     if (!roles.includes("admin")) throw new Error("Forbidden");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: roleRows } = await supabaseAdmin
       .from("user_roles")
       .select("user_id")
@@ -1838,7 +1884,9 @@ export const listAdvisorCustomers = createServerFn({ method: "GET" })
     const roles = await getRolesForUser(context.userId);
     if (!roles.includes("admin")) throw new Error("Forbidden");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     // 1) Sessions explicitly allocated to this advisor.
     const allocatedIds = new Set<string>();
@@ -1947,7 +1995,9 @@ export const allocateSession = createServerFn({ method: "POST" })
       throw new Error("That user is not an advisor.");
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     // Hard cap: at most MAX_ADVISORS_PER_SESSION advisors per customer file.
     const { data: current, error: currentErr } = await supabaseAdmin
@@ -2008,7 +2058,9 @@ export const bulkAllocateSessions = createServerFn({ method: "POST" })
     const targetRoles = await getRolesForUser(advisorId);
     if (!targetRoles.includes("advisor")) throw new Error("That user is not an advisor.");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     // Current allocations across the selected sessions (one query).
     const { data: existing, error: existingErr } = await supabaseAdmin
@@ -2063,7 +2115,9 @@ export const unallocateSession = createServerFn({ method: "POST" })
     const roles = await getRolesForUser(context.userId);
     if (!roles.includes("admin")) throw new Error("Forbidden");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { error } = await supabaseAdmin
       .from("session_advisors")
       .delete()
@@ -2094,7 +2148,9 @@ export const transferSession = createServerFn({ method: "POST" })
     const targetRoles = await getRolesForUser(data.toAdvisorId);
     if (!targetRoles.includes("advisor")) throw new Error("Target user is not an advisor.");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     const { data: current, error: currentErr } = await supabaseAdmin
       .from("session_advisors")
@@ -2170,7 +2226,9 @@ export const bulkTransferSessions = createServerFn({ method: "POST" })
     const targetRoles = await getRolesForUser(toAdvisorId);
     if (!targetRoles.includes("advisor")) throw new Error("Target user is not an advisor.");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: existing, error: existingErr } = await supabaseAdmin
       .from("session_advisors")
       .select("session_id, advisor_id")
@@ -2243,7 +2301,9 @@ export const listCustomersForAdmin = createServerFn({ method: "GET" })
     const access = await resolveAdminAccess(context.userId, email);
     if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const customerIds = new Set<string>();
 
     const { data: roleRows } = await supabaseAdmin
@@ -2338,7 +2398,9 @@ export async function clearSessionAttention(
   _reason: string,
 ): Promise<void> {
   try {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const now = new Date().toISOString();
 
     const { error: trackErr } = await supabaseAdmin.from("session_contact_tracking").upsert(
@@ -2418,7 +2480,9 @@ async function appendContactLog(
   body: string | null,
 ): Promise<void> {
   try {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { error } = await supabaseAdmin
       .from("customer_contact_log")
       .insert({ session_id: sessionId, author_id: authorId, entry_type: entryType, body });
@@ -2434,7 +2498,9 @@ export const getContactTracking = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const roles = await getRolesForUser(context.userId);
     if (!roles.includes("advisor")) throw new Error("Forbidden");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: row, error } = await supabaseAdmin
       .from("session_contact_tracking")
       .select("last_contacted_at, next_contact_at")
@@ -2456,7 +2522,9 @@ async function upsertContactTracking(
   userId: string,
   patch: { last_contacted_at?: string; next_contact_at?: string | null },
 ): Promise<{ lastContactedAt: string | null; nextContactAt: string | null }> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { data, error } = await supabaseAdmin
     .from("session_contact_tracking")
     .upsert(
@@ -2502,7 +2570,9 @@ export const setNextContact = createServerFn({ method: "POST" })
     const isStaff = roles.includes("advisor") || adminAccess.isAdmin;
     if (!isStaff) throw new Error("Forbidden");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     await upsertContactTracking(data.sessionId, context.userId, {
       next_contact_at: data.nextContactAt,
     });
@@ -2593,7 +2663,9 @@ export async function fetchContactHistoryEntries(
   sessionId: string,
   opts: { userId: string; email?: string },
 ): Promise<ContactHistoryEntry[]> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { resolveAdminAccess } = await import("@/lib/admin.functions");
   const { canAmendHistory } = await import("@/lib/admin-access");
   const isOwner = canAmendHistory(await resolveAdminAccess(opts.userId, opts.email));
@@ -2834,7 +2906,9 @@ export const getCustomerJourney = createServerFn({ method: "POST" })
     const roles = await getRolesForUser(context.userId);
     const isStaff = roles.includes("advisor") || roles.includes("admin");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: session, error: sessErr } = await supabaseAdmin
       .from("interview_sessions")
       .select("customer_id")
@@ -2931,7 +3005,9 @@ export const confirmJourneyMilestone = createServerFn({ method: "POST" })
     const roles = await getRolesForUser(context.userId);
     if (!roles.includes("advisor") && !roles.includes("admin")) throw new Error("Forbidden");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: session, error: sessErr } = await supabaseAdmin
       .from("interview_sessions")
       .select("customer_id")
@@ -2991,7 +3067,9 @@ export const reverseJourneyMilestone = createServerFn({ method: "POST" })
       throw new Error("Only an admin can reverse journey milestones.");
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const label = JOURNEY_MILESTONE_LABELS[data.milestoneKey];
     const { error } = await supabaseAdmin
       .from("customer_journey_milestones")
@@ -3032,7 +3110,9 @@ export const amendContactHistoryEntry = createServerFn({ method: "POST" })
     const access = await resolveAdminAccess(context.userId, email);
     if (!canAmendHistory(access)) throw new Error("Only the owner can amend history.");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: row, error } = await supabaseAdmin
       .from("customer_contact_log")
       .select("id, body, session_id")
@@ -3117,7 +3197,9 @@ async function requireAdmin(userId: string): Promise<void> {
   const roles = await getRolesForUser(userId);
   if (roles.includes("admin")) return;
   // Owner/supervisor via ADMIN_EMAILS / admin_profiles should also pass.
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { data: profile } = await supabaseAdmin
     .from("profiles")
     .select("email")
@@ -3132,7 +3214,9 @@ async function requireAdmin(userId: string): Promise<void> {
 // Stamp deleted_at on an advisor profile, swallowing the error if the column
 // isn't present yet (pre-migration graceful degradation).
 async function setAdvisorDeletedAt(userId: string, value: string | null): Promise<void> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { error } = await supabaseAdmin
     .from("advisor_profiles")
     .update({ deleted_at: value })
@@ -3151,7 +3235,9 @@ export const softDeleteAdvisor = createServerFn({ method: "POST" })
     if (data.userId === context.userId) {
       throw new Error("You can't bin your own advisor access.");
     }
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     // Preserve the advisor_profiles row + code before binning.
     try {
       await ensureAdvisorCode(data.userId);
@@ -3175,7 +3261,13 @@ export const restoreAdvisor = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ userId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await requireAdmin(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { resolveSoleMembershipTenant, withForcedTenantId } = await import(
+      "@/lib/tenant-assert.server"
+    );
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { error } = await supabaseAdmin
       .from("user_roles")
       .upsert({ user_id: data.userId, role: "advisor" }, { onConflict: "user_id,role" });
@@ -3197,7 +3289,9 @@ export const softDeleteIntroducer = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ userId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await requireAdmin(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { error } = await supabaseAdmin
       .from("user_roles")
       .delete()
@@ -3226,7 +3320,9 @@ export const restoreIntroducer = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ userId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await requireAdmin(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { error } = await supabaseAdmin
       .from("user_roles")
       .upsert({ user_id: data.userId, role: "introducer" }, { onConflict: "user_id,role" });
@@ -3278,7 +3374,9 @@ export const listBinnedStaff = createServerFn({ method: "GET" })
     const access = await resolveAdminAccess(context.userId, email);
     if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     const binnedAdvisors: BinnedAdvisor[] = [];
     const binnedIntroducers: BinnedIntroducer[] = [];
@@ -3406,7 +3504,13 @@ export const createStaffInvite = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await requireAdmin(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { resolveSoleMembershipTenant, withForcedTenantId } = await import(
+      "@/lib/tenant-assert.server"
+    );
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     const isJoin = data.role === "introducer" && data.companyMode === "join";
     let companyName: string | null = null;
@@ -3416,6 +3520,7 @@ export const createStaffInvite = createServerFn({ method: "POST" })
         .from("introducers")
         .select("company_name")
         .eq("company_code", data.companyCode)
+        .eq("tenant_id", authorised.tenant.id)
         .limit(1)
         .maybeSingle();
       if (companyErr && !isMissingTableError(companyErr)) throw new Error(companyErr.message);
@@ -3425,14 +3530,19 @@ export const createStaffInvite = createServerFn({ method: "POST" })
 
     const { data: invite, error } = await supabaseAdmin
       .from("staff_invitations")
-      .insert({
-        role: data.role,
-        email: data.email ? data.email.trim() : null,
-        create_company: data.role === "introducer" ? data.companyMode !== "join" : false,
-        company_code: isJoin ? data.companyCode : null,
-        company_name: companyName,
-        created_by: context.userId,
-      })
+      .insert(
+        withForcedTenantId(
+          {
+            role: data.role,
+            email: data.email ? data.email.trim() : null,
+            create_company: data.role === "introducer" ? data.companyMode !== "join" : false,
+            company_code: isJoin ? data.companyCode : null,
+            company_name: companyName,
+            created_by: context.userId,
+          },
+          authorised.tenant.id,
+        ),
+      )
       .select("token, role, email, expires_at")
       .single();
     if (error) {
@@ -3449,10 +3559,15 @@ export const listStaffInvites = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await requireAdmin(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { resolveSoleMembershipTenant } = await import("@/lib/tenant-assert.server");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data, error } = await supabaseAdmin
       .from("staff_invitations")
       .select("id, token, role, email, company_code, company_name, create_company, created_at, expires_at, used_at")
+      .eq("tenant_id", authorised.tenant.id)
       .order("created_at", { ascending: false })
       .limit(50);
     if (error) {
@@ -3468,17 +3583,31 @@ export const revokeStaffInvite = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await requireAdmin(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { resolveSoleMembershipTenant, assertRowBelongsToTenant } = await import(
+      "@/lib/tenant-assert.server"
+    );
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    await assertRowBelongsToTenant({
+      table: "staff_invitations",
+      id: data.id,
+      authorisedTenantId: authorised.tenant.id,
+      select: "id, tenant_id",
+    });
     const { error } = await supabaseAdmin
       .from("staff_invitations")
       .delete()
       .eq("id", data.id)
+      .eq("tenant_id", authorised.tenant.id)
       .is("used_at", null);
     if (error && !isMissingTableError(error)) throw new Error(error.message);
     return { ok: true };
   });
 
 type ResolvedInvite = {
+  tenantId: string;
   role: "advisor" | "introducer" | "admin";
   email: string | null;
   companyName: string | null;
@@ -3491,12 +3620,15 @@ type ResolvedInvite = {
 // token without client RLS. Rejects missing / used / expired invites.
 async function resolveInviteByToken(token: string): Promise<{
   id: string;
+  tenantId: string;
   resolved: ResolvedInvite;
 }> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { data: invite, error } = await supabaseAdmin
     .from("staff_invitations")
-    .select("id, role, email, company_code, company_name, create_company, expires_at, used_at")
+    .select("id, tenant_id, role, email, company_code, company_name, create_company, expires_at, used_at")
     .eq("token", token)
     .maybeSingle();
   if (error) {
@@ -3508,6 +3640,9 @@ async function resolveInviteByToken(token: string): Promise<{
   if (invite.expires_at && new Date(invite.expires_at).getTime() < Date.now()) {
     throw new Error("This invite link has expired. Ask an admin for a new one.");
   }
+  if (!invite.tenant_id) {
+    throw new Error("This invite link is not valid.");
+  }
   const role =
     invite.role === "introducer"
       ? "introducer"
@@ -3516,7 +3651,9 @@ async function resolveInviteByToken(token: string): Promise<{
         : "advisor";
   return {
     id: invite.id,
+    tenantId: invite.tenant_id,
     resolved: {
+      tenantId: invite.tenant_id,
       role,
       email: invite.email ?? null,
       companyName: invite.company_name ?? null,
@@ -3542,7 +3679,9 @@ export const exportOwnerCustomerReport = createServerFn({ method: "GET" })
     const access = await resolveAdminAccess(context.userId, email);
     if (!access.isOwner) throw new Error("Owner only");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     const customerIdSet = new Set<string>();
     const { data: roleRows } = await supabaseAdmin.from("user_roles").select("user_id").eq("role", "customer");
@@ -3728,14 +3867,17 @@ export const markStaffInviteUsed = createServerFn({ method: "POST" })
     z.object({ token: z.string().uuid(), userId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ data }) => {
-    const { id, resolved } = await resolveInviteByToken(data.token);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { id, tenantId, resolved } = await resolveInviteByToken(data.token);
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     // Claim the invite first (atomic): only one caller may flip used_at.
     const { data: claimed, error: claimErr } = await supabaseAdmin
       .from("staff_invitations")
       .update({ used_at: new Date().toISOString(), used_by: data.userId })
       .eq("id", id)
+      .eq("tenant_id", tenantId)
       .is("used_at", null)
       .select("id")
       .maybeSingle();
@@ -3781,8 +3923,21 @@ export const markStaffInviteUsed = createServerFn({ method: "POST" })
           data.userId,
           resolved.createCompany ? "new" : "join",
           resolved.companyCode ?? undefined,
+          tenantId,
         );
       }
+      const { error: membershipErr } = await supabaseAdmin
+        .from("tenant_memberships")
+        .upsert(
+          {
+            tenant_id: tenantId,
+            user_id: data.userId,
+            role: resolved.role === "admin" ? "owner" : resolved.role,
+            active: true,
+          },
+          { onConflict: "tenant_id,user_id" },
+        );
+      if (membershipErr) throw new Error(membershipErr.message);
     } catch (e) {
       // Roll back the claim so the invite can be retried.
       await supabaseAdmin

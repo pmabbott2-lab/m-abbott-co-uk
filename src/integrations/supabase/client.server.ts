@@ -85,3 +85,12 @@ export const supabaseAdmin = new Proxy({} as ReturnType<typeof createSupabaseAdm
     return Reflect.get(_supabaseAdmin, prop, receiver);
   },
 });
+
+/**
+ * Untyped service-role alias.
+ * Generated Database types lag G1–G4A tenant_id columns; regenerate types when CLI allows.
+ * Prefer this only in privileged server modules that already bypass RLS.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const supabaseAdminUntyped: any = supabaseAdmin;
+

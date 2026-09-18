@@ -3,6 +3,12 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { resolveAdminAccess } from "@/lib/admin.functions";
 import { canAmend, canView, canViewFinanceReport, canViewCommissionPayouts, canAmendCommissionPayouts } from "@/lib/admin-access";
+import {
+  assertRowBelongsToTenant,
+  requireTenantMembership,
+  resolveSoleMembershipTenant,
+  withForcedTenantId,
+} from "@/lib/tenant-assert.server";
 
 const FEE_TYPES = ["fee", "mortgage_fee", "insurance_fee", "other_fee"] as const;
 
@@ -35,6 +41,7 @@ async function commissionPctForUser(
   userId: string,
   role: "advisor" | "introducer",
   feeType: string,
+  tenantId: string,
 ): Promise<number> {
   // Introducers (including staff attributed as introducer) earn on fee + mortgage fee only.
   // Insurance and other fee commission rates are advisor-exclusive.
@@ -45,6 +52,7 @@ async function commissionPctForUser(
     .select("percentage, pct_fee, pct_mortgage_fee, pct_insurance_fee, pct_other_fee")
     .eq("user_id", userId)
     .eq("role", role)
+    .eq("tenant_id", tenantId)
     .maybeSingle();
   if (error && !isMissingTable(error)) throw new Error(error.message);
   if (!rate) return 0;
@@ -132,12 +140,22 @@ export const listSessionFees = createServerFn({ method: "GET" })
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
     if (!canView(access, "finance_customer")) throw new Error("Forbidden");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    await assertRowBelongsToTenant({
+      table: "interview_sessions",
+      id: data.sessionId,
+      authorisedTenantId: authorised.tenant.id,
+      select: "id, tenant_id",
+    });
     const { data: lines, error } = await supabaseAdmin
       .from("finance_fee_lines")
       .select("*")
       .eq("session_id", data.sessionId)
+      .eq("tenant_id", authorised.tenant.id)
       .neq("status", "deleted")
       .order("created_at", { ascending: true });
     if (error) {
@@ -154,8 +172,17 @@ export const listSessionCommissions = createServerFn({ method: "GET" })
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
     if (!canView(access, "finance_customer")) throw new Error("Forbidden");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    await assertRowBelongsToTenant({
+      table: "interview_sessions",
+      id: data.sessionId,
+      authorisedTenantId: authorised.tenant.id,
+      select: "id, tenant_id",
+    });
     const { data: rows, error } = await supabaseAdmin
       .from("finance_ledger")
       .select(
@@ -163,6 +190,7 @@ export const listSessionCommissions = createServerFn({ method: "GET" })
       )
       .eq("kind", "commission")
       .eq("session_id", data.sessionId)
+      .eq("tenant_id", authorised.tenant.id)
       .order("created_at", { ascending: true });
     if (error) {
       if (isMissingTable(error)) return { rows: [] as CommissionPayoutRow[], migrationRequired: true };
@@ -171,6 +199,7 @@ export const listSessionCommissions = createServerFn({ method: "GET" })
     const enriched = await enrichCommissionLedgerRows(
       supabaseAdmin,
       (rows ?? []) as RawCommissionLedgerRow[],
+      authorised.tenant.id,
     );
     return { rows: enriched, migrationRequired: false };
   });
@@ -188,10 +217,17 @@ export const upsertDraftFee = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .handler(async ({ data: _data, context }) => {
+  .handler(async ({ data, context }) => {
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
     if (!canAmend(access, "finance_customer")) throw new Error("Forbidden");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    await assertRowBelongsToTenant({
+      table: "interview_sessions",
+      id: data.sessionId,
+      authorisedTenantId: authorised.tenant.id,
+      select: "id, tenant_id",
+    });
 
     // Case fees must come from Finance → Network statements → Allocate.
     // Manual draft create/edit is closed so commission only pull through from the network.
@@ -207,8 +243,20 @@ export const submitSessionFees = createServerFn({ method: "POST" })
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
     if (!canAmend(access, "finance_customer")) throw new Error("Forbidden");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    const session = await assertRowBelongsToTenant<{
+      tenant_id: string;
+      customer_id: string | null;
+    }>({
+      table: "interview_sessions",
+      id: data.sessionId,
+      authorisedTenantId: authorised.tenant.id,
+      select: "id, tenant_id, customer_id",
+    });
     const batchId = crypto.randomUUID();
     const now = new Date().toISOString();
 
@@ -216,20 +264,16 @@ export const submitSessionFees = createServerFn({ method: "POST" })
       .from("finance_fee_lines")
       .select("*")
       .eq("session_id", data.sessionId)
+      .eq("tenant_id", authorised.tenant.id)
       .eq("status", "draft");
     if (error) throw new Error(error.message);
     if (!drafts?.length) throw new Error("No draft fees to submit.");
 
-    const { data: feeSession } = await supabaseAdmin
-      .from("interview_sessions")
-      .select("customer_id")
-      .eq("id", data.sessionId)
-      .maybeSingle();
     const { resolveIntroducerIdForCustomerAtDate } = await import("@/lib/introducer-attribution");
-    const resolvedIntroducerId = feeSession?.customer_id
+    const resolvedIntroducerId = session.customer_id
       ? await resolveIntroducerIdForCustomerAtDate(
           supabaseAdmin,
-          feeSession.customer_id,
+          session.customer_id,
           new Date(now),
           data.sessionId,
         )
@@ -239,9 +283,10 @@ export const submitSessionFees = createServerFn({ method: "POST" })
       await supabaseAdmin
         .from("finance_fee_lines")
         .update({ status: "posted", batch_id: batchId, posted_at: now, updated_at: now })
-        .eq("id", line.id);
+        .eq("id", line.id)
+        .eq("tenant_id", authorised.tenant.id);
 
-      await supabaseAdmin.from("finance_ledger").insert({
+      await supabaseAdmin.from("finance_ledger").insert(withForcedTenantId({
         session_id: data.sessionId,
         fee_line_id: line.id,
         kind: "post",
@@ -250,13 +295,14 @@ export const submitSessionFees = createServerFn({ method: "POST" })
         is_reversal: false,
         note: line.note,
         created_by: context.userId,
-      });
+      }, authorised.tenant.id));
 
       // Commission pull-through for advisors allocated to this session.
       const allocRes = await supabaseAdmin
         .from("session_advisors")
         .select("advisor_id")
-        .eq("session_id", data.sessionId);
+        .eq("session_id", data.sessionId)
+        .eq("tenant_id", authorised.tenant.id);
       const allocations =
         allocRes.error && isMissingTable(allocRes.error) ? [] : (allocRes.data ?? []);
       for (const a of allocations) {
@@ -265,11 +311,12 @@ export const submitSessionFees = createServerFn({ method: "POST" })
           a.advisor_id,
           "advisor",
           line.fee_type,
+          authorised.tenant.id,
         );
         if (pct <= 0) continue;
         const commissionPence = Math.round((line.amount_pence * pct) / 100);
         if (commissionPence <= 0) continue;
-        await supabaseAdmin.from("finance_ledger").insert({
+        await supabaseAdmin.from("finance_ledger").insert(withForcedTenantId({
           session_id: data.sessionId,
           fee_line_id: line.id,
           kind: "commission",
@@ -281,7 +328,7 @@ export const submitSessionFees = createServerFn({ method: "POST" })
           commission_pct: pct,
           payout_status: "received",
           created_by: context.userId,
-        });
+        }, authorised.tenant.id));
       }
 
       // Introducer commission: case → customer → introducer (falls back to session leads).
@@ -294,6 +341,7 @@ export const submitSessionFees = createServerFn({ method: "POST" })
           .from("introducers")
           .select("user_id")
           .eq("id", resolvedIntroducerId)
+          .eq("tenant_id", authorised.tenant.id)
           .maybeSingle();
         if (intro?.user_id) {
           const pct = await commissionPctForUser(
@@ -301,11 +349,12 @@ export const submitSessionFees = createServerFn({ method: "POST" })
             intro.user_id,
             "introducer",
             line.fee_type,
+            authorised.tenant.id,
           );
           if (pct > 0) {
             const commissionPence = Math.round((line.amount_pence * pct) / 100);
             if (commissionPence > 0) {
-              await supabaseAdmin.from("finance_ledger").insert({
+              await supabaseAdmin.from("finance_ledger").insert(withForcedTenantId({
                 session_id: data.sessionId,
                 fee_line_id: line.id,
                 kind: "commission",
@@ -317,7 +366,7 @@ export const submitSessionFees = createServerFn({ method: "POST" })
                 commission_pct: pct,
                 payout_status: "received",
                 created_by: context.userId,
-              });
+              }, authorised.tenant.id));
             }
           }
         }
@@ -343,18 +392,28 @@ export const amendPostedFee = createServerFn({ method: "POST" })
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
     if (!canAmend(access, "finance_customer")) throw new Error("Forbidden");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: line, error } = await supabaseAdmin
-      .from("finance_fee_lines")
-      .select("*")
-      .eq("id", data.lineId)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!line || line.status !== "posted") throw new Error("Only posted fees can be amended.");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    const line = await assertRowBelongsToTenant<Record<string, unknown> & {
+      tenant_id: string;
+      status: string;
+      session_id: string;
+      id: string;
+      fee_type: string;
+      amount_pence: number;
+      note: string | null;
+    }>({
+      table: "finance_fee_lines",
+      id: data.lineId,
+      authorisedTenantId: authorised.tenant.id,
+    });
+    if (line.status !== "posted") throw new Error("Only posted fees can be amended.");
 
     // Red reversal of original.
-    await supabaseAdmin.from("finance_ledger").insert({
+    await supabaseAdmin.from("finance_ledger").insert(withForcedTenantId({
       session_id: line.session_id,
       fee_line_id: line.id,
       kind: data.delete ? "delete" : "amend",
@@ -363,13 +422,14 @@ export const amendPostedFee = createServerFn({ method: "POST" })
       is_reversal: true,
       note: data.delete ? "Deleted posted fee" : "Amended posted fee (reversal)",
       created_by: context.userId,
-    });
+    }, authorised.tenant.id));
 
     if (data.delete) {
       await supabaseAdmin
         .from("finance_fee_lines")
         .update({ status: "deleted", updated_at: new Date().toISOString() })
-        .eq("id", line.id);
+        .eq("id", line.id)
+        .eq("tenant_id", authorised.tenant.id);
       return { ok: true };
     }
 
@@ -383,9 +443,10 @@ export const amendPostedFee = createServerFn({ method: "POST" })
         status: "amended",
         updated_at: new Date().toISOString(),
       })
-      .eq("id", line.id);
+      .eq("id", line.id)
+      .eq("tenant_id", authorised.tenant.id);
 
-    await supabaseAdmin.from("finance_ledger").insert({
+    await supabaseAdmin.from("finance_ledger").insert(withForcedTenantId({
       session_id: line.session_id,
       fee_line_id: line.id,
       kind: "amend",
@@ -394,7 +455,7 @@ export const amendPostedFee = createServerFn({ method: "POST" })
       is_reversal: false,
       note: data.note ?? "Amended posted fee",
       created_by: context.userId,
-    });
+    }, authorised.tenant.id));
 
     return { ok: true };
   });
@@ -421,6 +482,7 @@ async function enrichFinanceLedgerRows(
     ReturnType<typeof import("@/integrations/supabase/client.server")>
   >["supabaseAdmin"],
   rows: Array<Record<string, unknown>>,
+  tenantId: string,
 ): Promise<EnrichedLedgerRow[]> {
   const sessionIds = new Set<string>();
   const userIds = new Set<string>();
@@ -434,7 +496,8 @@ async function enrichFinanceLedgerRows(
     const { data: sessions } = await supabaseAdmin
       .from("interview_sessions")
       .select("id, case_ref, customer_id")
-      .in("id", [...sessionIds]);
+      .in("id", [...sessionIds])
+      .eq("tenant_id", tenantId);
     for (const s of sessions ?? []) {
       sessionMap.set(s.id, { caseRef: s.case_ref ?? null, customerId: s.customer_id ?? null });
     }
@@ -510,18 +573,26 @@ export const listFinanceLedger = createServerFn({ method: "GET" })
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
     if (!canViewFinanceReport(access)) throw new Error("Forbidden — owner only");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: rows, error } = await supabaseAdmin
       .from("finance_ledger")
       .select("*")
+      .eq("tenant_id", authorised.tenant.id)
       .order("created_at", { ascending: false })
       .limit(500);
     if (error) {
       if (isMissingTable(error)) return { rows: [], migrationRequired: true };
       throw new Error(error.message);
     }
-    const enriched = await enrichFinanceLedgerRows(supabaseAdmin, rows ?? []);
+    const enriched = await enrichFinanceLedgerRows(
+      supabaseAdmin,
+      rows ?? [],
+      authorised.tenant.id,
+    );
     return { rows: enriched, migrationRequired: false };
   });
 
@@ -544,9 +615,16 @@ export const listCommissionStaff = createServerFn({ method: "GET" })
         ? "finance_advisor_pct"
         : "finance_introducer_pct";
     if (!canView(access, key)) throw new Error("Forbidden");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: roleRows } = await supabaseAdmin.from("user_roles").select("user_id, role");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    const { data: roleRows } = await supabaseAdmin
+      .from("tenant_memberships")
+      .select("user_id, role")
+      .eq("tenant_id", authorised.tenant.id)
+      .eq("active", true);
     const byUser = new Map<string, Set<string>>();
     for (const r of roleRows ?? []) {
       const set = byUser.get(r.user_id) ?? new Set<string>();
@@ -558,11 +636,13 @@ export const listCommissionStaff = createServerFn({ method: "GET" })
     if (data.role === "advisor") {
       // Pure advisors (+ anyone with advisor role). Do not pull admins-only into this list.
       for (const [userId, roles] of byUser) {
-        if (roles.has("advisor")) ids.add(userId);
+        if (roles.has("adviser")) ids.add(userId);
       }
     } else if (data.role === "admin") {
       for (const [userId, roles] of byUser) {
-        if (roles.has("admin")) ids.add(userId);
+        if (roles.has("owner") || roles.has("supervisor") || roles.has("general")) {
+          ids.add(userId);
+        }
       }
     } else {
       for (const [userId, roles] of byUser) {
@@ -579,13 +659,19 @@ export const listCommissionStaff = createServerFn({ method: "GET" })
 
     const advisorCodeMap = new Map<string, string>();
     if (data.role === "advisor" || data.role === "admin") {
-      const { data: codes } = await supabaseAdmin.from("advisor_profiles").select("user_id, code");
+      const { data: codes } = await supabaseAdmin
+        .from("advisor_profiles")
+        .select("user_id, code")
+        .eq("tenant_id", authorised.tenant.id);
       for (const c of codes ?? []) advisorCodeMap.set(c.user_id, c.code);
     }
 
     const introCodeMap = new Map<string, string>();
     if (data.role === "introducer" || data.role === "admin") {
-      const res = await supabaseAdmin.from("introducers").select("user_id, company_code");
+      const res = await supabaseAdmin
+        .from("introducers")
+        .select("user_id, company_code")
+        .eq("tenant_id", authorised.tenant.id);
       for (const r of res.data ?? []) {
         introCodeMap.set(r.user_id, (r as { company_code?: string }).company_code ?? "");
       }
@@ -636,11 +722,15 @@ export const listCommissionRateHistory = createServerFn({ method: "GET" })
       const key = data.role === "introducer" ? "finance_introducer_pct" : "finance_advisor_pct";
       if (!canView(access, key)) throw new Error("Forbidden");
     }
+    const authorised = await resolveSoleMembershipTenant(context.userId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     let query = supabaseAdmin
       .from("commission_rate_history")
       .select("fee_type, pct_from, pct_to, created_at, changed_by, user_id, role")
+      .eq("tenant_id", authorised.tenant.id)
       .order("created_at", { ascending: false })
       .limit(100);
     if (data.userId) query = query.eq("user_id", data.userId);
@@ -678,8 +768,11 @@ export const getCommissionRate = createServerFn({ method: "GET" })
     const access = await resolveAdminAccess(context.userId, email);
     const key = data.role === "advisor" ? "finance_advisor_pct" : "finance_introducer_pct";
     if (!canView(access, key)) throw new Error("Forbidden");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: rate, error } = await supabaseAdmin
       .from("commission_rates")
       .select(
@@ -687,6 +780,7 @@ export const getCommissionRate = createServerFn({ method: "GET" })
       )
       .eq("user_id", data.userId)
       .eq("role", data.role)
+      .eq("tenant_id", authorised.tenant.id)
       .maybeSingle();
     if (error && !isMissingTable(error)) throw new Error(error.message);
 
@@ -706,12 +800,16 @@ export const getRafBonusAmount = createServerFn({ method: "GET" })
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
     if (!canView(access, "finance_raf")) throw new Error("Forbidden");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data, error } = await supabaseAdmin
       .from("finance_settings")
       .select("num_value")
       .eq("key", "raf_bonus_pence")
+      .eq("tenant_id", authorised.tenant.id)
       .maybeSingle();
     if (error && !isMissingTable(error)) throw new Error(error.message);
     return { amountPence: data?.num_value ?? RAF_BONUS_PENCE };
@@ -736,14 +834,19 @@ export const setCommissionRate = createServerFn({ method: "POST" })
     const access = await resolveAdminAccess(context.userId, email);
     const key = data.role === "advisor" ? "finance_advisor_pct" : "finance_introducer_pct";
     if (!canAmend(access, key)) throw new Error("Forbidden");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    await requireTenantMembership(data.userId, authorised.tenant.id);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     const { data: existing } = await supabaseAdmin
       .from("commission_rates")
       .select("pct_fee, pct_mortgage_fee, pct_insurance_fee, pct_other_fee, percentage")
       .eq("user_id", data.userId)
       .eq("role", data.role)
+      .eq("tenant_id", authorised.tenant.id)
       .maybeSingle();
 
     const prev = existing as CommissionRateRow | null;
@@ -762,20 +865,25 @@ export const setCommissionRate = createServerFn({ method: "POST" })
       other_fee: data.role === "introducer" ? 0 : data.pctOtherFee,
     };
 
-    const { error } = await supabaseAdmin.from("commission_rates").upsert(
-      {
-        user_id: data.userId,
-        role: data.role,
-        percentage: data.pctFee,
-        pct_fee: nextByType.fee,
-        pct_mortgage_fee: nextByType.mortgage_fee,
-        pct_insurance_fee: nextByType.insurance_fee,
-        pct_other_fee: nextByType.other_fee,
-        updated_by: context.userId,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id,role" },
-    );
+    const ratePayload = withForcedTenantId({
+      user_id: data.userId,
+      role: data.role,
+      percentage: data.pctFee,
+      pct_fee: nextByType.fee,
+      pct_mortgage_fee: nextByType.mortgage_fee,
+      pct_insurance_fee: nextByType.insurance_fee,
+      pct_other_fee: nextByType.other_fee,
+      updated_by: context.userId,
+      updated_at: new Date().toISOString(),
+    }, authorised.tenant.id);
+    const { error } = existing
+      ? await supabaseAdmin
+          .from("commission_rates")
+          .update(ratePayload)
+          .eq("user_id", data.userId)
+          .eq("role", data.role)
+          .eq("tenant_id", authorised.tenant.id)
+      : await supabaseAdmin.from("commission_rates").insert(ratePayload);
     if (error) {
       if (isMissingTable(error)) throw new Error("Run the commission-by-fee-type SQL migration first.");
       throw new Error(error.message);
@@ -785,21 +893,21 @@ export const setCommissionRate = createServerFn({ method: "POST" })
       const from = prevByType[feeType];
       const to = nextByType[feeType];
       if (from === to) continue;
-      await supabaseAdmin.from("commission_rate_history").insert({
+      await supabaseAdmin.from("commission_rate_history").insert(withForcedTenantId({
         user_id: data.userId,
         role: data.role,
         fee_type: feeType,
         pct_from: from,
         pct_to: to,
         changed_by: context.userId,
-      });
+      }, authorised.tenant.id));
       const { data: profile } = await supabaseAdmin
         .from("profiles")
         .select("full_name, email")
         .eq("id", data.userId)
         .maybeSingle();
       const who = profile?.full_name || profile?.email || data.userId;
-      await supabaseAdmin.from("finance_audit_log").insert({
+      await supabaseAdmin.from("finance_audit_log").insert(withForcedTenantId({
         audit_type: "commission_rate",
         subject_user_id: data.userId,
         role: data.role,
@@ -807,7 +915,7 @@ export const setCommissionRate = createServerFn({ method: "POST" })
         summary: `${data.role} ${who}: ${FEE_TYPE_LABELS[feeType]} ${from != null ? `${from}% → ` : ""}${to}%`,
         detail: { pct_from: from, pct_to: to },
         changed_by: context.userId,
-      });
+      }, authorised.tenant.id));
     }
 
     return { ok: true };
@@ -820,13 +928,17 @@ export const listRafCommissionHighlights = createServerFn({ method: "GET" })
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
     if (!canView(access, "finance_raf")) return { byUserId: {} as Record<string, number> };
+    const authorised = await resolveSoleMembershipTenant(context.userId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: rows, error } = await supabaseAdmin
       .from("finance_ledger")
       .select("beneficiary_user_id, amount_pence")
       .eq("kind", "commission")
-      .eq("beneficiary_role", "introducer");
+      .eq("beneficiary_role", "introducer")
+      .eq("tenant_id", authorised.tenant.id);
     if (error) {
       if (isMissingTable(error)) return { byUserId: {} };
       throw new Error(error.message);
@@ -841,11 +953,13 @@ export const listRafCommissionHighlights = createServerFn({ method: "GET" })
 
 async function getRafBonusPence(
   supabaseAdmin: Awaited<ReturnType<typeof import("@/integrations/supabase/client.server")>>["supabaseAdmin"],
+  tenantId: string,
 ): Promise<number> {
   const { data } = await supabaseAdmin
     .from("finance_settings")
     .select("num_value")
     .eq("key", "raf_bonus_pence")
+    .eq("tenant_id", tenantId)
     .maybeSingle();
   return data?.num_value ?? RAF_BONUS_PENCE;
 }
@@ -855,22 +969,26 @@ export async function ensureRafCommissionLedgerEntry(
   referralId: string,
   createdBy?: string,
 ): Promise<void> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+
+  const { data: referral, error: refErr } = await supabaseAdmin
+    .from("referrals")
+    .select("id, referrer_user_id, code, referred_email, referral_code_id, tenant_id")
+    .eq("id", referralId)
+    .maybeSingle();
+  if (refErr || !referral?.tenant_id) return;
+  const tenantId = referral.tenant_id as string;
 
   const { data: existing } = await supabaseAdmin
     .from("finance_ledger")
     .select("id")
     .eq("referral_id", referralId)
     .eq("kind", "commission")
+    .eq("tenant_id", tenantId)
     .maybeSingle();
   if (existing) return;
-
-  const { data: referral, error: refErr } = await supabaseAdmin
-    .from("referrals")
-    .select("id, referrer_user_id, code, referred_email, referral_code_id")
-    .eq("id", referralId)
-    .maybeSingle();
-  if (refErr || !referral) return;
 
   let referrerName: string | null = null;
   if (referral.referral_code_id) {
@@ -878,14 +996,15 @@ export async function ensureRafCommissionLedgerEntry(
       .from("referral_codes")
       .select("referrer_name, referrer_user_id")
       .eq("id", referral.referral_code_id)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
     referrerName = codeRow?.referrer_name ?? null;
   }
 
-  const amountPence = await getRafBonusPence(supabaseAdmin);
+  const amountPence = await getRafBonusPence(supabaseAdmin, tenantId);
   const note = `RAF bonus · friend ${referral.referred_email ?? "unknown"} · code ${referral.code ?? ""}`;
 
-  const { error } = await supabaseAdmin.from("finance_ledger").insert({
+  const { error } = await supabaseAdmin.from("finance_ledger").insert(withForcedTenantId({
     kind: "commission",
     fee_type: "fee",
     amount_pence: amountPence,
@@ -896,7 +1015,7 @@ export async function ensureRafCommissionLedgerEntry(
     payout_status: "received",
     note: referrerName ? `${note} · referrer ${referrerName}` : note,
     created_by: createdBy ?? null,
-  });
+  }, tenantId));
   if (error && !isMissingTable(error)) {
     console.error("ensureRafCommissionLedgerEntry failed", error);
   }
@@ -924,6 +1043,7 @@ async function enrichCommissionLedgerRows(
     ReturnType<typeof import("@/integrations/supabase/client.server")>
   >["supabaseAdmin"],
   rows: RawCommissionLedgerRow[],
+  tenantId: string,
 ): Promise<CommissionPayoutRow[]> {
   const userIds = new Set<string>();
   const sessionIds = new Set<string>();
@@ -950,7 +1070,8 @@ async function enrichCommissionLedgerRows(
     const { data: sessions } = await supabaseAdmin
       .from("interview_sessions")
       .select("id, case_ref")
-      .in("id", Array.from(sessionIds));
+      .in("id", Array.from(sessionIds))
+      .eq("tenant_id", tenantId);
     for (const s of sessions ?? []) {
       if (s.case_ref) caseRefMap.set(s.id, s.case_ref);
     }
@@ -961,7 +1082,8 @@ async function enrichCommissionLedgerRows(
     const { data: refs } = await supabaseAdmin
       .from("referrals")
       .select("id, referred_email")
-      .in("id", Array.from(referralIds));
+      .in("id", Array.from(referralIds))
+      .eq("tenant_id", tenantId);
     for (const ref of refs ?? []) {
       referralMap.set(ref.id, ref.referred_email ?? "Friend");
     }
@@ -1010,13 +1132,17 @@ export const listMyCommissionStatement = createServerFn({ method: "GET" })
       .parse(d ?? {}),
   )
   .handler(async ({ data, context }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    const authorised = await resolveSoleMembershipTenant(context.userId);
 
     let beneficiaryUserId = context.userId;
     if (data.viewAsUserId) {
       const email = (context.claims as { email?: string }).email;
       const access = await resolveAdminAccess(context.userId, email);
       if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+      await requireTenantMembership(data.viewAsUserId, authorised.tenant.id);
       beneficiaryUserId = data.viewAsUserId;
     }
 
@@ -1025,6 +1151,7 @@ export const listMyCommissionStatement = createServerFn({ method: "GET" })
       .select("id")
       .eq("referrer_user_id", beneficiaryUserId)
       .eq("bonus_status", "eligible")
+      .eq("tenant_id", authorised.tenant.id)
       .limit(100);
     for (const r of eligibleRefs ?? []) {
       await ensureRafCommissionLedgerEntry(r.id, beneficiaryUserId);
@@ -1037,6 +1164,7 @@ export const listMyCommissionStatement = createServerFn({ method: "GET" })
       )
       .eq("kind", "commission")
       .eq("beneficiary_user_id", beneficiaryUserId)
+      .eq("tenant_id", authorised.tenant.id)
       .order("created_at", { ascending: false })
       .limit(2000);
 
@@ -1051,6 +1179,7 @@ export const listMyCommissionStatement = createServerFn({ method: "GET" })
     const enriched = await enrichCommissionLedgerRows(
       supabaseAdmin,
       (rows ?? []) as RawCommissionLedgerRow[],
+      authorised.tenant.id,
     );
     return { rows: enriched, migrationRequired: false };
   });
@@ -1072,14 +1201,18 @@ export const listCommissionPayouts = createServerFn({ method: "GET" })
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
     if (!canViewCommissionPayouts(access)) throw new Error("Forbidden");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     // Sync eligible RAF referrals that pre-date the payout ledger.
     const { data: eligibleRefs } = await supabaseAdmin
       .from("referrals")
       .select("id")
       .eq("bonus_status", "eligible")
+      .eq("tenant_id", authorised.tenant.id)
       .limit(100);
     for (const r of eligibleRefs ?? []) {
       await ensureRafCommissionLedgerEntry(r.id, context.userId);
@@ -1087,6 +1220,12 @@ export const listCommissionPayouts = createServerFn({ method: "GET" })
 
     let sessionFilterIds: string[] | null = null;
     if (data.sessionId) {
+      await assertRowBelongsToTenant({
+        table: "interview_sessions",
+        id: data.sessionId,
+        authorisedTenantId: authorised.tenant.id,
+        select: "id, tenant_id",
+      });
       sessionFilterIds = [data.sessionId];
     } else if (data.caseRefQuery?.trim()) {
       const q = data.caseRefQuery.trim();
@@ -1094,6 +1233,7 @@ export const listCommissionPayouts = createServerFn({ method: "GET" })
         .from("interview_sessions")
         .select("id")
         .ilike("case_ref", `%${q}%`)
+        .eq("tenant_id", authorised.tenant.id)
         .limit(100);
       if (sessErr) throw new Error(sessErr.message);
       sessionFilterIds = (sessions ?? []).map((s) => s.id);
@@ -1108,6 +1248,7 @@ export const listCommissionPayouts = createServerFn({ method: "GET" })
         "id, session_id, fee_type, amount_pence, commission_pct, beneficiary_user_id, beneficiary_role, referral_id, payout_status, payout_note, payout_at, lost_reason, created_at, note",
       )
       .eq("kind", "commission")
+      .eq("tenant_id", authorised.tenant.id)
       .order("created_at", { ascending: false })
       .limit(sessionFilterIds ? 200 : 500);
 
@@ -1125,6 +1266,7 @@ export const listCommissionPayouts = createServerFn({ method: "GET" })
     const enriched = await enrichCommissionLedgerRows(
       supabaseAdmin,
       (rows ?? []) as RawCommissionLedgerRow[],
+      authorised.tenant.id,
     );
 
     return { rows: enriched, migrationRequired: false };
@@ -1145,8 +1287,19 @@ export const updateCommissionPayoutStatus = createServerFn({ method: "POST" })
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
     if (!canAmendCommissionPayouts(access)) throw new Error("Forbidden");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    await assertRowBelongsToTenant({
+      table: "finance_ledger",
+      id: data.ledgerId,
+      authorisedTenantId: authorised.tenant.id,
+      select: "id, tenant_id",
+    });
 
-    return await applyCommissionPayoutStatusPatch(data, context.userId);
+    return await applyCommissionPayoutStatusPatch(
+      data,
+      context.userId,
+      authorised.tenant.id,
+    );
   });
 
 export const updateSessionCommissionPayoutStatus = createServerFn({ method: "POST" })
@@ -1165,19 +1318,33 @@ export const updateSessionCommissionPayoutStatus = createServerFn({ method: "POS
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
     if (!canAmend(access, "finance_customer")) throw new Error("Forbidden");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    await assertRowBelongsToTenant({
+      table: "interview_sessions",
+      id: data.sessionId,
+      authorisedTenantId: authorised.tenant.id,
+      select: "id, tenant_id",
+    });
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: row, error } = await supabaseAdmin
       .from("finance_ledger")
       .select("id, session_id, kind")
       .eq("id", data.ledgerId)
+      .eq("tenant_id", authorised.tenant.id)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!row || row.kind !== "commission" || row.session_id !== data.sessionId) {
       throw new Error("Commission row not found for this case");
     }
 
-    return await applyCommissionPayoutStatusPatch(data, context.userId);
+    return await applyCommissionPayoutStatusPatch(
+      data,
+      context.userId,
+      authorised.tenant.id,
+    );
   });
 
 async function applyCommissionPayoutStatusPatch(
@@ -1187,12 +1354,16 @@ async function applyCommissionPayoutStatusPatch(
     payoutNote?: string;
   },
   userId: string,
+  tenantId: string,
 ) {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: row, error: readErr } = await supabaseAdmin
       .from("finance_ledger")
       .select("id, kind, referral_id, beneficiary_role")
       .eq("id", data.ledgerId)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
     if (readErr) throw new Error(readErr.message);
     if (!row || row.kind !== "commission") throw new Error("Commission row not found");
@@ -1206,7 +1377,11 @@ async function applyCommissionPayoutStatusPatch(
       payout_by: data.payoutStatus === "received" ? null : userId,
     };
 
-    const { error } = await supabaseAdmin.from("finance_ledger").update(patch).eq("id", data.ledgerId);
+    const { error } = await supabaseAdmin
+      .from("finance_ledger")
+      .update(patch)
+      .eq("id", data.ledgerId)
+      .eq("tenant_id", tenantId);
     if (error) {
       if (isMissingTable(error)) {
         throw new Error("Run supabase/RUN_COMMISSION_PAYOUTS.sql in Supabase first.");
@@ -1223,7 +1398,8 @@ async function applyCommissionPayoutStatusPatch(
       await supabaseAdmin
         .from("referrals")
         .update({ bonus_status: bonusMap[data.payoutStatus], updated_at: now })
-        .eq("id", row.referral_id);
+        .eq("id", row.referral_id)
+        .eq("tenant_id", tenantId);
     }
 
     return { ok: true };
@@ -1244,11 +1420,15 @@ export const listFinanceAuditLog = createServerFn({ method: "GET" })
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
     if (!canViewFinanceReport(access)) throw new Error("Forbidden");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data, error } = await supabaseAdmin
       .from("finance_audit_log")
       .select("id, audit_type, summary, role, fee_type, created_at")
+      .eq("tenant_id", authorised.tenant.id)
       .order("created_at", { ascending: false })
       .limit(200);
     if (error && !isMissingTable(error)) throw new Error(error.message);
@@ -1275,10 +1455,16 @@ export const listCurrentCommissionArrangements = createServerFn({ method: "GET" 
     const email = (context.claims as { email?: string }).email;
     const access = await resolveAdminAccess(context.userId, email);
     if (!canViewFinanceReport(access)) throw new Error("Forbidden");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
 
     const roleFilter = data.role ?? "all";
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: rates, error } = await supabaseAdmin.from("commission_rates").select("*");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    const { data: rates, error } = await supabaseAdmin
+      .from("commission_rates")
+      .select("*")
+      .eq("tenant_id", authorised.tenant.id);
     if (error && !isMissingTable(error)) throw new Error(error.message);
 
     const rows: CommissionArrangementRow[] = [];
@@ -1291,9 +1477,15 @@ export const listCurrentCommissionArrangements = createServerFn({ method: "GET" 
 
     const advisorCodes = new Map<string, string>();
     const introCodes = new Map<string, string>();
-    const { data: adv } = await supabaseAdmin.from("advisor_profiles").select("user_id, code");
+    const { data: adv } = await supabaseAdmin
+      .from("advisor_profiles")
+      .select("user_id, code")
+      .eq("tenant_id", authorised.tenant.id);
     for (const a of adv ?? []) advisorCodes.set(a.user_id, a.code);
-    const { data: intros } = await supabaseAdmin.from("introducers").select("user_id, company_code");
+    const { data: intros } = await supabaseAdmin
+      .from("introducers")
+      .select("user_id, company_code")
+      .eq("tenant_id", authorised.tenant.id);
     for (const i of intros ?? []) introCodes.set(i.user_id, (i as { company_code?: string }).company_code ?? "");
 
     for (const r of rates ?? []) {

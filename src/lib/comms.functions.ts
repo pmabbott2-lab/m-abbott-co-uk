@@ -8,6 +8,10 @@ import {
   type CommunicationTemplateRow,
   type CommunicationSettingsRow,
 } from "@/lib/comms.server";
+import {
+  resolveSoleMembershipTenant,
+  withForcedTenantId,
+} from "@/lib/tenant-assert.server";
 
 async function requireCommsView(userId: string, email?: string) {
   const access = await resolveAdminAccess(userId, email);
@@ -30,12 +34,16 @@ export const listCommunicationTemplates = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const email = (context.claims as { email?: string }).email;
     await requireCommsView(context.userId, email);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data, error } = await supabaseAdmin
       .from("communication_templates")
       .select(
-        "id, template_key, name, description, channel, subject, body, active, required_tokens, sort_order, updated_at, updated_by",
+        "id, tenant_id, template_key, name, description, channel, subject, body, active, required_tokens, sort_order, updated_at, updated_by",
       )
+      .or(`tenant_id.eq.${authorised.tenant.id},tenant_id.is.null`)
       .order("sort_order", { ascending: true });
     if (error) throw new Error(error.message);
     return { templates: (data ?? []) as CommunicationTemplateRow[] };
@@ -46,8 +54,9 @@ export const getCommunicationSettingsFn = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const email = (context.claims as { email?: string }).email;
     await requireCommsView(context.userId, email);
+    const authorised = await resolveSoleMembershipTenant(context.userId);
     const { getCommunicationSettings } = await import("@/lib/comms.server");
-    return getCommunicationSettings();
+    return getCommunicationSettings(authorised.tenant.id);
   });
 
 export const updateCommunicationSettingsFn = createServerFn({ method: "POST" })
@@ -63,18 +72,35 @@ export const updateCommunicationSettingsFn = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const email = (context.claims as { email?: string }).email;
     await requireCommsAmend(context.userId, email);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     let sms = data.smsRegulatoryFooter.trim();
     if (sms && !sms.startsWith("*")) sms = `*${sms}`;
-    const { error } = await supabaseAdmin.from("communication_settings").upsert({
+    const payload = withForcedTenantId({
       id: 1,
       email_regulatory_footer: data.emailRegulatoryFooter.trim(),
       sms_regulatory_footer: sms,
       updated_at: new Date().toISOString(),
       updated_by: context.userId,
-    });
+    }, authorised.tenant.id);
+    const { data: existing, error: readErr } = await supabaseAdmin
+      .from("communication_settings")
+      .select("id")
+      .eq("id", 1)
+      .eq("tenant_id", authorised.tenant.id)
+      .maybeSingle();
+    if (readErr) throw new Error(readErr.message);
+    const { error } = existing
+      ? await supabaseAdmin
+          .from("communication_settings")
+          .update(payload)
+          .eq("id", 1)
+          .eq("tenant_id", authorised.tenant.id)
+      : await supabaseAdmin.from("communication_settings").insert(payload);
     if (error) throw new Error(error.message);
-    clearCommunicationSettingsCache();
+    clearCommunicationSettingsCache(authorised.tenant.id);
     return { ok: true };
   });
 
@@ -94,33 +120,45 @@ export const updateCommunicationTemplateFn = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const email = (context.claims as { email?: string }).email;
     await requireCommsAmend(context.userId, email);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const authorised = await resolveSoleMembershipTenant(context.userId);
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     const { data: existing, error: readErr } = await supabaseAdmin
       .from("communication_templates")
-      .select("id, subject, body")
+      .select("id, tenant_id, subject, body")
       .eq("id", data.templateId)
+      .or(`tenant_id.eq.${authorised.tenant.id},tenant_id.is.null`)
       .maybeSingle();
     if (readErr) throw new Error(readErr.message);
     if (!existing) throw new Error("Template not found");
 
-    const { data: lastVer } = await supabaseAdmin
+    let lastVersionQuery = supabaseAdmin
       .from("communication_template_versions")
       .select("version")
       .eq("template_id", data.templateId)
       .order("version", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(1);
+    lastVersionQuery = existing.tenant_id
+      ? lastVersionQuery.eq("tenant_id", authorised.tenant.id)
+      : lastVersionQuery.is("tenant_id", null);
+    const { data: lastVer } = await lastVersionQuery.maybeSingle();
     const nextVersion = (lastVer?.version ?? 0) + 1;
 
-    await supabaseAdmin.from("communication_template_versions").insert({
+    const versionPayload = {
       template_id: data.templateId,
       version: nextVersion,
       subject: existing.subject,
       body: existing.body,
       changed_by: context.userId,
       change_note: data.changeNote ?? "Saved previous version before amend",
-    });
+    };
+    await supabaseAdmin
+      .from("communication_template_versions")
+      .insert(existing.tenant_id
+        ? withForcedTenantId(versionPayload, authorised.tenant.id)
+        : versionPayload);
 
     const patch: Record<string, unknown> = {
       body: data.body,
@@ -130,10 +168,14 @@ export const updateCommunicationTemplateFn = createServerFn({ method: "POST" })
     if (data.subject !== undefined) patch.subject = data.subject;
     if (data.active !== undefined) patch.active = data.active;
 
-    const { error } = await supabaseAdmin
+    let updateQuery = supabaseAdmin
       .from("communication_templates")
       .update(patch)
       .eq("id", data.templateId);
+    updateQuery = existing.tenant_id
+      ? updateQuery.eq("tenant_id", authorised.tenant.id)
+      : updateQuery.is("tenant_id", null);
+    const { error } = await updateQuery;
     if (error) throw new Error(error.message);
     return { ok: true, version: nextVersion };
   });

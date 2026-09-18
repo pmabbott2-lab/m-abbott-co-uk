@@ -87,21 +87,32 @@ export async function captureIntroducerCalculatorLead(
 
   assertRateLimit(`${data.slug}:${phone}`);
 
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+  const { TenantContextError, withForcedTenantId } = await import("@/lib/tenant-assert.server");
+
   const { data: introducer, error: introErr } = await supabaseAdmin
     .from("introducers")
-    .select("id, company_name, slug")
+    .select("id, company_name, slug, tenant_id")
     .eq("slug", data.slug)
     .eq("active", true)
     .maybeSingle();
   if (introErr) throw new Error(introErr.message);
   if (!introducer) throw new Error("This referral link is not valid or has expired.");
+  if (!introducer.tenant_id) {
+    throw new TenantContextError(
+      "TENANT_CONTEXT_REQUIRED",
+      "Introducer is not bound to a tenant.",
+    );
+  }
 
   const oneHourAgo = new Date(Date.now() - RATE_WINDOW_MS).toISOString();
   const { data: recentLead } = await supabaseAdmin
     .from("introducer_leads")
     .select("id")
     .eq("introducer_id", introducer.id)
+    .eq("tenant_id", introducer.tenant_id)
     .eq("customer_phone", phone)
     .gte("created_at", oneHourAgo)
     .order("created_at", { ascending: false })
@@ -120,27 +131,32 @@ export async function captureIntroducerCalculatorLead(
 
   const { data: lead, error: leadErr } = await supabaseAdmin
     .from("introducer_leads")
-    .insert({
-      introducer_id: introducer.id,
-      lead_source: "web",
-      channel: "manual",
-      customer_name: data.customerName,
-      customer_phone: phone,
-      customer_email: data.customerEmail,
-      notes,
-      status: "new",
-    })
+    .insert(
+      withForcedTenantId(
+        {
+          introducer_id: introducer.id,
+          lead_source: "web",
+          channel: "manual",
+          customer_name: data.customerName,
+          customer_phone: phone,
+          customer_email: data.customerEmail,
+          notes,
+          status: "new",
+        },
+        introducer.tenant_id,
+      ),
+    )
     .select("id")
     .single();
   if (leadErr) throw new Error(leadErr.message);
 
   console.info(
-    `[calculator-lead] ${lead.id} for introducer ${introducer.slug} (${introducer.company_name})`,
+    `[calculator-lead] ${lead.id} for introducer ${introducer.slug} tenant=${introducer.tenant_id}`,
   );
 
   return {
     ok: true,
     leadId: lead.id,
-    message: "Thank you — a MortgageEasy advisor will call you back shortly.",
+    message: "Thank you — an advisor will call you back shortly.",
   };
 }

@@ -93,8 +93,8 @@ function londonWeekdayIndex(dateKey: string): number {
   return map[wd] ?? 0;
 }
 
-async function getPrimaryAdvisorId(): Promise<string> {
-  const pool = await listBookableAdvisors();
+async function getPrimaryAdvisorId(tenantId?: string | null): Promise<string> {
+  const pool = await listBookableAdvisors(tenantId);
   if (pool.length === 0) {
     throw new Error("No advisor configured. Add an advisor role in Supabase first.");
   }
@@ -133,16 +133,38 @@ export type BookableAdvisor = {
  * - Live advisors: Teams/Outlook must be linked (availability defaults to Outlook).
  * - Test advisor accounts: included while live, Hub diary only (no Outlook required).
  */
-async function listBookableAdvisors(): Promise<BookableAdvisor[]> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+async function listBookableAdvisors(tenantId?: string | null): Promise<BookableAdvisor[]> {
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { isTestAccountEmail } = await import("@/lib/test-accounts");
 
-  const { data: advisors, error } = await supabaseAdmin
-    .from("user_roles")
-    .select("user_id")
-    .eq("role", "advisor");
-  if (error) throw new Error(error.message);
-  const ids = [...new Set((advisors ?? []).map((a) => a.user_id).filter(Boolean))];
+  let ids: string[] = [];
+  if (tenantId) {
+    const { data: members, error: memErr } = await supabaseAdmin
+      .from("tenant_memberships")
+      .select("user_id")
+      .eq("tenant_id", tenantId)
+      .eq("active", true)
+      .in("role", ["adviser", "owner", "supervisor", "general"]);
+    if (memErr) throw new Error(memErr.message);
+    const memberIds = [...new Set((members ?? []).map((m: { user_id: string }) => m.user_id))];
+    if (memberIds.length === 0) return [];
+    const { data: advisors, error } = await supabaseAdmin
+      .from("user_roles")
+      .select("user_id")
+      .eq("role", "advisor")
+      .in("user_id", memberIds);
+    if (error) throw new Error(error.message);
+    ids = [...new Set((advisors ?? []).map((a: { user_id: string }) => a.user_id).filter(Boolean))];
+  } else {
+    const { data: advisors, error } = await supabaseAdmin
+      .from("user_roles")
+      .select("user_id")
+      .eq("role", "advisor");
+    if (error) throw new Error(error.message);
+    ids = [...new Set((advisors ?? []).map((a) => a.user_id).filter(Boolean))];
+  }
   if (ids.length === 0) return [];
 
   const { data: profiles } = await supabaseAdmin
@@ -187,11 +209,82 @@ async function listBookableAdvisors(): Promise<BookableAdvisor[]> {
   return out.sort((a, b) => a.fullName.localeCompare(b.fullName));
 }
 
+/** Resolve tenant for booking from slug / introducer / user / advisor — never invent 001. */
+async function resolveBookingTenantId(opts: {
+  tenantSlug?: string | null;
+  introducerId?: string | null;
+  actingUserId?: string | null;
+  advisorId?: string | null;
+}): Promise<string> {
+  const {
+    getTenantContextBySlug,
+    resolveSoleMembershipTenant,
+    TenantContextError,
+  } = await import("@/lib/tenant-assert.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+
+  if (opts.tenantSlug?.trim()) {
+    const ctx = await getTenantContextBySlug(opts.tenantSlug.trim());
+    return ctx.tenant.id;
+  }
+
+  if (opts.introducerId) {
+    const { data: intro } = await supabaseAdmin
+      .from("introducers")
+      .select("tenant_id")
+      .eq("id", opts.introducerId)
+      .maybeSingle();
+    if (intro?.tenant_id) return intro.tenant_id as string;
+  }
+
+  if (opts.actingUserId) {
+    try {
+      const auth = await resolveSoleMembershipTenant(opts.actingUserId);
+      return auth.tenant.id;
+    } catch (e) {
+      if (!(e instanceof TenantContextError)) throw e;
+    }
+  }
+
+  if (opts.advisorId) {
+    const auth = await resolveSoleMembershipTenant(opts.advisorId);
+    return auth.tenant.id;
+  }
+
+  throw new TenantContextError(
+    "TENANT_CONTEXT_REQUIRED",
+    "Tenant required for booking.",
+  );
+}
+
+async function assertAdvisorInTenant(advisorId: string, tenantId: string): Promise<void> {
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+  const { TenantContextError } = await import("@/lib/tenant-assert.server");
+  const { data, error } = await supabaseAdmin
+    .from("tenant_memberships")
+    .select("id")
+    .eq("user_id", advisorId)
+    .eq("tenant_id", tenantId)
+    .eq("active", true)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) {
+    throw new TenantContextError("TENANT_DATA_ACCESS_DENIED", "Advisor not available for this firm.");
+  }
+}
+
 async function countAdvisorAppointmentsOnDay(
   advisorId: string,
   dateKey: string,
 ): Promise<number> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const dayStart = londonWallToUtc(dateKey, "00:00");
   const dayEnd = londonWallToUtc(dateKey, "23:59");
   const { count, error } = await supabaseAdmin
@@ -207,7 +300,9 @@ async function countAdvisorAppointmentsOnDay(
 
 /** Keep test advisors on a reliable Mon–Fri 09:00–17:00 London demo diary. */
 async function ensureTestAdvisorDemoDiary(advisorId: string): Promise<void> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const weekdays = [1, 2, 3, 4, 5];
   for (const day of weekdays) {
     const { data: existing } = await supabaseAdmin
@@ -251,7 +346,9 @@ async function computeAdvisorFreeSlots(
     await ensureDefaultAvailability(advisor.id);
   }
 
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
   const { data: exception } = await supabaseAdmin
     .from("advisor_diary_exceptions")
@@ -379,9 +476,10 @@ function londonDateKey(isoOrDate: string | Date): string {
 async function pickLeastLoadedAdvisorForSlot(
   startsAtIso: string,
   candidates?: BookableAdvisor[],
+  tenantId?: string | null,
 ): Promise<string> {
   const dateKey = londonDateKey(startsAtIso);
-  const pool = candidates ?? (await listBookableAdvisors());
+  const pool = candidates ?? (await listBookableAdvisors(tenantId));
   const free: BookableAdvisor[] = [];
   for (const advisor of pool) {
     const slots = await computeAdvisorFreeSlots(advisor, dateKey);
@@ -402,7 +500,9 @@ async function pickLeastLoadedAdvisorForSlot(
 
 async function resolveBookingAdvisorId(staffUserId?: string): Promise<string> {
   if (!staffUserId) return getPrimaryAdvisorId();
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { data: roles } = await supabaseAdmin
     .from("user_roles")
     .select("role")
@@ -415,7 +515,9 @@ async function resolveBookingAdvisorId(staffUserId?: string): Promise<string> {
 // Falls back to "your advisor" when no profile/name is available.
 async function getAdvisorName(advisorId: string): Promise<string> {
   try {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data } = await supabaseAdmin
       .from("profiles")
       .select("full_name")
@@ -429,7 +531,9 @@ async function getAdvisorName(advisorId: string): Promise<string> {
 }
 
 async function getAdvisorSlotMinutes(advisorId: string): Promise<number> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { data: settings } = await supabaseAdmin
     .from("advisor_diary_settings")
     .select("slot_minutes")
@@ -447,7 +551,9 @@ async function getAdvisorSlotMinutes(advisorId: string): Promise<number> {
 }
 
 async function ensureDefaultAvailability(advisorId: string) {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { count } = await supabaseAdmin
     .from("advisor_availability")
     .select("id", { count: "exact", head: true })
@@ -476,7 +582,9 @@ async function logSms(opts: {
   appointmentId?: string;
   leadId?: string;
 }) {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   await supabaseAdmin.from("sms_messages").insert({
     direction: opts.direction,
     from_number: opts.from,
@@ -497,10 +605,19 @@ export const getAvailableSlots = createServerFn({ method: "GET" })
         advisorId: z.string().uuid().optional(),
         /** Use the full bookable pool (Teams-linked live + live test advisors). */
         pool: z.boolean().optional(),
+        /** Tenant slug — when set, only advisers with membership in that tenant. */
+        tenantSlug: z.string().min(1).max(64).optional(),
       })
       .parse(d),
   )
   .handler(async ({ data }) => {
+    let tenantId: string | null = null;
+    if (data.tenantSlug) {
+      const { getTenantContextBySlug } = await import("@/lib/tenant-assert.server");
+      const ctx = await getTenantContextBySlug(data.tenantSlug);
+      tenantId = ctx.tenant.id;
+    }
+
     const empty = {
       slots: [] as string[],
       advisorsBySlot: {} as Record<
@@ -557,7 +674,7 @@ export const getAvailableSlots = createServerFn({ method: "GET" })
 
     try {
       const usePool = data.pool === true || !data.advisorId;
-      const pool = await listBookableAdvisors();
+      const pool = await listBookableAdvisors(tenantId);
       if (pool.length === 0) {
         const fb = await mergeTestDiaryFallback([], {});
         return { ...empty, ...fb, advisorId: data.advisorId ?? null };
@@ -570,8 +687,14 @@ export const getAvailableSlots = createServerFn({ method: "GET" })
           : pool.slice(0, 1);
 
       // Single-advisor lock path when caller passed a specific id not in pool (e.g. staff self).
+      // Still require tenant membership when tenant context is known.
       if (data.advisorId && advisors.length === 0) {
-        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        if (tenantId) {
+          await assertAdvisorInTenant(data.advisorId, tenantId);
+        }
+        const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
         const { isTestAccountEmail } = await import("@/lib/test-accounts");
         const { data: profile } = await supabaseAdmin
           .from("profiles")
@@ -629,6 +752,10 @@ export const getAvailableSlots = createServerFn({ method: "GET" })
 
 const appointmentInput = z.object({
   slug: z.string().min(1).optional(),
+  /** Hub tenant route slug (e.g. mortgageeasy) — preferred public tenant authority. */
+  tenantSlug: z.string().min(1).max(64).optional(),
+  /** Ignored for authority — server forces authorised tenant_id. */
+  tenant_id: z.string().uuid().optional(),
   leadId: z.string().uuid().optional(),
   sessionId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
@@ -646,10 +773,12 @@ const appointmentInput = z.object({
 
 async function resolveIntroducer(slug?: string) {
   if (!slug) return null;
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { data } = await supabaseAdmin
     .from("introducers")
-    .select("id, company_name, slug")
+    .select("id, company_name, slug, tenant_id")
     .eq("slug", slug)
     .eq("active", true)
     .maybeSingle();
@@ -666,15 +795,24 @@ function slugifyStaffName(value: string): string {
 
 /** Introducer row for staff booking attribution (does not grant introducer portal role). */
 async function ensureStaffIntroducerRecord(staffUserId: string): Promise<string> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+  const { resolveSoleMembershipTenant } = await import("@/lib/tenant-assert.server");
+  const authorised = await resolveSoleMembershipTenant(staffUserId);
   const { data: existing } = await supabaseAdmin
     .from("introducers")
     .select("id, active")
     .eq("user_id", staffUserId)
+    .eq("tenant_id", authorised.tenant.id)
     .maybeSingle();
   if (existing?.id) {
     if (existing.active === false) {
-      await supabaseAdmin.from("introducers").update({ active: true }).eq("id", existing.id);
+      await supabaseAdmin
+        .from("introducers")
+        .update({ active: true })
+        .eq("id", existing.id)
+        .eq("tenant_id", authorised.tenant.id);
     }
     const { data: existingRate } = await supabaseAdmin
       .from("commission_rates")
@@ -713,6 +851,7 @@ async function ensureStaffIntroducerRecord(staffUserId: string): Promise<string>
       .from("introducers")
       .select("id")
       .eq("slug", candidate)
+      .eq("tenant_id", authorised.tenant.id)
       .maybeSingle();
     if (!clash) {
       slug = candidate;
@@ -724,6 +863,7 @@ async function ensureStaffIntroducerRecord(staffUserId: string): Promise<string>
     .from("introducers")
     .insert({
       user_id: staffUserId,
+      tenant_id: authorised.tenant.id,
       company_name: ownName,
       slug,
       contact_email: profile?.email ?? null,
@@ -761,7 +901,9 @@ async function resolveOrCreateCustomerProfile(data: {
   customerPhone: string;
   customerEmail: string;
 }): Promise<string> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const phone = normaliseUkPhone(data.customerPhone);
   const email = data.customerEmail.trim().toLowerCase();
   const authEmail = emailForCustomerAccount(email, phone);
@@ -864,12 +1006,29 @@ async function bookAppointment(
   data: z.infer<typeof appointmentInput>,
   actingUserId?: string,
 ) {
+  const { withForcedTenantId, rejectMismatchedClientTenantId } = await import(
+    "@/lib/tenant-assert.server"
+  );
+
+  // Resolve introducer early so tenant can come from introducer.tenant_id.
+  const introducer = await resolveIntroducer(data.slug);
+
+  const tenantId = await resolveBookingTenantId({
+    tenantSlug: data.tenantSlug,
+    introducerId: introducer?.id ?? null,
+    actingUserId: actingUserId ?? null,
+    advisorId: data.advisorId ?? null,
+  });
+  rejectMismatchedClientTenantId(tenantId, data.tenant_id);
+
   let advisorId = data.advisorId ?? null;
   if (data.preferAnyAdvisor) {
-    advisorId = await pickLeastLoadedAdvisorForSlot(data.startsAt);
+    advisorId = await pickLeastLoadedAdvisorForSlot(data.startsAt, undefined, tenantId);
   } else if (!advisorId) {
     if (actingUserId) {
-      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
       const { data: roles } = await supabaseAdmin
         .from("user_roles")
         .select("role")
@@ -877,17 +1036,21 @@ async function bookAppointment(
       if ((roles ?? []).some((r) => r.role === "advisor")) {
         advisorId = actingUserId;
       } else {
-        advisorId = await pickLeastLoadedAdvisorForSlot(data.startsAt);
+        advisorId = await pickLeastLoadedAdvisorForSlot(data.startsAt, undefined, tenantId);
       }
     } else {
-      advisorId = await pickLeastLoadedAdvisorForSlot(data.startsAt);
+      advisorId = await pickLeastLoadedAdvisorForSlot(data.startsAt, undefined, tenantId);
     }
   }
+  if (!advisorId) {
+    throw new Error("No advisor available for this firm.");
+  }
+  await assertAdvisorInTenant(advisorId, tenantId);
+
   const startsAt = new Date(data.startsAt);
   const slotMinutes = await getAdvisorSlotMinutes(advisorId);
   const endsAt = new Date(startsAt.getTime() + slotMinutes * 60 * 1000);
 
-  const introducer = await resolveIntroducer(data.slug);
   let leadSource: "referral_link" | "introducer_portal" | "web" = "web";
   let referralChannel: "voice" | "text" | "direct_booking" | "manual" =
     data.channel ?? "direct_booking";
@@ -895,7 +1058,9 @@ async function bookAppointment(
   const leadId: string | null = data.leadId ?? null;
 
   if (actingUserId) {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: roles } = await supabaseAdmin
       .from("user_roles")
       .select("role")
@@ -906,8 +1071,9 @@ async function bookAppointment(
       if (!introducerId) {
         const { data: ownIntro } = await supabaseAdmin
           .from("introducers")
-          .select("id")
+          .select("id, tenant_id")
           .eq("user_id", actingUserId)
+          .eq("tenant_id", tenantId)
           .maybeSingle();
         introducerId = ownIntro?.id ?? null;
       }
@@ -927,12 +1093,44 @@ async function bookAppointment(
     referralChannel = "direct_booking";
   }
 
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  // Introducer must belong to the same tenant when present.
+  if (introducerId) {
+    const { supabaseAdmin: adminForIntro } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    const { data: introRow } = await adminForIntro
+      .from("introducers")
+      .select("id, tenant_id")
+      .eq("id", introducerId)
+      .maybeSingle();
+    if (!introRow || introRow.tenant_id !== tenantId) {
+      const { TenantContextError } = await import("@/lib/tenant-assert.server");
+      throw new TenantContextError(
+        "TENANT_DATA_ACCESS_DENIED",
+        "Resource not found.",
+      );
+    }
+  }
+
+  if (leadId) {
+    const { assertRowBelongsToTenant } = await import("@/lib/tenant-assert.server");
+    await assertRowBelongsToTenant({
+      table: "introducer_leads",
+      id: leadId,
+      authorisedTenantId: tenantId,
+      select: "id, tenant_id",
+    });
+  }
+
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
   const { data: conflict } = await supabaseAdmin
     .from("appointments")
     .select("id")
     .eq("advisor_id", advisorId)
+    .eq("tenant_id", tenantId)
     .eq("status", "confirmed")
     .eq("starts_at", startsAt.toISOString())
     .maybeSingle();
@@ -940,21 +1138,26 @@ async function bookAppointment(
 
   const { data: appointment, error } = await supabaseAdmin
     .from("appointments")
-    .insert({
-      advisor_id: advisorId,
-      introducer_id: introducerId,
-      lead_id: leadId,
-      session_id: data.sessionId ?? null,
-      customer_name: data.customerName,
-      customer_phone: data.customerPhone,
-      customer_email: data.customerEmail || null,
-      starts_at: startsAt.toISOString(),
-      ends_at: endsAt.toISOString(),
-      status: "confirmed",
-      lead_source: leadSource,
-      referral_channel: referralChannel,
-      notes: data.notes || null,
-    })
+    .insert(
+      withForcedTenantId(
+        {
+          advisor_id: advisorId,
+          introducer_id: introducerId,
+          lead_id: leadId,
+          session_id: data.sessionId ?? null,
+          customer_name: data.customerName,
+          customer_phone: data.customerPhone,
+          customer_email: data.customerEmail || null,
+          starts_at: startsAt.toISOString(),
+          ends_at: endsAt.toISOString(),
+          status: "confirmed",
+          lead_source: leadSource,
+          referral_channel: referralChannel,
+          notes: data.notes || null,
+        },
+        tenantId,
+      ),
+    )
     .select()
     .single();
   if (error) throw new Error(error.message);
@@ -970,7 +1173,8 @@ async function bookAppointment(
       await supabaseAdmin
         .from("appointments")
         .update({ session_id: linkedSessionId })
-        .eq("id", appointment.id);
+        .eq("id", appointment.id)
+        .eq("tenant_id", tenantId);
     } catch (e) {
       console.error("create case for appointment failed", e);
     }
@@ -1009,7 +1213,8 @@ async function bookAppointment(
     await supabaseAdmin
       .from("introducer_leads")
       .update({ status: "booked", appointment_id: appointment.id })
-      .eq("id", leadId);
+      .eq("id", leadId)
+      .eq("tenant_id", tenantId);
   }
 
   let customerIdForIntro = targetCustomerId;
@@ -1101,7 +1306,9 @@ export const customerAppointmentSignup = createServerFn({ method: "POST" })
       customerEmail: emailRaw,
     });
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     if (password.length >= 6) {
       const { error: pwErr } = await supabaseAdmin.auth.admin.updateUserById(userId, { password });
@@ -1238,7 +1445,9 @@ export const bookCustomerAppointmentAsStaff = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertStaffCanAccessCustomer(context.userId, data.customerId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     let sessionId = data.sessionId ?? null;
 
     if (sessionId) {
@@ -1331,7 +1540,9 @@ export const bookCaseFollowUpAppointment = createServerFn({ method: "POST" })
       await assertStaffCanAccessCustomer(context.userId, data.customerId);
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: session, error } = await supabaseAdmin
       .from("interview_sessions")
       .select("id, customer_id, case_ref")
@@ -1435,7 +1646,9 @@ export const getSessionBooking = createServerFn({ method: "GET" })
       .eq("user_id", context.userId);
     const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     // Customers may view booking/call-back status for their own session.
     if (!isStaff) {
@@ -1585,7 +1798,9 @@ export const updateCallbackStatus = createServerFn({ method: "POST" })
     const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
     if (!isStaff) throw new Error("Forbidden");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { error } = await supabaseAdmin
       .from("callback_requests")
       .update({ status: data.status })
@@ -1643,7 +1858,9 @@ export const resolveCallback = createServerFn({ method: "POST" })
     const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
     if (!isStaff) throw new Error("Forbidden");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { error } = await supabaseAdmin
       .from("callback_requests")
       .update({ status: "closed" })
@@ -1686,11 +1903,24 @@ async function createCallbackRequest(
     customerName: string;
     customerPhone: string;
     customerEmail?: string;
+    tenantSlug?: string;
+    tenantId?: string;
+    actingUserId?: string;
     window: "9-12" | "12-4" | "4-8";
   },
 ): Promise<{ ok: true }> {
-  const advisorId = await getPrimaryAdvisorId();
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { withForcedTenantId } = await import("@/lib/tenant-assert.server");
+  const tenantId =
+    data.tenantId ??
+    (await resolveBookingTenantId({
+      tenantSlug: data.tenantSlug,
+      actingUserId: data.actingUserId,
+    }));
+  const advisorId = await getPrimaryAdvisorId(tenantId);
+  await assertAdvisorInTenant(advisorId, tenantId);
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
   // Attach the request to a fact-find so it surfaces against the customer's
   // record in the advisor portal. The direct "/booking" path doesn't pass a
@@ -1713,16 +1943,21 @@ async function createCallbackRequest(
 
   const { data: callback, error } = await supabaseAdmin
     .from("callback_requests")
-    .insert({
-      session_id: sessionId,
-      customer_id: data.customerId ?? null,
-      advisor_id: advisorId,
-      customer_name: data.customerName,
-      customer_phone: data.customerPhone,
-      customer_email: data.customerEmail || null,
-      preferred_window: data.window,
-      status: "new",
-    })
+    .insert(
+      withForcedTenantId(
+        {
+          session_id: sessionId,
+          customer_id: data.customerId ?? null,
+          advisor_id: advisorId,
+          customer_name: data.customerName,
+          customer_phone: data.customerPhone,
+          customer_email: data.customerEmail || null,
+          preferred_window: data.window,
+          status: "new",
+        },
+        tenantId,
+      ),
+    )
     .select("id")
     .single();
   if (error) throw new Error(error.message);
@@ -1785,7 +2020,7 @@ export const requestSessionCallback = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { data: session, error } = await context.supabase
       .from("interview_sessions")
-      .select("id, customer_id")
+      .select("id, customer_id, tenant_id")
       .eq("id", data.sessionId)
       .single();
     if (error) throw new Error(error.message);
@@ -1797,6 +2032,8 @@ export const requestSessionCallback = createServerFn({ method: "POST" })
       customerName: data.customerName,
       customerPhone: data.customerPhone,
       customerEmail: data.customerEmail,
+      tenantId: session.tenant_id,
+      actingUserId: context.userId,
       window: data.window,
     });
   });
@@ -1819,6 +2056,7 @@ export const requestCallbackAuth = createServerFn({ method: "POST" })
       customerName: data.customerName,
       customerPhone: data.customerPhone,
       customerEmail: data.customerEmail,
+      actingUserId: context.userId,
       window: data.window,
     }),
   );
@@ -1930,7 +2168,9 @@ async function appendContactLog(
   body: string | null,
 ): Promise<void> {
   try {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { error } = await supabaseAdmin
       .from("customer_contact_log")
       .insert({ session_id: sessionId, author_id: authorId, entry_type: entryType, body });
@@ -1955,7 +2195,9 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
     const isAdvisor = (roles ?? []).some((r) => r.role === "advisor");
     if (!isAdvisor && !isStaffAdmin) throw new Error("Forbidden");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
 
     const opened = new Set<string>();
     const contactedAtByKey = new Map<string, string>();
@@ -2511,7 +2753,9 @@ export const listSessionCrmContacts = createServerFn({ method: "POST" })
     const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
     if (!isStaff) throw new Error("Forbidden");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const contactedAtByKey = new Map<string, string>();
     {
       const { data: views, error } = await supabaseAdmin
@@ -2618,7 +2862,9 @@ export const markAdvisorContactHandled = createServerFn({ method: "POST" })
       }
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const now = new Date().toISOString();
 
     const viewRow: Record<string, unknown> = {
@@ -2709,7 +2955,9 @@ export const listAssigneeAdvisors = createServerFn({ method: "GET" })
       throw new Error("Forbidden");
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: roleRows } = await supabaseAdmin.from("user_roles").select("user_id").eq("role", "advisor");
     const advisorIds = Array.from(new Set((roleRows ?? []).map((r) => r.user_id)));
     if (advisorIds.length === 0) return [] as Array<{ id: string; full_name: string | null; email: string | null }>;
@@ -2737,7 +2985,9 @@ export const assignUnallocatedVoicemail = createServerFn({ method: "POST" })
       throw new Error("Forbidden");
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { findSessionForCallerPhone } = await import("@/lib/phone-lookup.server");
 
     const { data: cb, error: cbErr } = await supabaseAdmin
@@ -2853,7 +3103,9 @@ export const markContactOpened = createServerFn({ method: "POST" })
       }
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { error } = await supabaseAdmin
       .from("advisor_contact_views")
       .upsert(
@@ -2906,7 +3158,9 @@ export const listAdvisorAppointments = createServerFn({ method: "POST" })
       throw new Error("Forbidden");
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: appts, error } = await supabaseAdmin
       .from("appointments")
       .select("*")
@@ -2934,7 +3188,9 @@ export const listAllUpcomingAppointments = createServerFn({ method: "GET" })
       canView(access, "appointments");
     if (!canViewGrid) throw new Error("Forbidden");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: appts, error } = await supabaseAdmin
       .from("appointments")
       .select("*")
@@ -3014,7 +3270,9 @@ export const sendLeadBookingSms = createServerFn({ method: "POST" })
       data.viewAsIntroducerUserId,
     );
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const introClient = viewAsMode ? supabaseAdmin : context.supabase;
 
     const { data: introducer, error: introErr } = await introClient
@@ -3075,7 +3333,9 @@ export const getLeadForBooking = createServerFn({ method: "GET" })
     z.object({ leadId: z.string().uuid(), slug: z.string().min(1) }).parse(d),
   )
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: lead, error } = await supabaseAdmin
       .from("introducer_leads")
       .select("id, customer_name, customer_phone, customer_email, introducer_id")
@@ -3104,7 +3364,9 @@ async function assertStaffBookingAccess(userId: string): Promise<void> {
   const roles = await getRolesForUser(userId);
   if (roles.includes("advisor")) return;
   const { resolveAdminAccess } = await import("@/lib/admin.functions");
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const { data: profile } = await supabaseAdmin
     .from("profiles")
     .select("email")
@@ -3172,7 +3434,9 @@ export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
     const twilioOk = isTwilioConfigured();
     const wantSms = data.sendSms !== false;
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const introducerId = await ensureStaffIntroducerRecord(context.userId);
     const { data: introducer, error: introErr } = await supabaseAdmin
       .from("introducers")
@@ -3252,7 +3516,9 @@ async function assertIntroducerBookingAccess(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   userClient?: { from: (table: string) => any },
 ): Promise<string> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
   const client = userClient ?? supabaseAdmin;
 
   const { data: roles, error: rolesErr } = await client
@@ -3329,7 +3595,9 @@ export const bookNewCustomerAsIntroducer = createServerFn({ method: "POST" })
     );
 
     if (viewAsMode) {
-      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
       const { logViewAsAudit } = await import("@/lib/view-as-audit.functions");
       await logViewAsAudit(supabaseAdmin, {
         viewType: "introducer",
@@ -3379,7 +3647,9 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
     const twilioOk = isTwilioConfigured();
     const wantSms = data.sendSms !== false;
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     // Own introducer writes work via RLS with the user client; view-as needs admin.
     const db = viewAsMode ? supabaseAdmin : context.supabase;
     const { data: introducer, error: introErr } = await db
@@ -3476,7 +3746,9 @@ export const rescheduleAppointment = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
     const { data: appt, error: apptErr } = await supabaseAdmin
       .from("appointments")
       .select("*")
