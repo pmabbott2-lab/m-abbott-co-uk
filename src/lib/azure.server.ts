@@ -41,6 +41,11 @@ function toSsml(text: string): string {
  * Output matches what Avatar already decodes for Simli lip-sync (MP3 → PCM 16 kHz mono).
  */
 export async function synthesizeSpeech(text: string): Promise<ArrayBuffer> {
+  const { isOpenAiEnvironmentAllowed } = await import("@/lib/app-environment.server");
+  // Azure TTS is part of the paid Susan/AI stack — same staging opt-in as OpenAI.
+  if (!isOpenAiEnvironmentAllowed()) {
+    throw new Error("Speech synthesis is disabled in this environment.");
+  }
   const { key, region } = getAzureSpeechConfig();
   const ssml = toSsml(text);
   const res = await fetch(`https://${region}.tts.speech.microsoft.com/cognitiveservices/v1`, {

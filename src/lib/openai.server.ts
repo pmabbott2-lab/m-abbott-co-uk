@@ -25,6 +25,10 @@ export function getOpenAIKey(): string {
 }
 
 export async function openAIFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const { isOpenAiEnvironmentAllowed } = await import("@/lib/app-environment.server");
+  if (!isOpenAiEnvironmentAllowed()) {
+    throw new Error("OpenAI is disabled in this environment.");
+  }
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${getOpenAIKey()}`);
   if (!headers.has("Content-Type") && init.body && typeof init.body === "string") {

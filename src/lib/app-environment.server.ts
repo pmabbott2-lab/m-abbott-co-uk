@@ -148,6 +148,39 @@ export function isSusanEnvironmentAllowed(): boolean {
   return true;
 }
 
+/**
+ * Paid AI (OpenAI chat/STT + Azure TTS) — broader than the Susan journey alone
+ * (interview step, call summaries, address helpers, commission parsing, etc.).
+ * Staging: STAGING_OPENAI_ENABLED=true or STAGING_SUSAN_ENABLED=true.
+ * Unknown: denied. Production/dev: on unless OPENAI_ENVIRONMENT_ENABLED=false.
+ */
+export function isOpenAiEnvironmentAllowed(): boolean {
+  const env = getAppEnvironment();
+  if (env === "unknown") return false;
+  if (env === "staging") {
+    return (
+      readEnv("STAGING_OPENAI_ENABLED") === "true" ||
+      readEnv("STAGING_SUSAN_ENABLED") === "true"
+    );
+  }
+  if (readEnv("OPENAI_ENVIRONMENT_ENABLED") === "false") return false;
+  return true;
+}
+
+/**
+ * getAddress.io — paid address lookup. Staging must not reuse production key
+ * silently; require explicit STAGING_GETADDRESS_ENABLED or non-staging env.
+ * When disabled, callers should fall back to postcodes.io / empty.
+ */
+export function isGetAddressEnvironmentAllowed(): boolean {
+  const env = getAppEnvironment();
+  if (env === "unknown") return false;
+  if (env === "staging") {
+    return readEnv("STAGING_GETADDRESS_ENABLED") === "true";
+  }
+  return true;
+}
+
 export function assertProductionOperationAllowed(operation: string): void {
   if (!isProduction()) {
     throw new ExternalActionBlockedError(

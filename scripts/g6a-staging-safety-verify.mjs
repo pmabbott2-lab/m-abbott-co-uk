@@ -156,6 +156,10 @@ ok("staging_sms_not_live", twilioLive() === false);
 ok("staging_voice_not_live", twilioLive() === false);
 ok("staging_teams_write_blocked", teamsWrite() === false);
 ok("staging_susan_default_off", susanEnv() === false);
+ok("staging_openai_default_off", !(process.env.STAGING_OPENAI_ENABLED === "true" || process.env.STAGING_SUSAN_ENABLED === "true"));
+ok("openai_src_guard", readFileSync(resolve("src/lib/openai.server.ts"), "utf8").includes("isOpenAiEnvironmentAllowed"));
+ok("azure_tts_src_guard", readFileSync(resolve("src/lib/azure.server.ts"), "utf8").includes("isOpenAiEnvironmentAllowed"));
+ok("getaddress_src_guard", readFileSync(resolve("src/lib/address-lookup.server.ts"), "utf8").includes("isGetAddressEnvironmentAllowed"));
 
 // staging generated links use staging origin
 {

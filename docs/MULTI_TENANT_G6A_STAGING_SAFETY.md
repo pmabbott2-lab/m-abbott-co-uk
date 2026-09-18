@@ -64,6 +64,10 @@ External guard: `src/lib/external-action.server.ts` — `assertExternalActionAll
 | MS Graph/Teams | Calendar/meetings | mock capture; no prod calendar writes | Yes | blocked | Dedicated Entra later | OAuth callback |
 | Susan/Simli | Avatar | `STAGING_SUSAN_ENABLED=false` | Paid API | off | Staging keys | — |
 | TTS/STT/OpenAI | Susan stack | same as Susan env | Paid API | off | Staging keys | — |
+| OpenAI chat (broader) | Interview step, call AI, classify, commission, address helpers | `STAGING_OPENAI_ENABLED` or `STAGING_SUSAN_ENABLED` | Paid API + customer text | off in staging | Staging key only | — |
+| Azure Speech TTS | Susan `/api/tts` | same OpenAI/Susan env gate | Paid API | off in staging | Staging key | — |
+| getAddress.io | UK address lookup | `STAGING_GETADDRESS_ENABLED`; else postcodes.io fallback | Paid API | off in staging | Staging key (never prod) | — |
+| postcodes.io | Free address fallback | always OK | No key | allowed | — | — |
 | Azure | Hosting | separate Web App (design) | — | — | Separate slot secrets | — |
 
 **Payment / debit card:** none found.

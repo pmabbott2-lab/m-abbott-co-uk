@@ -150,7 +150,9 @@ export async function resolveAddress(postcodeRaw: string, houseRaw: string): Pro
   // The spoken postcode is raw STT text (e.g. "en gee two, three eff bee"), so
   // normalise it into a canonical postcode before any lookup.
   const postcode = await normaliseSpokenPostcode(postcodeRaw);
-  const key = process.env.GETADDRESS_API_KEY;
+  const { isGetAddressEnvironmentAllowed } = await import("@/lib/app-environment.server");
+  const key =
+    isGetAddressEnvironmentAllowed() ? process.env.GETADDRESS_API_KEY : undefined;
 
   if (postcode) {
     if (key) {
@@ -188,6 +190,9 @@ function formatGetAddressRecord(a: Record<string, unknown>, postcode: string): s
 export async function searchUkAddresses(query: string): Promise<AddressSuggestion[]> {
   const term = (query ?? "").trim();
   if (term.length < 3) return [];
+
+  const { isGetAddressEnvironmentAllowed } = await import("@/lib/app-environment.server");
+  if (!isGetAddressEnvironmentAllowed()) return [];
 
   const key = process.env.GETADDRESS_API_KEY;
   if (!key) return [];
