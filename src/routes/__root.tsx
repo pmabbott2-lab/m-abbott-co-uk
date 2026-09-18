@@ -13,6 +13,7 @@ import "../styles.css";
 import appCss from "../styles.css?url";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeInit } from "@/components/ThemeInit";
+import { StagingBanner } from "@/components/StagingBanner";
 import { supabase } from "@/integrations/supabase/client";
 import { getPublicEnvInlineScript } from "@/lib/supabase-public-env";
 
@@ -156,6 +157,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeInit />
+      <StagingBanner />
       <Outlet />
       <Toaster position="top-center" richColors closeButton />
     </QueryClientProvider>

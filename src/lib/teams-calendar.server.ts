@@ -357,6 +357,40 @@ export type SyncAppointmentResult = {
 export async function syncAppointmentToTeams(
   input: SyncAppointmentInput,
 ): Promise<SyncAppointmentResult> {
+  const {
+    assertExternalActionAllowed,
+    captureExternalAction,
+    ExternalActionBlockedError,
+  } = await import("@/lib/external-action.server");
+
+  let decision;
+  try {
+    decision = assertExternalActionAllowed({
+      service: "teams_graph",
+      action: input.existingEventId ? "update_meeting" : "create_meeting",
+    });
+  } catch (e) {
+    if (e instanceof ExternalActionBlockedError) {
+      return { synced: false, reason: "environment_blocked" };
+    }
+    throw e;
+  }
+
+  if (decision.mode === "capture") {
+    const cap = captureExternalAction({
+      service: "teams_graph",
+      action: input.existingEventId ? "update_meeting" : "create_meeting",
+      meta: {
+        appointmentId: input.appointmentId,
+        mockJoin: true,
+      },
+    });
+    const mockEventId = `MOCK_TEAMS_${cap.id}`;
+    const mockJoin = `https://teams.microsoft.com/l/meetup-join/mock/${cap.id}`;
+    await persistEventIds(input.appointmentId, mockEventId, mockJoin);
+    return { synced: true, eventId: mockEventId, joinUrl: mockJoin, reason: "captured_mock" };
+  }
+
   if (!teamsConfigured()) {
     return { synced: false, reason: "not_configured" };
   }
@@ -452,6 +486,24 @@ export async function deleteTeamsEvent(
   eventId: string | null | undefined,
 ): Promise<void> {
   if (!eventId || !teamsConfigured()) return;
+  const { resolveExternalAction, captureExternalAction } = await import(
+    "@/lib/external-action.server"
+  );
+  const decision = resolveExternalAction({
+    service: "teams_graph",
+    action: "delete_meeting",
+  });
+  if (!decision.allowed) {
+    if (decision.mode === "capture") {
+      captureExternalAction({
+        service: "teams_graph",
+        action: "delete_meeting",
+        meta: { eventIdPrefix: eventId.slice(0, 12) },
+      });
+    }
+    return;
+  }
+  if (eventId.startsWith("MOCK_TEAMS_")) return;
   const accessToken = await ensureAccessToken(advisorId);
   if (!accessToken) return;
   try {

@@ -101,9 +101,14 @@ export function getPublicEnvInlineScript(): string {
     return "window.__MH_PUBLIC_ENV__=window.__MH_PUBLIC_ENV__||{};";
   }
   const { url, publishableKey } = fromProcess();
+  const appEnv =
+    readProcessEnv("APP_ENV") ||
+    readProcessEnv("VITE_APP_ENV") ||
+    "";
   const payload = {
     SUPABASE_URL: url,
     SUPABASE_PUBLISHABLE_KEY: publishableKey,
+    APP_ENV: appEnv,
   };
   return `window.__MH_PUBLIC_ENV__=${JSON.stringify(payload)};`;
 }

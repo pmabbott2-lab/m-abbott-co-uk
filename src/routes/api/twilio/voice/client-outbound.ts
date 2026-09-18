@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { clientDialCustomerTwiml, getVoiceConfig, voiceWebhookUrl } from "@/lib/voice.server";
 import { normaliseUkPhone } from "@/lib/sms.server";
+import { isTwilioLiveDeliveryAllowed } from "@/lib/app-environment.server";
 
 /** Twilio fetches this when the browser softphone places an outbound call. */
 export const Route = createFileRoute("/api/twilio/voice/client-outbound")({
@@ -13,6 +14,12 @@ export const Route = createFileRoute("/api/twilio/voice/client-outbound")({
 });
 
 async function twimlForRequest(request: Request): Promise<Response> {
+  if (!isTwilioLiveDeliveryAllowed()) {
+    return twiml(
+      "<Response><Say>Outbound calling is disabled in this environment.</Say></Response>",
+    );
+  }
+
   const url = new URL(request.url);
   let form: FormData | null = null;
   if (request.method === "POST") {

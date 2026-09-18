@@ -64,14 +64,37 @@ export function normaliseUkPhone(phone: string): string {
 export async function sendSms(opts: {
   to: string;
   body: string;
-}): Promise<{ sid: string }> {
-  const { accountSid, authToken } = getTwilioCredentials();
-  const messagingServiceSid = getTwilioMessagingServiceSid();
-  const to = normaliseUkPhone(opts.to);
-  const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+}): Promise<{ sid: string; captured?: boolean }> {
+  const {
+    assertExternalActionAllowed,
+    captureExternalAction,
+  } = await import("@/lib/external-action.server");
+  const decision = assertExternalActionAllowed({
+    service: "twilio_sms",
+    action: "send",
+  });
 
   const { withSmsRegulatoryFooter } = await import("@/lib/comms.server");
   const body = await withSmsRegulatoryFooter(opts.body);
+  const to = normaliseUkPhone(opts.to);
+
+  if (decision.mode === "capture") {
+    const cap = captureExternalAction({
+      service: "twilio_sms",
+      action: "send",
+      meta: {
+        toLast4: to.replace(/\D/g, "").slice(-4),
+        bodyChars: body.length,
+        senderLabel: getSmsSenderLabel(),
+      },
+    });
+    return { sid: `CAPTURED_${cap.id}`, captured: true };
+  }
+
+  // live — production (or explicit STAGING_TWILIO_ALLOW_LIVE)
+  const { accountSid, authToken } = getTwilioCredentials();
+  const messagingServiceSid = getTwilioMessagingServiceSid();
+  const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
 
   const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
     method: "POST",

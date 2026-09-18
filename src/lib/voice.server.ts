@@ -4,6 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import twilio from "twilio";
 import { getTwilioConfig, getTwilioVoiceNumber, isTwilioVoiceNumberConfigured, normaliseUkPhone } from "@/lib/sms.server";
 import { isTwilioClientVoiceConfigured } from "@/lib/voice-token.server";
+import { isTwilioLiveDeliveryAllowed } from "@/lib/app-environment.server";
 
 export type VoiceBrandId = "mortgage_easy" | "trent_valley";
 
@@ -50,6 +51,9 @@ export function getVoiceConfig() {
 }
 
 export function twilioClient() {
+  if (!isTwilioLiveDeliveryAllowed()) {
+    throw new Error("Twilio voice is disabled or capture-only in this environment.");
+  }
   const { accountSid, authToken } = getVoiceConfig();
   return twilio(accountSid, authToken);
 }

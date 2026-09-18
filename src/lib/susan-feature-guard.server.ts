@@ -17,6 +17,14 @@ export async function requireSusanApiAccess(opts: {
   sessionTenantId?: string | null;
   featureKey?: "susan_ai_journey" | "susan_chat_journey";
 }): Promise<{ tenantId: string }> {
+  const { isSusanEnvironmentAllowed } = await import("@/lib/app-environment.server");
+  if (!isSusanEnvironmentAllowed()) {
+    throw new TenantFeatureError(
+      opts.featureKey ?? "susan_ai_journey",
+      "Feature not available.",
+    );
+  }
+
   const tenantId = await resolveFeatureTenantId({
     tenantSlug: opts.tenantSlug,
     tenantId: opts.tenantId,
