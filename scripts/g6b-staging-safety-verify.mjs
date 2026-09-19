@@ -67,6 +67,14 @@ ok(
   !/VITE_SUPABASE_URL:\s+https:/.test(stagingWf) && !/VITE_SUPABASE_PUBLISHABLE_KEY:\s+sb_/.test(stagingWf),
 );
 ok("staging_workflow_capture", stagingWf.includes("COMMUNICATION_DELIVERY_MODE") && stagingWf.includes("capture"));
+ok(
+  "staging_workflow_smoke_max_time_20",
+  stagingWf.includes("--max-time 20") && !stagingWf.includes("--max-time 3"),
+);
+ok(
+  "staging_workflow_smoke_log_on_failure",
+  stagingWf.includes("dump_smoke_log") && stagingWf.includes("/tmp/azure-deploy-smoke.log"),
+);
 ok("staging_example_app_env", example.includes("APP_ENV=staging"));
 ok("guard_knows_prod_ref", guard.includes(PRODUCTION_SUPABASE_REF));
 ok("guard_knows_staging_ref", guard.includes(STAGING_SUPABASE_REF));
