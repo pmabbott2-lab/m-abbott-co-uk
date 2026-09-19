@@ -1,0 +1,310 @@
+[
+  {
+    "filename": "20260623111307_50629eaf-7628-4438-b901-b2b543b96be4.sql",
+    "version": "20260623111307",
+    "name": "50629eaf_7628_4438_b901_b2b543b96be4",
+    "migrationName": "20260623111307_50629eaf_7628_4438_b901_b2b543b96be4",
+    "substituted": false
+  },
+  {
+    "filename": "20260623111337_2323de94-b58a-46dd-bb73-a5e11b9bd295.sql",
+    "version": "20260623111337",
+    "name": "2323de94_b58a_46dd_bb73_a5e11b9bd295",
+    "migrationName": "20260623111337_2323de94_b58a_46dd_bb73_a5e11b9bd295",
+    "substituted": false
+  },
+  {
+    "filename": "20260623151101_46f0c80e-c667-4435-9d7c-64c1d7e11080.sql",
+    "version": "20260623151101",
+    "name": "46f0c80e_c667_4435_9d7c_64c1d7e11080",
+    "migrationName": "20260623151101_46f0c80e_c667_4435_9d7c_64c1d7e11080",
+    "substituted": false
+  },
+  {
+    "filename": "20260623152617_63fae123-13a5-4c4c-a468-8bfb2abeb207.sql",
+    "version": "20260623152617",
+    "name": "63fae123_13a5_4c4c_a468_8bfb2abeb207",
+    "migrationName": "20260623152617_63fae123_13a5_4c4c_a468_8bfb2abeb207",
+    "substituted": false
+  },
+  {
+    "filename": "20260623152936_810c1fb6-2940-4241-b11a-23646c92d8bc.sql",
+    "version": "20260623152936",
+    "name": "810c1fb6_2940_4241_b11a_23646c92d8bc",
+    "migrationName": "20260623152936_810c1fb6_2940_4241_b11a_23646c92d8bc",
+    "substituted": false
+  },
+  {
+    "filename": "20260623163632_3573c0d1-4b3e-4f19-83c0-9cf56ed0b18f.sql",
+    "version": "20260623163632",
+    "name": "3573c0d1_4b3e_4f19_83c0_9cf56ed0b18f",
+    "migrationName": "20260623163632_3573c0d1_4b3e_4f19_83c0_9cf56ed0b18f",
+    "substituted": false
+  },
+  {
+    "filename": "20260624100000_add_structured_value.sql",
+    "version": "20260624100000",
+    "name": "add_structured_value",
+    "migrationName": "20260624100000_add_structured_value",
+    "substituted": false
+  },
+  {
+    "filename": "20260626130000_add_profile_phone.sql",
+    "version": "20260626130000",
+    "name": "add_profile_phone",
+    "migrationName": "20260626130000_add_profile_phone",
+    "substituted": false
+  },
+  {
+    "filename": "20260626220000_introducer_portal.sql",
+    "version": "20260626220000",
+    "name": "introducer_portal",
+    "migrationName": "20260626220000_introducer_portal",
+    "substituted": false
+  },
+  {
+    "filename": "20260626230000_diary_sms_booking.sql",
+    "version": "20260626230000",
+    "name": "diary_sms_booking",
+    "migrationName": "20260626230000_diary_sms_booking",
+    "substituted": false
+  },
+  {
+    "filename": "20260626240000_session_channel_and_appointment_rls.sql",
+    "version": "20260626240000",
+    "name": "session_channel_and_appointment_rls",
+    "migrationName": "20260626240000_session_channel_and_appointment_rls",
+    "substituted": false
+  },
+  {
+    "filename": "20260627090000_session_allocation.sql",
+    "version": "20260627090000",
+    "name": "session_allocation",
+    "migrationName": "20260627090000_session_allocation",
+    "substituted": false
+  },
+  {
+    "filename": "20260627100000_company_and_advisor_codes.sql",
+    "version": "20260627100000",
+    "name": "company_and_advisor_codes",
+    "migrationName": "20260627100000_company_and_advisor_codes",
+    "substituted": false
+  },
+  {
+    "filename": "20260627110000_staff_invites_and_bin.sql",
+    "version": "20260627110000",
+    "name": "staff_invites_and_bin",
+    "migrationName": "20260627110000_staff_invites_and_bin",
+    "substituted": false
+  },
+  {
+    "filename": "20260627120000_refer_a_friend.sql",
+    "version": "20260627120000",
+    "name": "refer_a_friend",
+    "migrationName": "20260627120000_refer_a_friend",
+    "substituted": false
+  },
+  {
+    "filename": "20260630120000_callbacks_and_contact_tracking.sql",
+    "version": "20260630120000",
+    "name": "callbacks_and_contact_tracking",
+    "migrationName": "20260630120000_callbacks_and_contact_tracking",
+    "substituted": false
+  },
+  {
+    "filename": "20260701120000_journey_and_attention.sql",
+    "version": "20260701120000",
+    "name": "journey_and_attention",
+    "migrationName": "20260701120000_journey_and_attention",
+    "substituted": false
+  },
+  {
+    "filename": "20260704120000_admin_levels_and_finance.sql",
+    "version": "20260704120000",
+    "name": "admin_levels_and_finance",
+    "migrationName": "20260704120000_admin_levels_and_finance",
+    "substituted": false
+  },
+  {
+    "filename": "20260704153000_session_soft_delete.sql",
+    "version": "20260704153000",
+    "name": "session_soft_delete",
+    "migrationName": "20260704153000_session_soft_delete",
+    "substituted": false
+  },
+  {
+    "filename": "20260704160000_commission_by_fee_type.sql",
+    "version": "20260704160000",
+    "name": "commission_by_fee_type",
+    "migrationName": "20260704160000_commission_by_fee_type",
+    "substituted": false
+  },
+  {
+    "filename": "20260704170000_cases_and_commission_history.sql",
+    "version": "20260704170000",
+    "name": "cases_and_commission_history",
+    "migrationName": "20260704170000_cases_and_commission_history",
+    "substituted": false
+  },
+  {
+    "filename": "20260704200000_commission_payout_status.sql",
+    "version": "20260704200000",
+    "name": "commission_payout_status",
+    "migrationName": "20260704200000_commission_payout_status",
+    "substituted": false
+  },
+  {
+    "filename": "20260704210000_customer_introducer_links.sql",
+    "version": "20260704210000",
+    "name": "customer_introducer_links",
+    "migrationName": "20260704210000_customer_introducer_links",
+    "substituted": false
+  },
+  {
+    "filename": "20260706140000_phone_calls.sql",
+    "version": "20260706140000",
+    "name": "phone_calls",
+    "migrationName": "20260706140000_phone_calls",
+    "substituted": false
+  },
+  {
+    "filename": "20260713230000_teams_calendar_link.sql",
+    "version": "20260713230000",
+    "name": "teams_calendar_link",
+    "migrationName": "20260713230000_teams_calendar_link",
+    "substituted": false
+  },
+  {
+    "filename": "20260901120000_journey_finance_case_relationship.sql",
+    "version": "20260901120000",
+    "name": "journey_finance_case_relationship",
+    "migrationName": "20260901120000_journey_finance_case_relationship",
+    "substituted": false
+  },
+  {
+    "filename": "20260902164500_staff_contact_tasks.sql",
+    "version": "20260902164500",
+    "name": "staff_contact_tasks",
+    "migrationName": "20260902164500_staff_contact_tasks",
+    "substituted": false
+  },
+  {
+    "filename": "20260903120000_contact_types_abandoned.sql",
+    "version": "20260903120000",
+    "name": "contact_types_abandoned",
+    "migrationName": "20260903120000_contact_types_abandoned",
+    "substituted": false
+  },
+  {
+    "filename": "20260917101000_public_booking_test_diary.sql",
+    "version": "20260917101000",
+    "name": "public_booking_test_diary",
+    "migrationName": "20260917101000_public_booking_test_diary",
+    "substituted": false
+  },
+  {
+    "filename": "20260917123000_comms_templates_90min_slots.sql",
+    "version": "20260917123000",
+    "name": "comms_templates_90min_slots",
+    "migrationName": "20260917123000_comms_templates_90min_slots",
+    "substituted": false
+  },
+  {
+    "filename": "20260917163000_advisor_diary_settings.sql",
+    "version": "20260917163000",
+    "name": "advisor_diary_settings",
+    "migrationName": "20260917163000_advisor_diary_settings",
+    "substituted": false
+  },
+  {
+    "filename": "20260917180039_gate_g1_multi_tenant_scaffolding.sql",
+    "version": "20260917180039",
+    "name": "gate_g1_multi_tenant_scaffolding",
+    "migrationName": "20260917180039_gate_g1_multi_tenant_scaffolding",
+    "substituted": false
+  },
+  {
+    "filename": "20260917180110_gate_g1_nullable_tenant_id_columns.sql",
+    "version": "20260917180110",
+    "name": "gate_g1_nullable_tenant_id_columns",
+    "migrationName": "20260917180110_gate_g1_nullable_tenant_id_columns",
+    "substituted": false
+  },
+  {
+    "filename": "20260917182141_gate_g1a_classification_and_support.sql",
+    "version": "20260917182141",
+    "name": "gate_g1a_classification_and_support",
+    "migrationName": "20260917182141_gate_g1a_classification_and_support",
+    "substituted": false
+  },
+  {
+    "filename": "20260917182412_gate_g1a_features_and_helpers.sql",
+    "version": "20260917182412",
+    "name": "gate_g1a_features_and_helpers",
+    "migrationName": "20260917182412_gate_g1a_features_and_helpers",
+    "substituted": false
+  },
+  {
+    "filename": "20260917193000_gate_g2_tenant_ownership_and_memberships.sql",
+    "version": "20260917193000",
+    "name": "gate_g2_tenant_ownership_and_memberships",
+    "migrationName": "20260917193000_gate_g2_tenant_ownership_and_memberships",
+    "substituted": true
+  },
+  {
+    "filename": "20260917200000_gate_g3a_rls_security_helpers.sql",
+    "version": "20260917200000",
+    "name": "gate_g3a_rls_security_helpers",
+    "migrationName": "20260917200000_gate_g3a_rls_security_helpers",
+    "substituted": false
+  },
+  {
+    "filename": "20260917200100_gate_g3b_identity_platform_config_rls.sql",
+    "version": "20260917200100",
+    "name": "gate_g3b_identity_platform_config_rls",
+    "migrationName": "20260917200100_gate_g3b_identity_platform_config_rls",
+    "substituted": false
+  },
+  {
+    "filename": "20260917200200_gate_g3c_business_tenant_rls.sql",
+    "version": "20260917200200",
+    "name": "gate_g3c_business_tenant_rls",
+    "migrationName": "20260917200200_gate_g3c_business_tenant_rls",
+    "substituted": false
+  },
+  {
+    "filename": "20260917200300_gate_g3d_telephony_comms_finance_rls.sql",
+    "version": "20260917200300",
+    "name": "gate_g3d_telephony_comms_finance_rls",
+    "migrationName": "20260917200300_gate_g3d_telephony_comms_finance_rls",
+    "substituted": false
+  },
+  {
+    "filename": "20260917210000_gate_g4_tenant_branding_seed.sql",
+    "version": "20260917210000",
+    "name": "gate_g4_tenant_branding_seed",
+    "migrationName": "20260917210000_gate_g4_tenant_branding_seed",
+    "substituted": false
+  },
+  {
+    "filename": "20260918103000_gate_g5_seed_001_operational_features.sql",
+    "version": "20260918103000",
+    "name": "gate_g5_seed_001_operational_features",
+    "migrationName": "20260918103000_gate_g5_seed_001_operational_features",
+    "substituted": false
+  },
+  {
+    "filename": "20260918120000_gate_g6_company_provisioning.sql",
+    "version": "20260918120000",
+    "name": "gate_g6_company_provisioning",
+    "migrationName": "20260918120000_gate_g6_company_provisioning",
+    "substituted": false
+  },
+  {
+    "filename": "20260918123000_gate_g6_invite_membership_role.sql",
+    "version": "20260918123000",
+    "name": "gate_g6_invite_membership_role",
+    "migrationName": "20260918123000_gate_g6_invite_membership_role",
+    "substituted": false
+  }
+]

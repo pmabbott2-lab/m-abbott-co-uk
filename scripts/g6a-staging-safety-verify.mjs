@@ -74,7 +74,13 @@ async function loadExternalModule() {
   // Placeholder tokens like sb_secret_STAGING_ONLY are OK; reject long opaque secrets.
   ok("staging_example_has_app_env", example.includes("APP_ENV=staging"));
   const workflow = readFileSync(resolve(".github/workflows/targeted-features_mortgagehub-prod.yml"), "utf8");
-  ok("prod_workflow_on_push_targeted", /push:[\s\S]*branches:[\s\S]*targeted-features/.test(workflow));
+  ok(
+    "prod_workflow_manual_only",
+    workflow.includes("workflow_dispatch") &&
+      !/^\s+push:\s*$/m.test(workflow) &&
+      !/on:\s*\n\s+push:/m.test(workflow),
+  );
+  ok("prod_workflow_targets_prod_app", workflow.includes("Mortgagehub-prod"));
 }
 
 // Dynamic env tests via tsx-compatible dynamic import of compiled? 
@@ -237,22 +243,30 @@ const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (url && key) {
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
   const OWNER = "5eef06a0-5292-44fd-bf01-4c934f8c8725";
-  const { data: tenants } = await admin.from("tenants").select("id, company_code, tenant_type").order("company_code");
+  const { data: tenants, error: tenantsError } = await admin.from("tenants").select("id, company_code, tenant_type").order("company_code");
   const t001 = tenants?.find((t) => t.company_code === "001");
   const t002 = tenants?.find((t) => t.company_code === "002");
-  ok("db_tenants", !!t001 && !!t002);
+  ok("db_tenants", !!t001 && !!t002, tenantsError?.message ? "query error (no secret)" : "");
   ok("db_no_external", !(tenants ?? []).some((t) => t.tenant_type === "EXTERNAL"));
   ok("db_no_003", !(tenants ?? []).some((t) => t.company_code === "003"));
-  const { count: m002 } = await admin.from("tenant_memberships").select("*", { count: "exact", head: true }).eq("tenant_id", t002.id);
-  ok("db_mem_002_zero", m002 === 0);
-  const { count: pr } = await admin.from("platform_roles").select("*", { count: "exact", head: true });
-  ok("db_platform_roles_0", pr === 0);
-  const { data: a1 } = await admin.rpc("can_access_tenant_data", { p_user_id: OWNER, p_tenant_id: t001.id });
-  const { data: a2 } = await admin.rpc("can_access_tenant_data", { p_user_id: OWNER, p_tenant_id: t002.id });
-  ok("db_owner_001", a1 === true);
-  ok("db_owner_002_deny", a2 === false);
-  const { data: users } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
-  ok("db_auth_6", (users?.users?.length ?? 0) === 6);
+  if (t001 && t002) {
+    const { count: m002 } = await admin.from("tenant_memberships").select("*", { count: "exact", head: true }).eq("tenant_id", t002.id);
+    ok("db_mem_002_zero", m002 === 0);
+    const { count: pr } = await admin.from("platform_roles").select("*", { count: "exact", head: true });
+    ok("db_platform_roles_0", pr === 0);
+    const { data: a1 } = await admin.rpc("can_access_tenant_data", { p_user_id: OWNER, p_tenant_id: t001.id });
+    const { data: a2 } = await admin.rpc("can_access_tenant_data", { p_user_id: OWNER, p_tenant_id: t002.id });
+    ok("db_owner_001", a1 === true);
+    ok("db_owner_002_deny", a2 === false);
+    const { data: users } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
+    ok("db_auth_6", (users?.users?.length ?? 0) === 6);
+  } else {
+    ok("db_mem_002_zero", false, "skipped — tenants 001/002 not returned");
+    ok("db_platform_roles_0", false, "skipped — tenants 001/002 not returned");
+    ok("db_owner_001", false, "skipped — tenants 001/002 not returned");
+    ok("db_owner_002_deny", false, "skipped — tenants 001/002 not returned");
+    ok("db_auth_6", false, "skipped — tenants 001/002 not returned");
+  }
 } else {
   ok("db_baseline_skipped", false, "missing supabase env");
 }

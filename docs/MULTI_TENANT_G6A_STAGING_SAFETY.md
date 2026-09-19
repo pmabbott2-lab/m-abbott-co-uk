@@ -170,12 +170,14 @@ Client may receive publishable Supabase + public URLs/`VITE_APP_ENV` only.
 
 **Hostname:** `staging.mymortgagehub.uk` → `/{slug}` tenant paths unchanged.
 
-**GitHub:** current `.github/workflows/targeted-features_mortgagehub-prod.yml` deploys on **push to `targeted-features`**. This is unsafe as permanent production policy.
+**GitHub (G6A recorded risk):** `.github/workflows/targeted-features_mortgagehub-prod.yml` deployed on **push to `targeted-features`**.
+
+**G6B local change:** that workflow is now **manual `workflow_dispatch` only** (not pushed). See `docs/MULTI_TENANT_G6B_STAGING_DEPLOYMENT.md`.
 
 Recommended CI/CD:
 
-- Production: protected branch or **manual `workflow_dispatch` + environment approval**
-- Staging: dedicated branch / manual dispatch → staging Web App
+- Production: protected environment + **manual `workflow_dispatch`**
+- Staging: dedicated workflow / manual dispatch → staging Web App
 - Docs-only: no deploy
 
 Do not push workflow changes in G6A.
@@ -228,8 +230,8 @@ G6 ≈ 18 untyped bridges. G6A adds env helpers **without** new Supabase `as any
 7. Twilio capture-only (or dedicated test)  
 8. Graph mock or test identity  
 9. Susan staging keys only if enabled  
-10. Staging GitHub workflow (manual)  
-11. Harden production workflow (no auto-push deploy)  
+10. Staging GitHub workflow (manual) — **prepared locally in G6B; not pushed**  
+11. Harden production workflow (no auto-push deploy) — **prepared locally in G6B; not pushed**  
 12. Webhook isolation plan executed  
 
 ---
