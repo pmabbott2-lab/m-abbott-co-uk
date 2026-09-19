@@ -92,9 +92,20 @@ jobs:
           npm start > /tmp/azure-deploy-smoke.log 2>&1 &
           SMOKE_PID=$!
           cleanup() { kill $SMOKE_PID 2>/dev/null || true; }
+          dump_smoke_log() {
+            echo "SMOKE_TEST_FAILED — /tmp/azure-deploy-smoke.log"
+            if [ -f /tmp/azure-deploy-smoke.log ]; then
+              echo "----- azure-deploy-smoke.log -----"
+              cat /tmp/azure-deploy-smoke.log
+              echo "----- end azure-deploy-smoke.log -----"
+            else
+              echo "azure-deploy-smoke.log missing"
+            fi
+          }
+          trap 'dump_smoke_log' ERR
           trap cleanup EXIT
           for i in $(seq 1 30); do
-            if curl -sf -o /tmp/azure-deploy-smoke.html --max-time 3 "http://127.0.0.1:8765/"; then
+            if curl -sf -o /tmp/azure-deploy-smoke.html --max-time 20 "http://127.0.0.1:8765/"; then
               break
             fi
             sleep 1
