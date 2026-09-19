@@ -1,0 +1,194 @@
+# G6B — staging Azure Web App only. Never deploy Mortgagehub-prod from this file.
+# First-deploy origin is the Azure default hostname. Do not use
+# staging.mymortgagehub.uk until DNS is authorised.
+# VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY are NOT baked at build:
+# SSR injects them at runtime from Azure App Settings via __MH_PUBLIC_ENV__.
+# Never hard-code SUPABASE_SERVICE_ROLE_KEY or any secret in this file.
+# Fail closed unless the dispatch ref is exactly refs/heads/targeted-features.
+name: Build and deploy Node.js app to Azure Web App - Mortgagehub-staging
+
+on:
+  workflow_dispatch:
+
+jobs:
+  guard-targeted-features-ref:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Refuse any ref except targeted-features
+        run: |
+          echo "Selected ref: ${GITHUB_REF}"
+          if [ "${GITHUB_REF}" != "refs/heads/targeted-features" ]; then
+            echo "Refused: staging deploy is locked to refs/heads/targeted-features."
+            echo "This run selected ${GITHUB_REF}."
+            exit 1
+          fi
+          echo "REF_GUARD_OK=yes"
+
+  build:
+    needs: guard-targeted-features-ref
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js version
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22.x'
+
+      - name: npm install and build
+        env:
+          APP_ENV: staging
+          VITE_APP_ENV: staging
+          VITE_APP_URL: https://mortgagehub-staging-f4duc9h6ghhgfwhk.uksouth-01.azurewebsites.net
+          APP_BASE_URL: https://mortgagehub-staging-f4duc9h6ghhgfwhk.uksouth-01.azurewebsites.net
+          VITE_SUPABASE_PROJECT_ID: fwgjtbeigpipvayytwlu
+          VITE_SKIP_LOGIN_MFA: "true"
+          VITE_REALTIME_AVATAR: "false"
+        run: |
+          if [ -n "${VITE_SUPABASE_URL:-}" ] || [ -n "${VITE_SUPABASE_PUBLISHABLE_KEY:-}" ]; then
+            echo "Refuse to bake VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY into the staging bundle."
+            echo "SSR injects those from Azure App Settings via __MH_PUBLIC_ENV__ at runtime."
+            exit 1
+          fi
+          npm ci
+          npm run build --if-present
+          if grep -R -n --exclude-dir=node_modules "tiuplmftooauihulhtws" dist; then
+            echo "Production Supabase ref must not appear in the staging build output."
+            exit 1
+          fi
+
+      - name: Prepare self-contained deploy package
+        run: |
+          rm -rf azure-deploy
+          mkdir -p azure-deploy
+          cp -a dist package.json package-lock.json patches azure-deploy/
+          npm ci --omit=dev --ignore-scripts --prefix azure-deploy
+          (cd azure-deploy && node "$GITHUB_WORKSPACE/node_modules/patch-package/index.js")
+          printf '%s\n' 'PlatformName="nodejs"' > azure-deploy/oryx-manifest.toml
+          rm -f azure-deploy/node_modules.tar.gz
+          test -f azure-deploy/node_modules/srvx/bin/srvx.mjs
+          test -f azure-deploy/node_modules/seroval-plugins/package.json
+          test -f azure-deploy/node_modules/seroval/package.json
+          test -f azure-deploy/dist/server/server.js
+          test -d azure-deploy/dist/client
+          (cd azure-deploy && node --input-type=module -e "await import('seroval-plugins/web'); console.log('SEROVAL_PLUGINS_RESOLVE_OK=yes')")
+          echo DEPLOY_PACKAGE_OK=yes
+
+      - name: Smoke-test azure-deploy with runtime Supabase env
+        env:
+          SUPABASE_URL: https://example.supabase.co
+          SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_smoke_key
+          SUPABASE_SERVICE_ROLE_KEY: sb_secret_ci_smoke_key_not_real
+          APP_ENV: staging
+          VITE_APP_ENV: staging
+          PORT: "8765"
+        run: |
+          cd azure-deploy
+          npm start > /tmp/azure-deploy-smoke.log 2>&1 &
+          SMOKE_PID=$!
+          cleanup() { kill $SMOKE_PID 2>/dev/null || true; }
+          trap cleanup EXIT
+          for i in $(seq 1 30); do
+            if curl -sf -o /tmp/azure-deploy-smoke.html --max-time 3 "http://127.0.0.1:8765/"; then
+              break
+            fi
+            sleep 1
+          done
+          test -s /tmp/azure-deploy-smoke.html
+          if grep -q "Missing Supabase environment variable" /tmp/azure-deploy-smoke.html; then
+            echo "Smoke HTML still reports missing Supabase env:"
+            head -c 2000 /tmp/azure-deploy-smoke.html
+            exit 1
+          fi
+          grep -q "__MH_PUBLIC_ENV__" /tmp/azure-deploy-smoke.html
+          grep -q '"SUPABASE_URL":"https://example.supabase.co"' /tmp/azure-deploy-smoke.html
+          if grep -q "sb_secret_ci_smoke_key_not_real" /tmp/azure-deploy-smoke.html; then
+            echo "SERVICE_ROLE key leaked into HTML"
+            exit 1
+          fi
+          echo SMOKE_RUNTIME_ENV_OK=yes
+        working-directory: ${{ github.workspace }}
+
+      - name: Upload artifact for deployment job
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-app-staging
+          path: azure-deploy
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      STAGING_SUPABASE_URL_SECRET: ${{ secrets.STAGING_SUPABASE_URL }}
+      STAGING_SUPABASE_PUBLISHABLE_KEY_SECRET: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
+      STAGING_SUPABASE_SERVICE_ROLE_KEY_SECRET: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+
+    steps:
+      - name: Download artifact from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: node-app-staging
+          path: azure-deploy
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_STAGING }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_STAGING }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_STAGING }}
+
+      - name: Ensure staging App Settings (never production origin)
+        uses: azure/appservice-settings@v1
+        with:
+          app-name: Mortgagehub-staging
+          slot-name: Production
+          app-settings-json: |
+            [
+              { "name": "APP_ENV", "value": "staging", "slotSetting": false },
+              { "name": "VITE_APP_ENV", "value": "staging", "slotSetting": false },
+              { "name": "COMMUNICATION_DELIVERY_MODE", "value": "capture", "slotSetting": false },
+              { "name": "APP_BASE_URL", "value": "https://mortgagehub-staging-f4duc9h6ghhgfwhk.uksouth-01.azurewebsites.net", "slotSetting": false },
+              { "name": "VITE_APP_URL", "value": "https://mortgagehub-staging-f4duc9h6ghhgfwhk.uksouth-01.azurewebsites.net", "slotSetting": false },
+              { "name": "VITE_SUPABASE_PROJECT_ID", "value": "fwgjtbeigpipvayytwlu", "slotSetting": false },
+              { "name": "VITE_SKIP_LOGIN_MFA", "value": "true", "slotSetting": false },
+              { "name": "SKIP_LOGIN_MFA", "value": "true", "slotSetting": false },
+              { "name": "VITE_REALTIME_AVATAR", "value": "false", "slotSetting": false },
+              { "name": "STAGING_SUSAN_ENABLED", "value": "false", "slotSetting": false },
+              { "name": "STAGING_OPENAI_ENABLED", "value": "false", "slotSetting": false },
+              { "name": "STAGING_GETADDRESS_ENABLED", "value": "false", "slotSetting": false },
+              { "name": "STAGING_TWILIO_ALLOW_LIVE", "value": "false", "slotSetting": false },
+              { "name": "STAGING_TEAMS_ALLOW_LIVE", "value": "false", "slotSetting": false },
+              { "name": "STAGING_TEAMS_ALLOW_READ", "value": "false", "slotSetting": false }
+            ]
+
+      - name: Sync staging Supabase keys (staging secrets only)
+        if: ${{ env.STAGING_SUPABASE_SERVICE_ROLE_KEY_SECRET != '' && env.STAGING_SUPABASE_URL_SECRET != '' && env.STAGING_SUPABASE_PUBLISHABLE_KEY_SECRET != '' }}
+        uses: azure/appservice-settings@v1
+        with:
+          app-name: Mortgagehub-staging
+          slot-name: Production
+          app-settings-json: |
+            [
+              { "name": "SUPABASE_URL", "value": "${{ env.STAGING_SUPABASE_URL_SECRET }}", "slotSetting": false },
+              { "name": "VITE_SUPABASE_URL", "value": "${{ env.STAGING_SUPABASE_URL_SECRET }}", "slotSetting": false },
+              { "name": "SUPABASE_PUBLISHABLE_KEY", "value": "${{ env.STAGING_SUPABASE_PUBLISHABLE_KEY_SECRET }}", "slotSetting": false },
+              { "name": "VITE_SUPABASE_PUBLISHABLE_KEY", "value": "${{ env.STAGING_SUPABASE_PUBLISHABLE_KEY_SECRET }}", "slotSetting": false },
+              { "name": "SUPABASE_SERVICE_ROLE_KEY", "value": "${{ env.STAGING_SUPABASE_SERVICE_ROLE_KEY_SECRET }}", "slotSetting": false }
+            ]
+
+      - name: Deploy to Azure Web App (staging)
+        id: deploy-to-webapp
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: Mortgagehub-staging
+          slot-name: Production
+          package: azure-deploy
