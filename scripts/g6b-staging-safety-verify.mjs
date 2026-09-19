@@ -34,6 +34,13 @@ ok(
 );
 ok("prod_workflow_targets_prod_app", prodWf.includes("app-name: Mortgagehub-prod") || prodWf.includes("app-name: 'Mortgagehub-prod'"));
 ok("staging_workflow_dispatch_only", stagingWf.includes("workflow_dispatch") && !/^\s+push:\s*$/m.test(stagingWf));
+ok(
+  "staging_workflow_ref_guard",
+  stagingWf.includes('github.ref') === false &&
+    stagingWf.includes('refs/heads/targeted-features') &&
+    stagingWf.includes("guard-targeted-features-ref") &&
+    stagingWf.includes("needs: guard-targeted-features-ref"),
+);
 ok("staging_workflow_targets_staging_app", stagingWf.includes("Mortgagehub-staging"));
 ok("staging_workflow_never_deploys_prod_app", !/app-name: ['"]?Mortgagehub-prod/.test(stagingWf));
 ok(

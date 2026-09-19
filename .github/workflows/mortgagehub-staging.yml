@@ -4,13 +4,30 @@
 # VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY are NOT baked at build:
 # SSR injects them at runtime from Azure App Settings via __MH_PUBLIC_ENV__.
 # Never hard-code SUPABASE_SERVICE_ROLE_KEY or any secret in this file.
+# Fail closed unless the dispatch ref is exactly refs/heads/targeted-features.
 name: Build and deploy Node.js app to Azure Web App - Mortgagehub-staging
 
 on:
   workflow_dispatch:
 
 jobs:
+  guard-targeted-features-ref:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Refuse any ref except targeted-features
+        run: |
+          echo "Selected ref: ${GITHUB_REF}"
+          if [ "${GITHUB_REF}" != "refs/heads/targeted-features" ]; then
+            echo "Refused: staging deploy is locked to refs/heads/targeted-features."
+            echo "This run selected ${GITHUB_REF}."
+            exit 1
+          fi
+          echo "REF_GUARD_OK=yes"
+
   build:
+    needs: guard-targeted-features-ref
     runs-on: ubuntu-latest
     permissions:
       contents: read
