@@ -41,12 +41,9 @@ function parseTimeToMinutes(time: string): number {
 
 async function assertCanManageDiary(userId: string, email: string | undefined, targetAdvisorId: string) {
   if (userId === targetAdvisorId) {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: roles } = await supabaseAdmin
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", userId);
-    if ((roles ?? []).some((r) => r.role === "advisor")) return;
+    const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+    const view = await resolveActingTenantRole(userId);
+    if (view.isAdvisor) return;
   }
 
   const access = await resolveAdminAccess(userId, email);

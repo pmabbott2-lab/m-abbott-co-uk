@@ -60,9 +60,9 @@ export const lookupIntroducerByCode = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ companyCode: z.string().regex(/^\d{4}$/) }).parse(d))
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!access.isAdmin && !(await context.supabase.from("user_roles").select("role").eq("user_id", context.userId).eq("role", "advisor")).data?.length) {
+    const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+    const view = await resolveActingTenantRole(context.userId);
+    if (!view.isMainAdmin && !view.isAdvisor) {
       throw new Error("Forbidden");
     }
 
@@ -109,7 +109,7 @@ export const getCustomerIntroducer = createServerFn({ method: "GET" })
 
     const { data: intro } = await supabaseAdmin
       .from("introducers")
-      .select("id, company_code, company_name, user_id")
+      .select("id, company_code, company_name, user_id, tenant_id")
       .eq("id", introducerId)
       .maybeSingle();
 
@@ -121,12 +121,15 @@ export const getCustomerIntroducer = createServerFn({ method: "GET" })
 
     let isStaff = false;
     const introUserId = (intro as { user_id?: string | null } | null)?.user_id ?? null;
+    const introTenantId = (intro as { tenant_id?: string | null } | null)?.tenant_id ?? null;
     if (introUserId) {
-      const { data: roles } = await supabaseAdmin
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", introUserId);
-      isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
+      const { loadTenantRoleForTenantId, resolveActingTenantRole } = await import(
+        "@/lib/tenant-role.server"
+      );
+      const targetView = introTenantId
+        ? await loadTenantRoleForTenantId(introUserId, introTenantId)
+        : await resolveActingTenantRole(introUserId);
+      isStaff = targetView.isAdvisor || targetView.isMainAdmin;
     }
 
     return {

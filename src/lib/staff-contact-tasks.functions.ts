@@ -11,18 +11,24 @@ export const completeStaffContactTask = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ taskId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const adminAccess = await resolveAdminAccess(context.userId, email);
-    const { data: roles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const isAdvisor = (roles ?? []).some((r) => r.role === "advisor");
-    const isStaff = isAdvisor || adminAccess.isAdmin;
-    if (!isStaff) throw new Error("Forbidden");
-
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: task } = await supabaseAdmin
+      .from("staff_contact_tasks")
+      .select("session_id")
+      .eq("id", data.taskId)
+      .maybeSingle();
+    let tenantId: string | null = null;
+    if (task?.session_id) {
+      const { data: session } = await supabaseAdmin
+        .from("interview_sessions")
+        .select("tenant_id")
+        .eq("id", task.session_id)
+        .maybeSingle();
+      tenantId = (session as { tenant_id?: string | null } | null)?.tenant_id ?? null;
+    }
+    const { requireActingTenantStaff } = await import("@/lib/tenant-role.server");
+    await requireActingTenantStaff(context.userId, null, tenantId);
+
     const result = await completeStaffContactTaskById(supabaseAdmin, data.taskId, context.userId);
     if (!result) throw new Error("Task not found or already completed");
 

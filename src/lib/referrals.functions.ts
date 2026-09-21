@@ -80,11 +80,13 @@ async function tenantSlugFromReferralRow(
 }
 
 async function getRolesForUser(userId: string): Promise<string[]> {
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-  const { data } = await supabaseAdmin.from("user_roles").select("role").eq("user_id", userId);
-  return (data ?? []).map((r) => r.role);
+  const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+  const view = await resolveActingTenantRole(userId);
+  const roles: string[] = [];
+  if (view.isAdvisor) roles.push("advisor");
+  if (view.isMainAdmin) roles.push("admin");
+  if (view.isIntroducer) roles.push("introducer");
+  return roles;
 }
 
 async function requireAdmin(userId: string): Promise<void> {

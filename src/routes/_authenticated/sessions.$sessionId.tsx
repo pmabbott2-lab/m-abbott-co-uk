@@ -68,6 +68,7 @@ import { contactHistoryToSheet } from "@/lib/report-mappers";
 import { PhoneCallDetailDialog } from "@/components/PhoneCallDetailDialog";
 import { CaseDetailsCard } from "@/components/CaseDetailsCard";
 import { PayoutStatusBadge, commissionPipelineTotals } from "@/components/PayoutStatusBadge";
+import { useTenantUi } from "@/lib/tenant-ui";
 
 export const Route = createFileRoute("/_authenticated/sessions/$sessionId")({
   component: SessionDetail,
@@ -76,13 +77,17 @@ export const Route = createFileRoute("/_authenticated/sessions/$sessionId")({
 export function SessionDetail() {
   const { sessionId } = useParams({ strict: false }) as { sessionId: string };
   const qc = useQueryClient();
+  const tenantSlug = useTenantUi()?.slug;
   const getFn = useServerFn(getSession);
   const submitFn = useServerFn(submitSession);
   const updateFn = useServerFn(updateAnswer);
   const roleFn = useServerFn(getMyRole);
 
   const q = useQuery({ queryKey: ["session", sessionId], queryFn: () => getFn({ data: { sessionId } }) });
-  const roleQ = useQuery({ queryKey: ["my-role"], queryFn: () => roleFn() });
+  const roleQ = useQuery({
+    queryKey: ["my-role", tenantSlug ?? null],
+    queryFn: () => roleFn({ data: { tenantSlug } }),
+  });
   const bookingFn = useServerFn(getSessionBooking);
   const bookingQ = useQuery({
     queryKey: ["session-booking", sessionId],

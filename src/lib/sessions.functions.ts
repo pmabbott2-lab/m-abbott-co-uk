@@ -109,12 +109,9 @@ function isMissingTableError(error: { code?: string; message?: string } | null):
   );
 }
 
-async function getRolesForUser(userId: string): Promise<string[]> {
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-  const { data } = await supabaseAdmin.from("user_roles").select("role").eq("user_id", userId);
-  return (data ?? []).map((r) => r.role);
+async function getRolesForUser(userId: string, tenantId?: string | null): Promise<string[]> {
+  const { rolesForUserInTenant } = await import("@/lib/tenant-role.server");
+  return rolesForUserInTenant(userId, tenantId);
 }
 
 /** Advisors may only open customers allocated to them; admins may open any customer. */
@@ -122,21 +119,38 @@ export async function assertStaffCanAccessCustomer(
   staffUserId: string,
   customerId: string,
 ): Promise<void> {
-  const roles = await getRolesForUser(staffUserId);
-  const isMainAdmin = roles.includes("admin");
-  const isAdvisor = roles.includes("advisor");
-
   const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-  const { resolveAdminAccess } = await import("@/lib/admin.functions");
+  const { loadTenantRoleForTenantId, resolveActingTenantRole } = await import(
+    "@/lib/tenant-role.server"
+  );
   const { canAmend } = await import("@/lib/admin-access");
-  const { data: staffProfile } = await supabaseAdmin
-    .from("profiles")
-    .select("email")
-    .eq("id", staffUserId)
-    .maybeSingle();
-  const access = await resolveAdminAccess(staffUserId, staffProfile?.email ?? undefined);
+
+  const { data: sessions, error } = await supabaseAdmin
+    .from("interview_sessions")
+    .select("id, tenant_id")
+    .eq("customer_id", customerId)
+    .is("deleted_at", null);
+  if (error) throw new Error(error.message);
+
+  const tenantIds = [
+    ...new Set(
+      (sessions ?? [])
+        .map((s: { tenant_id?: string | null }) => s.tenant_id)
+        .filter((id: string | null | undefined): id is string => Boolean(id)),
+    ),
+  ];
+  if (tenantIds.length > 1) {
+    throw new Error("Forbidden");
+  }
+
+  const view = tenantIds[0]
+    ? await loadTenantRoleForTenantId(staffUserId, tenantIds[0])
+    : await resolveActingTenantRole(staffUserId);
+  const access = view.adminAccess;
+  const isMainAdmin = view.isMainAdmin;
+  const isAdvisor = view.isAdvisor;
 
   if (
     !isMainAdmin &&
@@ -148,14 +162,7 @@ export async function assertStaffCanAccessCustomer(
     throw new Error("Forbidden");
   }
 
-  const { data: sessions, error } = await supabaseAdmin
-    .from("interview_sessions")
-    .select("id")
-    .eq("customer_id", customerId)
-    .is("deleted_at", null);
-  if (error) throw new Error(error.message);
-
-  const sessionIds = (sessions ?? []).map((s) => s.id);
+  const sessionIds = (sessions ?? []).map((s: { id: string }) => s.id);
   if (sessionIds.length === 0 && !isMainAdmin && !access.isOwner && !access.isSupervisor) {
     throw new Error("Customer not found");
   }
@@ -1245,31 +1252,19 @@ export const updateAnswer = createServerFn({ method: "POST" })
 
 export const getMyRole = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { data } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    let roles = (data ?? []).map((r) => r.role);
-
-    const email = (context.claims as { email?: string }).email?.trim().toLowerCase();
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const adminAccess = await resolveAdminAccess(context.userId, email);
-
-    // Keep roles array in sync after owner bootstrap.
-    if (adminAccess.isAdmin && !roles.includes("admin")) roles = [...roles, "admin"];
-    if (adminAccess.isOwner && !roles.includes("advisor")) {
-      const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-      await supabaseAdmin
-        .from("user_roles")
-        .upsert({ user_id: context.userId, role: "advisor" }, { onConflict: "user_id,role" });
-      roles = [...roles, "advisor"];
-    }
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        tenantSlug: z.string().min(1).max(64).optional(),
+      })
+      .parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+    const view = await resolveActingTenantRole(context.userId, data.tenantSlug ?? null);
 
     let advisorCode: string | null = null;
-    if (roles.includes("advisor")) {
+    if (view.isAdvisor) {
       try {
         advisorCode = await ensureAdvisorCode(context.userId);
       } catch (e) {
@@ -1278,45 +1273,58 @@ export const getMyRole = createServerFn({ method: "GET" })
     }
 
     return {
-      isAdvisor: roles.includes("advisor"),
-      isMainAdmin: adminAccess.isAdmin,
-      isOwner: adminAccess.isOwner,
-      isSupervisor: adminAccess.isSupervisor,
-      adminLevel: adminAccess.adminLevel,
-      adminAccess,
+      isAdvisor: view.isAdvisor,
+      isMainAdmin: view.isMainAdmin,
+      isOwner: view.isOwner,
+      isSupervisor: view.isSupervisor,
+      isIntroducer: view.isIntroducer,
+      adminLevel: view.adminLevel,
+      adminAccess: view.adminAccess,
       advisorCode,
-      roles,
+      roles: view.membershipRoles,
+      membershipRoles: view.membershipRoles,
+      tenantSlug: view.tenantSlug,
+      tenantId: view.tenantId,
+      member: view.member,
+      shell: view.shell,
     };
   });
 
 export const listUsersWithRoles = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: myRoles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const adminAccess = await resolveAdminAccess(context.userId, email);
-    const isAdvisor = (myRoles ?? []).some((r) => r.role === "advisor");
-    if (!isAdvisor && !adminAccess.isAdmin) throw new Error("Forbidden");
+    const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+    const view = await resolveActingTenantRole(context.userId);
+    if (!view.isAdvisor && !view.isMainAdmin) throw new Error("Forbidden");
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
+    let memberQuery = supabaseAdmin
+      .from("tenant_memberships")
+      .select("user_id, role")
+      .eq("active", true);
+    if (view.tenantId) memberQuery = memberQuery.eq("tenant_id", view.tenantId);
+    const { data: memberRows, error: memberErr } = await memberQuery;
+    if (memberErr) throw new Error(memberErr.message);
+    const memberIds = [...new Set((memberRows ?? []).map((r: { user_id: string }) => r.user_id))];
+    const advisorIds = new Set(
+      (memberRows ?? [])
+        .filter((r: { role: string }) => r.role === "adviser")
+        .map((r: { user_id: string }) => r.user_id),
+    );
+    const introducerIds = new Set(
+      (memberRows ?? [])
+        .filter((r: { role: string }) => r.role === "introducer")
+        .map((r: { user_id: string }) => r.user_id),
+    );
+
     const { data: profiles, error } = await supabaseAdmin
       .from("profiles")
       .select("id, full_name, email")
+      .in("id", memberIds.length ? memberIds : ["00000000-0000-0000-0000-000000000000"])
       .order("email", { ascending: true });
     if (error) throw new Error(error.message);
-    const { data: roleRows } = await supabaseAdmin.from("user_roles").select("user_id, role");
-    const advisorIds = new Set(
-      (roleRows ?? []).filter((r) => r.role === "advisor").map((r) => r.user_id),
-    );
-    const introducerIds = new Set(
-      (roleRows ?? []).filter((r) => r.role === "introducer").map((r) => r.user_id),
-    );
 
     // Advisor codes (for display next to each advisor).
     const advisorCodeMap = new Map<string, string>();
@@ -1498,11 +1506,9 @@ export const setIntroducerRole = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: myRoles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    if (!(myRoles ?? []).some((r) => r.role === "advisor")) throw new Error("Forbidden");
+    const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+    const view = await resolveActingTenantRole(context.userId);
+    if (!view.isAdvisor && !view.isMainAdmin) throw new Error("Forbidden");
 
     if (data.makeIntroducer) {
       const companyCode = await grantIntroducerRole(data.userId, data.companyMode, data.companyCode);
@@ -1529,11 +1535,9 @@ export const setAdvisorRole = createServerFn({ method: "POST" })
     z.object({ userId: z.string().uuid(), makeAdvisor: z.boolean() }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: myRoles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    if (!(myRoles ?? []).some((r) => r.role === "advisor")) throw new Error("Forbidden");
+    const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+    const view = await resolveActingTenantRole(context.userId);
+    if (!view.isAdvisor && !view.isMainAdmin) throw new Error("Forbidden");
     // Guard against an advisor locking themselves out of the dashboard.
     if (!data.makeAdvisor && data.userId === context.userId) {
       throw new Error("You can't remove your own advisor access.");
@@ -1603,15 +1607,20 @@ export type AdvisorCustomerRow = {
 export const listAllSessionsForAdvisor = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ viewAsAdvisorId: z.string().uuid().optional() }).parse(d ?? {}),
+    z
+      .object({
+        viewAsAdvisorId: z.string().uuid().optional(),
+        tenantSlug: z.string().min(1).max(64).optional(),
+      })
+      .parse(d ?? {}),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const adminAccess = await resolveAdminAccess(context.userId, email);
+    const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+    const view = await resolveActingTenantRole(context.userId, data.tenantSlug ?? null);
+    const adminAccess = view.adminAccess;
     const viewAsMode = Boolean(data.viewAsAdvisorId);
 
-    const roles = await getRolesForUser(context.userId);
+    const roles = await getRolesForUser(context.userId, view.tenantId);
     if (viewAsMode) {
       if (!adminAccess.isOwner && !adminAccess.isSupervisor) throw new Error("Forbidden");
     } else if (!roles.includes("advisor") && !adminAccess.isAdmin) {
@@ -1652,6 +1661,9 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "POST" })
       .from("interview_sessions")
       .select("*")
       .order("started_at", { ascending: false });
+    if (view.tenantId) {
+      sessionsQuery = sessionsQuery.eq("tenant_id", view.tenantId);
+    }
 
     if (!isMainAdmin) {
       const myAllocated = new Set(
@@ -1856,17 +1868,17 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "POST" })
 export const listAdvisors = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("admin")) throw new Error("Forbidden");
+    const { resolveActingTenantRole, listTenantMemberUserIds } = await import(
+      "@/lib/tenant-role.server"
+    );
+    const view = await resolveActingTenantRole(context.userId);
+    if (!view.isMainAdmin) throw new Error("Forbidden");
+    if (!view.tenantId) return [] as AdvisorWithCode[];
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const { data: roleRows } = await supabaseAdmin
-      .from("user_roles")
-      .select("user_id")
-      .eq("role", "advisor");
-    const advisorIds = Array.from(new Set((roleRows ?? []).map((r) => r.user_id)));
+    const advisorIds = await listTenantMemberUserIds(view.tenantId, ["adviser"]);
     if (advisorIds.length === 0) return [] as AdvisorWithCode[];
 
     const { data: profiles } = await supabaseAdmin
@@ -2340,25 +2352,24 @@ export type CustomerListItem = {
 export const listCustomersForAdmin = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+    const { resolveActingTenantRole, listTenantMemberUserIds } = await import(
+      "@/lib/tenant-role.server"
+    );
+    const view = await resolveActingTenantRole(context.userId);
+    if (!view.isOwner && !view.isSupervisor) throw new Error("Forbidden");
+    if (!view.tenantId) return [] as CustomerListItem[];
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const customerIds = new Set<string>();
-
-    const { data: roleRows } = await supabaseAdmin
-      .from("user_roles")
-      .select("user_id")
-      .eq("role", "customer");
-    for (const r of roleRows ?? []) customerIds.add(r.user_id);
+    const customerIds = new Set<string>(
+      await listTenantMemberUserIds(view.tenantId, ["customer"]),
+    );
 
     const { data: sessions } = await supabaseAdmin
       .from("interview_sessions")
       .select("customer_id")
+      .eq("tenant_id", view.tenantId)
       .is("deleted_at", null);
     const sessionCount = new Map<string, number>();
     for (const s of sessions ?? []) {
@@ -3238,21 +3249,9 @@ export const listNotes = createServerFn({ method: "POST" })
 // Throws unless the caller holds the main-admin role. Mirrors the admin gate
 // used by listAdvisors / allocateSession.
 async function requireAdmin(userId: string): Promise<void> {
-  const roles = await getRolesForUser(userId);
-  if (roles.includes("admin")) return;
-  // Owner/supervisor via ADMIN_EMAILS / admin_profiles should also pass.
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-  const { data: profile } = await supabaseAdmin
-    .from("profiles")
-    .select("email")
-    .eq("id", userId)
-    .maybeSingle();
-  const { resolveAdminAccess } = await import("@/lib/admin.functions");
-  const access = await resolveAdminAccess(userId, profile?.email ?? undefined);
-  if (access.isOwner || access.isSupervisor || access.isAdmin) return;
-  throw new Error("Forbidden");
+  const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+  const view = await resolveActingTenantRole(userId);
+  if (!view.isMainAdmin) throw new Error("Forbidden");
 }
 
 // Stamp deleted_at on an advisor profile, swallowing the error if the column
@@ -3775,22 +3774,25 @@ export const getStaffInvite = createServerFn({ method: "GET" })
 export const exportOwnerCustomerReport = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!access.isOwner) throw new Error("Owner only");
+    const { resolveActingTenantRole, listTenantMemberUserIds } = await import(
+      "@/lib/tenant-role.server"
+    );
+    const view = await resolveActingTenantRole(context.userId);
+    if (!view.isOwner) throw new Error("Owner only");
+    if (!view.tenantId) return { rows: [] as OwnerCustomerExportRow[] };
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
 
-    const customerIdSet = new Set<string>();
-    const { data: roleRows } = await supabaseAdmin.from("user_roles").select("user_id").eq("role", "customer");
-    for (const r of roleRows ?? []) customerIdSet.add(r.user_id);
+    const customerIdSet = new Set<string>(
+      await listTenantMemberUserIds(view.tenantId, ["customer"]),
+    );
 
     const { data: sessions, error: sessErr } = await supabaseAdmin
       .from("interview_sessions")
       .select("id, customer_id, status, case_ref, started_at, deleted_at")
+      .eq("tenant_id", view.tenantId)
       .is("deleted_at", null)
       .order("started_at", { ascending: false });
     if (sessErr) throw new Error(sessErr.message);

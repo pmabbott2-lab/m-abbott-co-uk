@@ -28,6 +28,7 @@ import {
 } from "@/lib/sessions.functions";
 import { canAmend } from "@/lib/admin-access";
 import { referralLinkForSlug } from "@/lib/referral";
+import { useTenantUi } from "@/lib/tenant-ui";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -50,10 +51,14 @@ export const Route = createFileRoute("/_authenticated/customers/$customerId")({
 export function CustomerHubPage() {
   const { customerId } = useParams({ strict: false }) as { customerId: string };
   const qc = useQueryClient();
+  const tenantSlug = useTenantUi()?.slug;
   const hubFn = useServerFn(getCustomerHub);
   const roleFn = useServerFn(getMyRole);
 
-  const roleQ = useQuery({ queryKey: ["my-role"], queryFn: () => roleFn() });
+  const roleQ = useQuery({
+    queryKey: ["my-role", tenantSlug ?? null],
+    queryFn: () => roleFn({ data: { tenantSlug } }),
+  });
   const hubQ = useQuery({
     queryKey: ["customer-hub", customerId],
     queryFn: () => hubFn({ data: { customerId } }),

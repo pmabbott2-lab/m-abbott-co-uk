@@ -148,12 +148,17 @@ export const resolveReferralSlug = createServerFn({ method: "GET" })
 
 export const checkIsIntroducer = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { data: roles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    return { isIntroducer: (roles ?? []).some((r) => r.role === "introducer") };
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        tenantSlug: z.string().min(1).max(64).optional(),
+      })
+      .parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+    const view = await resolveActingTenantRole(context.userId, data.tenantSlug ?? null);
+    return { isIntroducer: view.isIntroducer };
   });
 
 export type IntroducerListItem = {
@@ -169,19 +174,15 @@ export type IntroducerListItem = {
 export const listIntroducersForAdmin = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const {
-      data: { user },
-    } = await context.supabase.auth.getUser();
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const access = await resolveAdminAccess(context.userId, user?.email ?? null);
-    if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+    const { resolveActingTenantRole, listTenantMemberUserIds } = await import(
+      "@/lib/tenant-role.server"
+    );
+    const view = await resolveActingTenantRole(context.userId);
+    if (!view.isOwner && !view.isSupervisor) throw new Error("Forbidden");
+    if (!view.tenantId) return [] as IntroducerListItem[];
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: roleRows } = await supabaseAdmin
-      .from("user_roles")
-      .select("user_id")
-      .eq("role", "introducer");
-    const userIds = Array.from(new Set((roleRows ?? []).map((r) => r.user_id)));
+    const userIds = await listTenantMemberUserIds(view.tenantId, ["introducer"]);
     if (userIds.length === 0) return [] as IntroducerListItem[];
 
     const [{ data: profiles }, { data: introducers }] = await Promise.all([
@@ -213,13 +214,14 @@ export const listIntroducersForAdmin = createServerFn({ method: "GET" })
       );
   });
 
-async function assertIntroducerUser(userId: string): Promise<void> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data: roles } = await supabaseAdmin
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", userId);
-  if (!(roles ?? []).some((r) => r.role === "introducer")) {
+async function assertIntroducerUser(userId: string, tenantId?: string | null): Promise<void> {
+  const { resolveActingTenantRole, loadTenantRoleForTenantId } = await import(
+    "@/lib/tenant-role.server"
+  );
+  const view = tenantId
+    ? await loadTenantRoleForTenantId(userId, tenantId)
+    : await resolveActingTenantRole(userId);
+  if (!view.isIntroducer) {
     throw new Error("Not an introducer account");
   }
 }
@@ -288,13 +290,7 @@ export const getIntroducerProfile = createServerFn({ method: "GET" })
       targetUserId = data.viewAsIntroducerUserId!;
       await assertIntroducerUser(targetUserId);
     } else {
-      const { data: roles } = await context.supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", context.userId);
-      if (!(roles ?? []).some((r) => r.role === "introducer")) {
-        throw new Error("Forbidden");
-      }
+      await assertIntroducerUser(context.userId);
     }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -387,13 +383,7 @@ export const updateIntroducerProfile = createServerFn({ method: "POST" })
     );
 
     if (!viewAsMode) {
-      const { data: roles } = await context.supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", context.userId);
-      if (!(roles ?? []).some((r) => r.role === "introducer")) {
-        throw new Error("Forbidden");
-      }
+      await assertIntroducerUser(context.userId);
     }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");

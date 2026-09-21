@@ -11,6 +11,7 @@ import { getAdvisorView } from "@/lib/advisor-view";
 import { getMyRole } from "@/lib/sessions.functions";
 import { Button } from "@/components/ui/button";
 import { useTenantAwareNavigate } from "@/components/tenant/TenantAppLink";
+import { useTenantUi } from "@/lib/tenant-ui";
 
 export const Route = createFileRoute("/_authenticated/diary")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -23,10 +24,14 @@ export const Route = createFileRoute("/_authenticated/diary")({
 export function DiaryPage() {
   const search = useSearch({ strict: false }) as { teams?: string; reason?: string };
   const navigate = useTenantAwareNavigate();
+  const tenantSlug = useTenantUi()?.slug;
   const roleFn = useServerFn(getMyRole);
   const advisorViewId = getAdvisorView()?.advisorId;
 
-  const roleQ = useQuery({ queryKey: ["my-role"], queryFn: () => roleFn() });
+  const roleQ = useQuery({
+    queryKey: ["my-role", tenantSlug ?? null],
+    queryFn: () => roleFn({ data: { tenantSlug } }),
+  });
 
   const isStaffAdvisor = Boolean(roleQ.data?.isAdvisor && !roleQ.data?.isMainAdmin);
   const isMainAdmin = Boolean(roleQ.data?.isMainAdmin);

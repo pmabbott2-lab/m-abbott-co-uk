@@ -13,12 +13,12 @@ import {
   type AdminAccess,
 } from "@/lib/admin-access";
 import { markContactOpened } from "@/lib/booking.functions";
-import { checkIsIntroducer } from "@/lib/introducer.functions";
 import { StaffCustomerBookingCard } from "@/components/StaffCustomerBookingCard";
 import { StaffBranchTabs } from "@/components/staff/StaffBranchTabs";
 import { getStaffBranchVisibility } from "@/lib/staff-branch-nav";
 import { getAdvisorView } from "@/lib/advisor-view";
 import { AppShell } from "@/components/AppShell";
+import { useTenantUi } from "@/lib/tenant-ui";
 import {
   CustomersListPanel,
   type CustomerSessionRow,
@@ -49,6 +49,7 @@ export function StaffDashboard({
   advisorCode,
 }: StaffDashboardProps) {
   const qc = useQueryClient();
+  const tenantSlug = useTenantUi()?.slug;
   const allFn = useServerFn(listAllSessionsForAdvisor);
   const markOpenedFn = useServerFn(markContactOpened);
 
@@ -79,8 +80,8 @@ export function StaffDashboard({
   const advisorViewId = getAdvisorView()?.advisorId;
 
   const allQ = useQuery({
-    queryKey: ["all-sessions", advisorViewId, advisorViewTick],
-    queryFn: () => allFn({ data: { viewAsAdvisorId: advisorViewId } }),
+    queryKey: ["all-sessions", advisorViewId, advisorViewTick, tenantSlug ?? null],
+    queryFn: () => allFn({ data: { viewAsAdvisorId: advisorViewId, tenantSlug } }),
     enabled: isAdvisor || isMainAdmin,
   });
 
@@ -235,23 +236,21 @@ export function StaffDashboard({
 
 /** Load role + introducer flag then render staff dashboard. */
 export function StaffDashboardLoader() {
+  const tenantSlug = useTenantUi()?.slug;
   const roleFn = useServerFn(getMyRole);
-  const introducerFn = useServerFn(checkIsIntroducer);
 
   const roleQ = useQuery({
-    queryKey: ["my-role"],
+    queryKey: ["my-role", tenantSlug ?? null],
     queryFn: async () => {
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("Account load timed out — please sign in again.")), 12000),
       );
-      return Promise.race([roleFn(), timeout]);
+      return Promise.race([roleFn({ data: { tenantSlug } }), timeout]);
     },
     retry: 1,
   });
 
-  const introducerQ = useQuery({ queryKey: ["is-introducer"], queryFn: () => introducerFn() });
-
-  if (roleQ.isLoading || introducerQ.isLoading) {
+  if (roleQ.isLoading) {
     return (
       <AppShell title="Home">
         <div className="py-16 text-center text-muted-foreground">Loading…</div>
@@ -275,7 +274,7 @@ export function StaffDashboardLoader() {
       isMainAdmin={roleQ.data?.isMainAdmin ?? false}
       isOwner={roleQ.data?.isOwner ?? false}
       isSupervisor={roleQ.data?.isSupervisor ?? false}
-      isIntroducer={introducerQ.data?.isIntroducer ?? false}
+      isIntroducer={roleQ.data?.isIntroducer ?? false}
       adminLevel={roleQ.data?.adminLevel ?? null}
       adminAccess={roleQ.data?.adminAccess ?? null}
       advisorCode={roleQ.data?.advisorCode ?? null}

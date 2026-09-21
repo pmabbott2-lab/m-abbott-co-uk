@@ -17,6 +17,7 @@ import { clearAdvisorView, getAdvisorView } from "@/lib/advisor-view";
 import { markContactOpened } from "@/lib/booking.functions";
 import { listAllSessionsForAdvisor } from "@/lib/sessions.functions";
 import { recordViewAsAudit } from "@/lib/view-as-audit.functions";
+import { useTenantUi } from "@/lib/tenant-ui";
 
 type AssignedAdvisor = { id: string; full_name: string | null; email: string | null };
 
@@ -35,6 +36,7 @@ export function AdvisorViewPanel({
 }: AdvisorViewPanelProps) {
   const active = getAdvisorView();
   const qc = useQueryClient();
+  const tenantSlug = useTenantUi()?.slug;
   const allFn = useServerFn(listAllSessionsForAdvisor);
   const markOpenedFn = useServerFn(markContactOpened);
   const auditFn = useServerFn(recordViewAsAudit);
@@ -47,8 +49,8 @@ export function AdvisorViewPanel({
   const advisorViewId = active?.advisorId;
 
   const allQ = useQuery({
-    queryKey: ["advisor-view-sessions", advisorViewId],
-    queryFn: () => allFn({ data: { viewAsAdvisorId: advisorViewId } }),
+    queryKey: ["advisor-view-sessions", advisorViewId, tenantSlug ?? null],
+    queryFn: () => allFn({ data: { viewAsAdvisorId: advisorViewId, tenantSlug } }),
     enabled: Boolean(advisorViewId),
   });
 

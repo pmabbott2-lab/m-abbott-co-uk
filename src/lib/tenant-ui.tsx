@@ -18,6 +18,11 @@ export function useTenantUi(): TenantPresentation | null {
   return useContext(TenantUiContext);
 }
 
+/** Public slug of the current tenant URL, if any. Never defaults to 001. */
+export function useActingTenantSlug(): string | undefined {
+  return useTenantUi()?.slug;
+}
+
 export function useRequiredTenantUi(): TenantPresentation {
   const t = useTenantUi();
   if (!t) {

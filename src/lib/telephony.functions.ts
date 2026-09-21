@@ -7,9 +7,12 @@ import { createVoiceAccessToken, isTwilioClientVoiceConfigured } from "@/lib/voi
 import type { ContactHistoryEntry } from "@/lib/sessions.functions";
 
 async function staffRoles(userId: string): Promise<string[]> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data } = await supabaseAdmin.from("user_roles").select("role").eq("user_id", userId);
-  return (data ?? []).map((r) => r.role);
+  const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+  const view = await resolveActingTenantRole(userId);
+  const roles: string[] = [];
+  if (view.isAdvisor) roles.push("advisor");
+  if (view.isMainAdmin) roles.push("admin");
+  return roles;
 }
 
 function isStaffRole(roles: string[]): boolean {

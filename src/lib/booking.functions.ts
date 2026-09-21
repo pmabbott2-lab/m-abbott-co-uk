@@ -38,6 +38,22 @@ function minutesToTime(total: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
+async function actingTenantStaffFlags(userId: string, tenantId?: string | null) {
+  const { resolveActingTenantRole, loadTenantRoleForTenantId } = await import(
+    "@/lib/tenant-role.server"
+  );
+  const view = tenantId
+    ? await loadTenantRoleForTenantId(userId, tenantId)
+    : await resolveActingTenantRole(userId);
+  return {
+    view,
+    isAdvisor: view.isAdvisor,
+    isAdmin: view.isMainAdmin,
+    isIntroducer: view.isIntroducer,
+    isStaff: view.isAdvisor || view.isMainAdmin,
+  };
+}
+
 /** Offset of `timeZone` vs UTC at the given instant (ms). */
 function timeZoneOffsetMs(timeZone: string, instant: Date): number {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -148,22 +164,12 @@ async function listBookableAdvisors(tenantId?: string | null): Promise<BookableA
       .eq("active", true)
       .in("role", ["adviser", "owner", "supervisor", "general"]);
     if (memErr) throw new Error(memErr.message);
-    const memberIds = [...new Set((members ?? []).map((m: { user_id: string }) => m.user_id))];
+    const rows = (members ?? []) as Array<{ user_id: string }>;
+    const memberIds = [...new Set(rows.map((m) => m.user_id))];
     if (memberIds.length === 0) return [];
-    const { data: advisors, error } = await supabaseAdmin
-      .from("user_roles")
-      .select("user_id")
-      .eq("role", "advisor")
-      .in("user_id", memberIds);
-    if (error) throw new Error(error.message);
-    ids = [...new Set((advisors ?? []).map((a: { user_id: string }) => a.user_id).filter(Boolean))];
+    ids = memberIds;
   } else {
-    const { data: advisors, error } = await supabaseAdmin
-      .from("user_roles")
-      .select("user_id")
-      .eq("role", "advisor");
-    if (error) throw new Error(error.message);
-    ids = [...new Set((advisors ?? []).map((a) => a.user_id).filter(Boolean))];
+    ids = [];
   }
   if (ids.length === 0) return [];
 
@@ -498,16 +504,10 @@ async function pickLeastLoadedAdvisorForSlot(
   return scored[0]!.advisor.id;
 }
 
-async function resolveBookingAdvisorId(staffUserId?: string): Promise<string> {
+async function resolveBookingAdvisorId(staffUserId?: string, tenantId?: string | null): Promise<string> {
   if (!staffUserId) return getPrimaryAdvisorId();
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-  const { data: roles } = await supabaseAdmin
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", staffUserId);
-  if ((roles ?? []).some((r) => r.role === "advisor")) return staffUserId;
+  const flags = await actingTenantStaffFlags(staffUserId, tenantId);
+  if (flags.isAdvisor) return staffUserId;
   return getPrimaryAdvisorId();
 }
 
@@ -1059,14 +1059,8 @@ async function bookAppointment(
     advisorId = await pickLeastLoadedAdvisorForSlot(data.startsAt, undefined, tenantId);
   } else if (!advisorId) {
     if (actingUserId) {
-      const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-      const { data: roles } = await supabaseAdmin
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", actingUserId);
-      if ((roles ?? []).some((r) => r.role === "advisor")) {
+      const flags = await actingTenantStaffFlags(actingUserId, tenantId);
+      if (flags.isAdvisor) {
         advisorId = actingUserId;
       } else {
         advisorId = await pickLeastLoadedAdvisorForSlot(data.startsAt, undefined, tenantId);
@@ -1094,11 +1088,8 @@ async function bookAppointment(
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const { data: roles } = await supabaseAdmin
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", actingUserId);
-    if ((roles ?? []).some((r) => r.role === "introducer")) {
+    const flags = await actingTenantStaffFlags(actingUserId, tenantId);
+    if (flags.isIntroducer) {
       leadSource = "introducer_portal";
       referralChannel = "manual";
       if (!introducerId) {
@@ -1110,10 +1101,7 @@ async function bookAppointment(
           .maybeSingle();
         introducerId = ownIntro?.id ?? null;
       }
-    } else if (
-      (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin") &&
-      data.channel === "direct_booking"
-    ) {
+    } else if (flags.isStaff && data.channel === "direct_booking") {
       // Staff booking: credit the acting advisor/admin as introducer on the case.
       leadSource = "introducer_portal";
       referralChannel = "manual";
@@ -1625,16 +1613,16 @@ export const getAppointmentForSession = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) => {
     const { data: session, error: sErr } = await context.supabase
       .from("interview_sessions")
-      .select("id, customer_id")
+      .select("id, customer_id, tenant_id")
       .eq("id", data.sessionId)
       .single();
     if (sErr) throw new Error(sErr.message);
 
-    const { data: roles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const isAdvisor = (roles ?? []).some((r) => r.role === "advisor");
+    const flags = await actingTenantStaffFlags(
+      context.userId,
+      (session as { tenant_id?: string | null }).tenant_id,
+    );
+    const isAdvisor = flags.isAdvisor;
     if (!isAdvisor && session.customer_id !== context.userId) throw new Error("Forbidden");
 
     const { data: appointment, error } = await context.supabase
@@ -1674,11 +1662,8 @@ export const getSessionBooking = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<SessionBookingDetails> => {
-    const { data: roles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
+    const flags = await actingTenantStaffFlags(context.userId);
+    const isStaff = flags.isStaff;
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
@@ -1825,11 +1810,8 @@ export const updateCallbackStatus = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: roles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
+    const flags = await actingTenantStaffFlags(context.userId);
+    const isStaff = flags.isStaff;
     if (!isStaff) throw new Error("Forbidden");
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
@@ -1852,11 +1834,8 @@ export const logCallbackAttempt = createServerFn({ method: "POST" })
     z.object({ sessionId: z.string().uuid(), note: z.string().max(200).optional() }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: roles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
+    const flags = await actingTenantStaffFlags(context.userId);
+    const isStaff = flags.isStaff;
     if (!isStaff) throw new Error("Forbidden");
 
     await appendContactLog(
@@ -1885,11 +1864,8 @@ export const resolveCallback = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: roles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
+    const flags = await actingTenantStaffFlags(context.userId);
+    const isStaff = flags.isStaff;
     if (!isStaff) throw new Error("Forbidden");
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
@@ -2219,16 +2195,10 @@ async function appendContactLog(
 export const listAdvisorContacts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<AdvisorContact[]> => {
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const adminAccess = await resolveAdminAccess(context.userId, email);
+    const flags = await actingTenantStaffFlags(context.userId);
+    const adminAccess = flags.view.adminAccess;
     const isStaffAdmin = adminAccess.isOwner || adminAccess.isSupervisor || adminAccess.isAdmin;
-
-    const { data: roles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const isAdvisor = (roles ?? []).some((r) => r.role === "advisor");
+    const isAdvisor = flags.isAdvisor;
     if (!isAdvisor && !isStaffAdmin) throw new Error("Forbidden");
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
@@ -2782,11 +2752,8 @@ export const listSessionCrmContacts = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<SessionCrmContactItem[]> => {
-    const { data: roles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
+    const flags = await actingTenantStaffFlags(context.userId);
+    const isStaff = flags.isStaff;
     if (!isStaff) throw new Error("Forbidden");
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
@@ -2884,15 +2851,10 @@ export const markAdvisorContactHandled = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: roles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const isStaff = (roles ?? []).some((r) => r.role === "advisor" || r.role === "admin");
+    const flags = await actingTenantStaffFlags(context.userId);
+    const isStaff = flags.isStaff;
     if (!isStaff) {
-      const email = (context.claims as { email?: string }).email;
-      const { resolveAdminAccess } = await import("@/lib/admin.functions");
-      const adminAccess = await resolveAdminAccess(context.userId, email);
+      const adminAccess = flags.view.adminAccess;
       if (!adminAccess.isOwner && !adminAccess.isSupervisor && !adminAccess.isAdmin) {
         throw new Error("Forbidden");
       }
@@ -2984,20 +2946,23 @@ export const markAdvisorContactHandled = createServerFn({ method: "POST" })
 export const listAssigneeAdvisors = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const adminAccess = await resolveAdminAccess(context.userId, email);
+    const flags = await actingTenantStaffFlags(context.userId);
+    const adminAccess = flags.view.adminAccess;
     if (!adminAccess.isOwner && !adminAccess.isSupervisor && !adminAccess.isAdmin) {
       throw new Error("Forbidden");
     }
 
+    if (!flags.view.tenantId) {
+      return [] as Array<{ id: string; full_name: string | null; email: string | null }>;
+    }
+
+    const { listTenantMemberUserIds } = await import("@/lib/tenant-role.server");
+    const advisorIds = await listTenantMemberUserIds(flags.view.tenantId, ["adviser"]);
+    if (advisorIds.length === 0) return [] as Array<{ id: string; full_name: string | null; email: string | null }>;
+
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const { data: roleRows } = await supabaseAdmin.from("user_roles").select("user_id").eq("role", "advisor");
-    const advisorIds = Array.from(new Set((roleRows ?? []).map((r) => r.user_id)));
-    if (advisorIds.length === 0) return [] as Array<{ id: string; full_name: string | null; email: string | null }>;
-
     const { data: profiles } = await supabaseAdmin
       .from("profiles")
       .select("id, full_name, email")
@@ -3117,9 +3082,8 @@ export const markContactOpened = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const adminAccess = await resolveAdminAccess(context.userId, email);
+    const flags = await actingTenantStaffFlags(context.userId);
+    const adminAccess = flags.view.adminAccess;
 
     let advisorId = context.userId;
     let viewAsMode = false;
@@ -3127,16 +3091,8 @@ export const markContactOpened = createServerFn({ method: "POST" })
       if (!adminAccess.isOwner && !adminAccess.isSupervisor) throw new Error("Forbidden");
       advisorId = data.viewAsAdvisorId;
       viewAsMode = true;
-    } else {
-      const { data: roles } = await context.supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", context.userId);
-      if (!(roles ?? []).some((r) => r.role === "advisor")) {
-        if (!adminAccess.isOwner && !adminAccess.isSupervisor && !adminAccess.isAdmin) {
-          throw new Error("Forbidden");
-        }
-      }
+    } else if (!flags.isAdvisor && !adminAccess.isAdmin) {
+      throw new Error("Forbidden");
     }
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
@@ -3171,14 +3127,8 @@ export const listAdvisorAppointments = createServerFn({ method: "POST" })
     z.object({ viewAsAdvisorId: z.string().uuid().optional() }).parse(d ?? {}),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const access = await resolveAdminAccess(context.userId, email);
-    const { data: roles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const roleList = (roles ?? []).map((r) => r.role);
+    const flags = await actingTenantStaffFlags(context.userId);
+    const access = flags.view.adminAccess;
 
     let advisorId = context.userId;
     if (data.viewAsAdvisorId) {
@@ -3190,7 +3140,7 @@ export const listAdvisorAppointments = createServerFn({ method: "POST" })
         canView(access, "appointments");
       if (!canViewAdvisorDiary) throw new Error("Forbidden");
       advisorId = data.viewAsAdvisorId;
-    } else if (!roleList.includes("advisor") && !access.isAdmin) {
+    } else if (!flags.isAdvisor && !access.isAdmin) {
       throw new Error("Forbidden");
     }
 
@@ -3397,20 +3347,8 @@ export const getLeadForBooking = createServerFn({ method: "GET" })
   });
 
 async function assertStaffBookingAccess(userId: string): Promise<void> {
-  const { getRolesForUser } = await import("@/lib/sessions.functions");
-  const roles = await getRolesForUser(userId);
-  if (roles.includes("advisor")) return;
-  const { resolveAdminAccess } = await import("@/lib/admin.functions");
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-  const { data: profile } = await supabaseAdmin
-    .from("profiles")
-    .select("email")
-    .eq("id", userId)
-    .maybeSingle();
-  const access = await resolveAdminAccess(userId, profile?.email ?? undefined);
-  if (access.isAdmin) return;
+  const flags = await actingTenantStaffFlags(userId);
+  if (flags.isAdvisor || flags.isAdmin) return;
   throw new Error("Forbidden");
 }
 
@@ -3552,26 +3490,18 @@ export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
 async function assertIntroducerBookingAccess(
   userId: string,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  userClient?: { from: (table: string) => any },
+  _userClient?: { from: (table: string) => any },
 ): Promise<string> {
+  const flags = await actingTenantStaffFlags(userId);
+  if (!flags.isIntroducer) {
+    throw new Error("Forbidden");
+  }
   const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-  const client = userClient ?? supabaseAdmin;
-
-  const { data: roles, error: rolesErr } = await client
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", userId);
-  if (rolesErr) throw new Error(rolesErr.message);
-  if (!(roles ?? []).some((r: { role: string }) => r.role === "introducer")) {
-    throw new Error("Forbidden");
-  }
-  const { data: introducer, error } = await client
-    .from("introducers")
-    .select("id")
-    .eq("user_id", userId)
-    .maybeSingle();
+  let introQuery = supabaseAdmin.from("introducers").select("id").eq("user_id", userId);
+  if (flags.view.tenantId) introQuery = introQuery.eq("tenant_id", flags.view.tenantId);
+  const { data: introducer, error } = await introQuery.maybeSingle();
   if (error) throw new Error(error.message);
   if (!introducer) throw new Error("Introducer profile not set up yet.");
   return introducer.id as string;
@@ -3796,16 +3726,13 @@ export const rescheduleAppointment = createServerFn({ method: "POST" })
     if (apptErr) throw new Error(apptErr.message);
     if (!appt || appt.status !== "confirmed") throw new Error("Appointment not found");
 
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const access = await resolveAdminAccess(context.userId, email);
-    const { data: roles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const roleList = (roles ?? []).map((r) => r.role);
-    const isAdvisor = roleList.includes("advisor");
-    const isStaff = isAdvisor || access.isAdmin;
+    const flags = await actingTenantStaffFlags(
+      context.userId,
+      (appt as { tenant_id?: string | null }).tenant_id,
+    );
+    const access = flags.view.adminAccess;
+    const isAdvisor = flags.isAdvisor;
+    const isStaff = flags.isStaff;
 
     let allowed = isStaff && appt.advisor_id === context.userId;
     if (!allowed && access.isOwner) allowed = true;

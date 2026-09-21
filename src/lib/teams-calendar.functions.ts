@@ -11,16 +11,9 @@ export const getTeamsCalendarStatus = createServerFn({ method: "GET" })
 export const getTeamsCalendarConnectUrl = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: roles } = await context.supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId);
-    const roleList = (roles ?? []).map((r) => r.role);
-    const isAdvisor = roleList.includes("advisor");
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!isAdvisor && !access.isAdmin) {
+    const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+    const view = await resolveActingTenantRole(context.userId);
+    if (!view.isAdvisor && !view.isMainAdmin) {
       throw new Error("Only advisors can link a Teams diary");
     }
 

@@ -10,8 +10,6 @@ import {
   PERMISSION_KEYS,
   canEditAdminPermissions,
   canGrantAdminLevel,
-  emptyPermissions,
-  fullPermissions,
 } from "@/lib/admin-access";
 
 function isMissingTable(error: { code?: string; message?: string } | null): boolean {
@@ -29,8 +27,9 @@ function isMissingTable(error: { code?: string; message?: string } | null): bool
 }
 
 /**
- * Firm owner emails. ADMIN_EMAILS App Setting / .env is preferred; the builtin
- * list keeps production owner access working if Azure is missing that setting.
+ * Firm owner emails — listing / bootstrap DISPLAY only.
+ * P2: ADMIN_EMAILS must not grant tenant-admin authority. resolveAdminAccess
+ * ignores email. Keep this helper for listAdmins owner badges until G7.
  */
 const BUILTIN_OWNER_EMAILS = ["pmabbott2@aol.com"];
 
@@ -43,36 +42,9 @@ function parseOwnerEmails(): string[] {
   return [...BUILTIN_OWNER_EMAILS];
 }
 
-function ownerAccess(): AdminAccess {
-  return {
-    isAdmin: true,
-    adminLevel: "owner",
-    isOwner: true,
-    isSupervisor: true,
-    permissions: fullPermissions(),
-  };
-}
-
 function isOwnerEmail(email: string | undefined | null): boolean {
   if (!email) return false;
   return parseOwnerEmails().includes(email.trim().toLowerCase());
-}
-
-/** JWT claims may omit email — fall back to the profiles table. */
-async function resolveAuthEmail(
-  userId: string,
-  claimsEmail?: string,
-): Promise<string | undefined> {
-  const fromClaims = claimsEmail?.trim().toLowerCase();
-  if (fromClaims) return fromClaims;
-
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data: profile } = await supabaseAdmin
-    .from("profiles")
-    .select("email")
-    .eq("id", userId)
-    .maybeSingle();
-  return profile?.email?.trim().toLowerCase() || undefined;
 }
 
 function resolveListedAdminLevel(
@@ -99,126 +71,24 @@ async function assertAdminTablesReady(error: { code?: string; message?: string }
   if (error) throw new Error(error.message);
 }
 
-async function getRoles(userId: string): Promise<string[]> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data } = await supabaseAdmin.from("user_roles").select("role").eq("user_id", userId);
-  return (data ?? []).map((r) => r.role);
-}
-
-async function ensureOwnerBootstrap(userId: string, email: string | undefined): Promise<void> {
-  if (!isOwnerEmail(email)) return;
-
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  // Original owner design: admin + advisor roles, admin_profiles.level = owner.
-  // Staff nav already hides advisor-only "My commission" when isMainAdmin.
-  await supabaseAdmin
-    .from("user_roles")
-    .upsert({ user_id: userId, role: "admin" }, { onConflict: "user_id,role" });
-  await supabaseAdmin
-    .from("user_roles")
-    .upsert({ user_id: userId, role: "advisor" }, { onConflict: "user_id,role" });
-  // Strip roles that pollute owner nav (introducer portal / customer home).
-  await supabaseAdmin
-    .from("user_roles")
-    .delete()
-    .eq("user_id", userId)
-    .in("role", ["customer", "introducer"]);
-
-  const { error } = await supabaseAdmin.from("admin_profiles").upsert(
-    { user_id: userId, level: "owner", updated_at: new Date().toISOString() },
-    { onConflict: "user_id" },
-  );
-  if (error && !isMissingTable(error)) console.error("owner bootstrap", error);
-}
-
-/** Resolve admin level + permission matrix for a user. */
+/**
+ * Resolve tenant admin access for the acting tenant.
+ *
+ * P2: tenant_memberships.role is authoritative. `claimsEmail` is ignored for
+ * tenant authority (legacy signature). ADMIN_EMAILS / user_roles / admin_profiles.level
+ * must not grant Owner in another tenant.
+ *
+ * When tenantId is omitted, the sole active membership is used. Dual membership
+ * without an explicit tenant returns empty (non-admin) access — never 001.
+ */
 export async function resolveAdminAccess(
   userId: string,
-  claimsEmail?: string,
+  _claimsEmail?: string,
+  tenantId?: string | null,
 ): Promise<AdminAccess> {
-  const email = await resolveAuthEmail(userId, claimsEmail);
-  if (email) await ensureOwnerBootstrap(userId, email);
-
-  // Owner emails always get full owner access (Finance, Management, Admin access, etc.).
-  if (isOwnerEmail(email)) {
-    return ownerAccess();
-  }
-
-  const roles = await getRoles(userId);
-  const isAdmin = roles.includes("admin");
-  if (!isAdmin) {
-    return {
-      isAdmin: false,
-      adminLevel: null,
-      isOwner: false,
-      isSupervisor: false,
-      permissions: emptyPermissions(),
-    };
-  }
-
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data: profile, error } = await supabaseAdmin
-    .from("admin_profiles")
-    .select("level")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  // Pre-migration / lookup failure: never silently demote — that hides Finance/Admin.
-  if (error) {
-    if (isMissingTable(error)) {
-      return {
-        isAdmin: true,
-        adminLevel: "supervisor",
-        isOwner: false,
-        isSupervisor: true,
-        permissions: fullPermissions(),
-      };
-    }
-    console.error("admin_profiles lookup failed", error);
-    return {
-      isAdmin: true,
-      adminLevel: "supervisor",
-      isOwner: false,
-      isSupervisor: true,
-      permissions: fullPermissions(),
-    };
-  }
-
-  let level = (profile?.level as AdminLevel | undefined) ?? "general";
-
-  if (level === "owner") {
-    return ownerAccess();
-  }
-
-  if (level === "supervisor") {
-    return {
-      isAdmin: true,
-      adminLevel: "supervisor",
-      isOwner: false,
-      isSupervisor: true,
-      permissions: fullPermissions(),
-    };
-  }
-
-  const permissions = { ...DEFAULT_GENERAL_PERMISSIONS };
-  const { data: rows } = await supabaseAdmin
-    .from("admin_permissions")
-    .select("permission_key, access")
-    .eq("user_id", userId);
-  for (const row of rows ?? []) {
-    const key = row.permission_key as PermissionKey;
-    if (PERMISSION_KEYS.includes(key)) {
-      permissions[key] = row.access as PermissionAccess;
-    }
-  }
-
-  return {
-    isAdmin: true,
-    adminLevel: "general",
-    isOwner: false,
-    isSupervisor: false,
-    permissions,
-  };
+  const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+  const view = await resolveActingTenantRole(userId, null, tenantId);
+  return view.adminAccess;
 }
 
 export async function requireAdminAccess(userId: string, email?: string): Promise<AdminAccess> {
@@ -229,9 +99,17 @@ export async function requireAdminAccess(userId: string, email?: string): Promis
 
 export const getMyAdminAccess = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const email = (context.claims as { email?: string }).email;
-    return resolveAdminAccess(context.userId, email);
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        tenantSlug: z.string().min(1).max(64).optional(),
+      })
+      .parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+    const view = await resolveActingTenantRole(context.userId, data.tenantSlug ?? null);
+    return view.adminAccess;
   });
 
 function classifySupabaseKey(value: string | undefined): string {
@@ -319,12 +197,14 @@ export const listAdmins = createServerFn({ method: "GET" })
     const access = await requireAdminAccess(context.userId, email);
     if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
 
+    const { resolveActingTenantRole, listTenantMemberUserIds } = await import(
+      "@/lib/tenant-role.server"
+    );
+    const view = await resolveActingTenantRole(context.userId);
+    if (!view.tenantId) return { admins: [], migrationRequired: false };
+
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: roleRows } = await supabaseAdmin
-      .from("user_roles")
-      .select("user_id")
-      .eq("role", "admin");
-    const ids = [...new Set((roleRows ?? []).map((r) => r.user_id))];
+    const ids = await listTenantMemberUserIds(view.tenantId, ["owner", "supervisor", "general"]);
 
     const { error: adminProfilesProbe } = await supabaseAdmin
       .from("admin_profiles")
@@ -524,58 +404,26 @@ export const setAdminPermissions = createServerFn({ method: "POST" })
 export const listUsersForAdminGrant = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await requireAdminAccess(context.userId, email);
-    if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
+    const { resolveActingTenantRole, listTenantMemberUserIds } = await import(
+      "@/lib/tenant-role.server"
+    );
+    const view = await resolveActingTenantRole(context.userId);
+    if (!view.isOwner && !view.isSupervisor) throw new Error("Forbidden");
+    if (!view.tenantId) return { users: [] as Array<{ id: string; full_name: string | null; email: string | null }> };
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const ids = new Set<string>();
-
-    const { data: invites } = await supabaseAdmin
-      .from("staff_invitations")
-      .select("used_by, email")
-      .eq("role", "admin");
-    for (const i of invites ?? []) {
-      if (i.used_by) ids.add(i.used_by as string);
-    }
-
-    const { data: roleRows } = await supabaseAdmin.from("user_roles").select("user_id").eq("role", "admin");
-    for (const r of roleRows ?? []) ids.add(r.user_id);
-
-    const { data: adminProfiles } = await supabaseAdmin.from("admin_profiles").select("user_id");
-    for (const p of adminProfiles ?? []) ids.add(p.user_id);
-
-    // Unused invite emails (e.g. test admin) — match existing profiles so they can be granted.
-    const unusedEmails = [...new Set(
-      (invites ?? [])
-        .filter((i) => !i.used_by && i.email)
-        .map((i) => (i.email as string).trim().toLowerCase()),
-    )];
-    if (unusedEmails.length > 0) {
-      const { data: byEmail } = await supabaseAdmin
-        .from("profiles")
-        .select("id, email")
-        .in("email", unusedEmails);
-      for (const p of byEmail ?? []) ids.add(p.id);
-    }
-
-    const { TEST_ACCOUNTS } = await import("@/lib/test-accounts");
-    const testAdminEmails = TEST_ACCOUNTS.filter((a) => a.role === "admin").map((a) => a.email);
-    if (testAdminEmails.length > 0) {
-      const { data: testProfiles } = await supabaseAdmin
-        .from("profiles")
-        .select("id, email")
-        .in("email", testAdminEmails);
-      for (const p of testProfiles ?? []) ids.add(p.id);
-    }
-
-    const idList = [...ids];
-    if (idList.length === 0) return [];
+    const ids = await listTenantMemberUserIds(view.tenantId, [
+      "owner",
+      "supervisor",
+      "general",
+      "adviser",
+    ]);
+    if (ids.length === 0) return [];
 
     const { data: profiles } = await supabaseAdmin
       .from("profiles")
       .select("id, full_name, email")
-      .in("id", idList)
+      .in("id", ids)
       .order("full_name", { ascending: true });
 
     return (profiles ?? []).filter((p) => !isOwnerEmail(p.email));

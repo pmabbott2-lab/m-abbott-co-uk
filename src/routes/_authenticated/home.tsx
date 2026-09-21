@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { listMySessions, createSession, getMyRole, listMyCases } from "@/lib/sessions.functions";
 import { claimReferral, listMyReferralActivity, ensureMyReferralLink, sendMyReferralLink, getPublicShareBaseUrl } from "@/lib/referrals.functions";
 import { getRafCode, clearRafCookie, rafLinkForCode, rafShareMessage } from "@/lib/referral";
-import { checkIsIntroducer } from "@/lib/introducer.functions";
+import { useTenantUi } from "@/lib/tenant-ui";
 import { clearPostAuthStart, resolvePostAuthStart } from "@/lib/post-auth-journey";
 import { StaffDashboardLoader } from "@/components/staff/StaffDashboard";
 import { AppShell } from "@/components/AppShell";
@@ -560,6 +560,7 @@ function CustomerRafSelfServeCard({
 export function Home() {
   const navigate = useTenantAwareNavigate();
   const qc = useQueryClient();
+  const tenantSlug = useTenantUi()?.slug;
   const roleFn = useServerFn(getMyRole);
   const sessionsFn = useServerFn(listMySessions);
   const casesFn = useServerFn(listMyCases);
@@ -567,26 +568,19 @@ export function Home() {
 
 
   const roleQ = useQuery({
-    queryKey: ["my-role"],
+    queryKey: ["my-role", tenantSlug ?? null],
     queryFn: async () => {
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("Account load timed out — please sign in again.")), 12000),
       );
-      return Promise.race([roleFn(), timeout]);
+      return Promise.race([roleFn({ data: { tenantSlug } }), timeout]);
     },
     retry: 1,
   });
   const isAdvisor = roleQ.data?.isAdvisor ?? false;
   const isMainAdmin = roleQ.data?.isMainAdmin ?? false;
-
-  const introducerFn = useServerFn(checkIsIntroducer);
-  const introducerQ = useQuery({
-    queryKey: ["is-introducer"],
-    queryFn: () => introducerFn(),
-    enabled: !roleQ.isLoading && !isAdvisor && !isMainAdmin,
-  });
   const isIntroducerOnly =
-    !isAdvisor && !isMainAdmin && (introducerQ.data?.isIntroducer ?? false);
+    !isAdvisor && !isMainAdmin && (roleQ.data?.isIntroducer ?? false);
 
   const sessionsQ = useQuery({
     queryKey: ["my-sessions"],
@@ -727,10 +721,6 @@ export function Home() {
 
   if (isAdvisor || isMainAdmin) {
     return <StaffDashboardLoader />;
-  }
-
-  if (introducerQ.isLoading) {
-    return <AppShell title="Home"><div className="py-16 text-center text-muted-foreground">Loading…</div></AppShell>;
   }
 
   if (isIntroducerOnly) {

@@ -5,9 +5,10 @@ import { useEffect } from "react";
 import { AppShell } from "@/components/AppShell";
 import { TabPageNav } from "@/components/TabPageNav";
 import { IntroducerPortalContent } from "@/components/introducer/IntroducerPortalContent";
-import { checkIsIntroducer } from "@/lib/introducer.functions";
+import { getMyRole } from "@/lib/sessions.functions";
 import { Button } from "@/components/ui/button";
 import { useTenantAwareNavigate } from "@/components/tenant/TenantAppLink";
+import { useTenantUi } from "@/lib/tenant-ui";
 
 export const Route = createFileRoute("/_authenticated/introducer")({
   component: IntroducerPortalPage,
@@ -16,8 +17,12 @@ export const Route = createFileRoute("/_authenticated/introducer")({
 /** Standalone /introducer URL — same inline UI as staff dashboard Introducers tab. */
 export function IntroducerPortalPage() {
   const navigate = useTenantAwareNavigate();
-  const roleFn = useServerFn(checkIsIntroducer);
-  const roleQ = useQuery({ queryKey: ["is-introducer"], queryFn: () => roleFn() });
+  const tenantSlug = useTenantUi()?.slug;
+  const roleFn = useServerFn(getMyRole);
+  const roleQ = useQuery({
+    queryKey: ["my-role", tenantSlug ?? null],
+    queryFn: () => roleFn({ data: { tenantSlug } }),
+  });
 
   useEffect(() => {
     if (roleQ.isSuccess && !roleQ.data?.isIntroducer) {
