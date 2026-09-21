@@ -65,6 +65,7 @@ export const RESERVED_TENANT_SLUGS = new Set([
   "settings",
   "workspace",
   "login",
+  "platform",
 ]);
 
 export function isReservedTenantSlug(slug: string): boolean {

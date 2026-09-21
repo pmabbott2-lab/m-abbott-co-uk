@@ -22,7 +22,7 @@ const OWNER = "5eef06a0-5292-44fd-bf01-4c934f8c8725";
 const RESERVED = new Set([
   "api", "auth", "register", "book", "go", "raf", "ref", "home", "diary", "cases",
   "booking", "introducer", "customers", "sessions", "interview", "chat", "text",
-  "assets", "tenant-branding", "companies", "settings", "workspace", "login",
+  "assets", "tenant-branding", "companies", "settings", "workspace", "login", "platform",
 ]);
 
 const failures = [];

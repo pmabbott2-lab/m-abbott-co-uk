@@ -11,11 +11,14 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as PlatformRouteRouteImport } from './routes/platform/route'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as TenantSlugRouteRouteImport } from './routes/$tenantSlug/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PlatformIndexRouteImport } from './routes/platform/index'
 import { Route as TenantSlugIndexRouteImport } from './routes/$tenantSlug/index'
 import { Route as RafCodeRouteImport } from './routes/raf.$code'
+import { Route as PlatformTenantsRouteImport } from './routes/platform/tenants'
 import { Route as GoSlugRouteImport } from './routes/go.$slug'
 import { Route as BookSlugRouteImport } from './routes/book.$slug'
 import { Route as AuthResetRouteImport } from './routes/auth/reset'
@@ -75,6 +78,11 @@ const AuthRoute = AuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlatformRouteRoute = PlatformRouteRouteImport.update({
+  id: '/platform',
+  path: '/platform',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
   id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
@@ -89,6 +97,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlatformIndexRoute = PlatformIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => PlatformRouteRoute,
+} as any)
 const TenantSlugIndexRoute = TenantSlugIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -98,6 +111,11 @@ const RafCodeRoute = RafCodeRouteImport.update({
   id: '/raf/$code',
   path: '/raf/$code',
   getParentRoute: () => rootRouteImport,
+} as any)
+const PlatformTenantsRoute = PlatformTenantsRouteImport.update({
+  id: '/tenants',
+  path: '/tenants',
+  getParentRoute: () => PlatformRouteRoute,
 } as any)
 const GoSlugRoute = GoSlugRouteImport.update({
   id: '/go/$slug',
@@ -361,6 +379,7 @@ const ApiTwilioVoiceAmdStatusRoute = ApiTwilioVoiceAmdStatusRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$tenantSlug': typeof TenantSlugRouteRouteWithChildren
+  '/platform': typeof PlatformRouteRouteWithChildren
   '/auth': typeof AuthRouteWithChildren
   '/register': typeof RegisterRoute
   '/$tenantSlug/booking': typeof TenantSlugBookingRoute
@@ -384,8 +403,10 @@ export interface FileRoutesByFullPath {
   '/auth/reset': typeof AuthResetRoute
   '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
+  '/platform/tenants': typeof PlatformTenantsRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug/': typeof TenantSlugIndexRoute
+  '/platform/': typeof PlatformIndexRoute
   '/$tenantSlug/book/$introducerSlug': typeof TenantSlugBookIntroducerSlugRoute
   '/$tenantSlug/chat/$sessionId': typeof TenantSlugChatSessionIdRoute
   '/$tenantSlug/customers/$customerId': typeof TenantSlugCustomersCustomerIdRoute
@@ -439,8 +460,10 @@ export interface FileRoutesByTo {
   '/auth/reset': typeof AuthResetRoute
   '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
+  '/platform/tenants': typeof PlatformTenantsRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug': typeof TenantSlugIndexRoute
+  '/platform': typeof PlatformIndexRoute
   '/$tenantSlug/book/$introducerSlug': typeof TenantSlugBookIntroducerSlugRoute
   '/$tenantSlug/chat/$sessionId': typeof TenantSlugChatSessionIdRoute
   '/$tenantSlug/customers/$customerId': typeof TenantSlugCustomersCustomerIdRoute
@@ -474,6 +497,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/$tenantSlug': typeof TenantSlugRouteRouteWithChildren
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/platform': typeof PlatformRouteRouteWithChildren
   '/auth': typeof AuthRouteWithChildren
   '/register': typeof RegisterRoute
   '/$tenantSlug/booking': typeof TenantSlugBookingRoute
@@ -497,8 +521,10 @@ export interface FileRoutesById {
   '/auth/reset': typeof AuthResetRoute
   '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
+  '/platform/tenants': typeof PlatformTenantsRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug/': typeof TenantSlugIndexRoute
+  '/platform/': typeof PlatformIndexRoute
   '/$tenantSlug/book/$introducerSlug': typeof TenantSlugBookIntroducerSlugRoute
   '/$tenantSlug/chat/$sessionId': typeof TenantSlugChatSessionIdRoute
   '/$tenantSlug/customers/$customerId': typeof TenantSlugCustomersCustomerIdRoute
@@ -532,6 +558,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/$tenantSlug'
+    | '/platform'
     | '/auth'
     | '/register'
     | '/$tenantSlug/booking'
@@ -555,8 +582,10 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/book/$slug'
     | '/go/$slug'
+    | '/platform/tenants'
     | '/raf/$code'
     | '/$tenantSlug/'
+    | '/platform/'
     | '/$tenantSlug/book/$introducerSlug'
     | '/$tenantSlug/chat/$sessionId'
     | '/$tenantSlug/customers/$customerId'
@@ -610,8 +639,10 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/book/$slug'
     | '/go/$slug'
+    | '/platform/tenants'
     | '/raf/$code'
     | '/$tenantSlug'
+    | '/platform'
     | '/$tenantSlug/book/$introducerSlug'
     | '/$tenantSlug/chat/$sessionId'
     | '/$tenantSlug/customers/$customerId'
@@ -644,6 +675,7 @@ export interface FileRouteTypes {
     | '/'
     | '/$tenantSlug'
     | '/_authenticated'
+    | '/platform'
     | '/auth'
     | '/register'
     | '/$tenantSlug/booking'
@@ -667,8 +699,10 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/book/$slug'
     | '/go/$slug'
+    | '/platform/tenants'
     | '/raf/$code'
     | '/$tenantSlug/'
+    | '/platform/'
     | '/$tenantSlug/book/$introducerSlug'
     | '/$tenantSlug/chat/$sessionId'
     | '/$tenantSlug/customers/$customerId'
@@ -702,6 +736,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   TenantSlugRouteRoute: typeof TenantSlugRouteRouteWithChildren
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  PlatformRouteRoute: typeof PlatformRouteRouteWithChildren
   AuthRoute: typeof AuthRouteWithChildren
   RegisterRoute: typeof RegisterRoute
   ApiAvatarTokenRoute: typeof ApiAvatarTokenRoute
@@ -743,6 +778,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/platform': {
+      id: '/platform'
+      path: '/platform'
+      fullPath: '/platform'
+      preLoaderRoute: typeof PlatformRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated': {
       id: '/_authenticated'
       path: ''
@@ -764,6 +806,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/platform/': {
+      id: '/platform/'
+      path: '/'
+      fullPath: '/platform/'
+      preLoaderRoute: typeof PlatformIndexRouteImport
+      parentRoute: typeof PlatformRouteRoute
+    }
     '/$tenantSlug/': {
       id: '/$tenantSlug/'
       path: '/'
@@ -777,6 +826,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/raf/$code'
       preLoaderRoute: typeof RafCodeRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/platform/tenants': {
+      id: '/platform/tenants'
+      path: '/tenants'
+      fullPath: '/platform/tenants'
+      preLoaderRoute: typeof PlatformTenantsRouteImport
+      parentRoute: typeof PlatformRouteRoute
     }
     '/go/$slug': {
       id: '/go/$slug'
@@ -1192,6 +1248,20 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
 const AuthenticatedRouteRouteWithChildren =
   AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
 
+interface PlatformRouteRouteChildren {
+  PlatformTenantsRoute: typeof PlatformTenantsRoute
+  PlatformIndexRoute: typeof PlatformIndexRoute
+}
+
+const PlatformRouteRouteChildren: PlatformRouteRouteChildren = {
+  PlatformTenantsRoute: PlatformTenantsRoute,
+  PlatformIndexRoute: PlatformIndexRoute,
+}
+
+const PlatformRouteRouteWithChildren = PlatformRouteRoute._addFileChildren(
+  PlatformRouteRouteChildren,
+)
+
 interface AuthRouteChildren {
   AuthResetRoute: typeof AuthResetRoute
 }
@@ -1206,6 +1276,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   TenantSlugRouteRoute: TenantSlugRouteRouteWithChildren,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  PlatformRouteRoute: PlatformRouteRouteWithChildren,
   AuthRoute: AuthRouteWithChildren,
   RegisterRoute: RegisterRoute,
   ApiAvatarTokenRoute: ApiAvatarTokenRoute,

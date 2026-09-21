@@ -1,0 +1,10 @@
+-- G7A last-Super-Owner protection cases (LOCAL / not applied).
+-- Mirrors prevent_last_super_owner_loss. Do not run against staging or production.
+--
+-- 1 Super Owner DELETE            → blocked (last_super_owner_protected)
+-- 1 Super Owner UPDATE role       → blocked
+-- 2 Super Owners DELETE one       → allowed
+-- Super Admin DELETE while SO exists → allowed
+-- TRUNCATE platform_roles         → blocked
+-- auth.users DELETE of last SO    → child CASCADE hits this DELETE trigger
+--   (cannot attach a trigger to auth.users; keep this trigger enabled)

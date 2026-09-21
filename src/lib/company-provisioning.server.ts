@@ -263,7 +263,24 @@ export const provisionCompany = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => provisionInputSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requirePlatformProvisioningAuthority(context.userId);
-    return provisionTenantInternal(data, { createdBy: context.userId });
+    const result = await provisionTenantInternal(data, { createdBy: context.userId });
+    try {
+      const { writePlatformAuditEvent } = await import("@/lib/platform-audit.server");
+      await writePlatformAuditEvent({
+        eventType: "TENANT_CREATED",
+        actingUserId: context.userId,
+        tenantId: result.tenantId,
+        metadata: {
+          companyCode: result.companyCode,
+          slug: result.slug,
+          tenantType: result.tenantType,
+          status: result.status,
+        },
+      });
+    } catch {
+      /* audit must not block provisioning */
+    }
+    return result;
   });
 
 export const canAccessPlatformCompanies = createServerFn({ method: "GET" })

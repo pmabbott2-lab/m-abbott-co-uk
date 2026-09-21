@@ -38,7 +38,7 @@ const STEPS = [
   "Create",
 ] as const;
 
-export function CreateCompanyWizard() {
+export function CreateCompanyWizard({ cancelTo = "/home" }: { cancelTo?: "/home" | "/platform" }) {
   const accessFn = useServerFn(canAccessPlatformCompanies);
   const listFn = useServerFn(listPlatformCompanies);
   const provisionFn = useServerFn(provisionCompany);
@@ -117,7 +117,7 @@ export function CreateCompanyWizard() {
           Tenant Owners cannot create companies.
         </p>
         <Button asChild variant="outline">
-          <Link to="/home">Back to workspace</Link>
+          <Link to={cancelTo}>{cancelTo === "/platform" ? "Back to platform" : "Back to workspace"}</Link>
         </Button>
       </div>
     );

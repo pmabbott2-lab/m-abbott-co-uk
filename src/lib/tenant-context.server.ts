@@ -177,7 +177,7 @@ export async function requireTenantMembership(userId: string, tenantId: string):
   }
 }
 
-/** Admin plane — uses G1A can_administer_tenant (owner/supervisor/platform grants). */
+/** Admin plane — G7A can_administer_tenant (owner/supervisor, SA admin grant, SO+GROUP). */
 export async function canAdministerTenant(userId: string, tenantId: string): Promise<boolean> {
   const { data, error } = await db.rpc("can_administer_tenant", {
     p_user_id: userId,
