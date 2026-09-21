@@ -774,20 +774,22 @@ const appointmentInput = z.object({
 });
 
 
-async function buildIntroducerBookUrl(introducer: { slug: string; tenant_id?: string | null }, leadId: string): Promise<string> {
-  const { buildCanonicalBookPath, buildTenantUrl } = await import("@/lib/tenant-url");
+async function buildIntroducerBookUrl(
+  introducer: { slug: string; tenant_id?: string | null },
+  leadId: string,
+): Promise<{ url: string; companyName: string }> {
+  const { buildCanonicalBookPath } = await import("@/lib/tenant-url");
   const { getAppBaseUrl } = await import("@/lib/sms.server");
-  let tenantSlug: string | null = null;
-  if (introducer.tenant_id) {
-    const { supabaseAdminUntyped: admin } = await import("@/integrations/supabase/client.server");
-    const { data: ten } = await admin.from("tenants").select("slug").eq("id", introducer.tenant_id).maybeSingle();
-    tenantSlug = ten?.slug ?? null;
+  const { resolveActiveTenantPublicNav } = await import("@/lib/tenant-presentation.impl.server");
+  const nav = await resolveActiveTenantPublicNav(introducer.tenant_id ?? null);
+  if (!nav) {
+    throw new Error("Cannot build booking link: introducer tenant is unknown.");
   }
-  if (!tenantSlug) {
-    // Legacy fallback path only when tenant unknown — keep flat link for 001-era resources
-    return `${getAppBaseUrl()}/book/${introducer.slug}?lead=${leadId}`;
-  }
-  return buildTenantUrl(tenantSlug, `/book/${introducer.slug}?lead=${encodeURIComponent(leadId)}`);
+  const origin = getAppBaseUrl().replace(/\/$/, "");
+  return {
+    url: `${origin}${buildCanonicalBookPath(nav.slug, introducer.slug, { lead: leadId })}`,
+    companyName: nav.displayName,
+  };
 }
 
 async function resolveIntroducer(slug?: string) {
@@ -985,15 +987,24 @@ async function sendBookingConfirmations(opts: {
   advisorName: string;
   sessionId?: string | null;
   appointmentId?: string;
+  tenantId?: string | null;
 }) {
+  const { resolveActiveTenantPublicNav } = await import("@/lib/tenant-presentation.impl.server");
+  const { buildTenantUrl } = await import("@/lib/tenant-url");
+  const nav = await resolveActiveTenantPublicNav(opts.tenantId ?? null);
+  if (!nav) {
+    console.error("booking confirmation skipped: tenant slug unresolved");
+    return;
+  }
   const setupUrl = opts.sessionId
-    ? `${getAppBaseUrl()}/sessions/${opts.sessionId}`
-    : `${getAppBaseUrl()}/home`;
+    ? buildTenantUrl(nav.slug, `/sessions/${opts.sessionId}`, getAppBaseUrl())
+    : buildTenantUrl(nav.slug, "/home", getAppBaseUrl());
   const message = await bookingConfirmationMessage({
     customerName: opts.customerName,
     startsAt: opts.startsAt,
     advisorName: opts.advisorName,
     bookingUrl: setupUrl,
+    companyName: nav.displayName,
   });
 
   if (isTwilioConfigured()) {
@@ -1269,6 +1280,7 @@ async function bookAppointment(
         advisorName,
         sessionId: sessionForAlloc,
         appointmentId: appointment.id,
+        tenantId,
       });
     } catch (e) {
       console.error("booking confirmation failed:", e);
@@ -3301,7 +3313,7 @@ export const sendLeadBookingSms = createServerFn({ method: "POST" })
 
     const { data: introducer, error: introErr } = await introClient
       .from("introducers")
-      .select("id, company_name, slug")
+      .select("id, company_name, slug, tenant_id")
       .eq("user_id", targetUserId)
       .single();
     if (introErr) throw new Error(introErr.message);
@@ -3315,11 +3327,12 @@ export const sendLeadBookingSms = createServerFn({ method: "POST" })
     if (leadErr) throw new Error(leadErr.message);
     if (!lead.customer_phone) throw new Error("Lead has no phone number.");
 
-    const bookUrl = await buildIntroducerBookUrl(introducer, lead.id);
+    const { url: bookUrl, companyName } = await buildIntroducerBookUrl(introducer, lead.id);
     const body = await textChannelInviteMessage({
       customerName: lead.customer_name,
       bookUrl,
       introducerName: introducer.company_name,
+      companyName,
     });
 
     const { sid } = await sendSms({ to: lead.customer_phone, body });
@@ -3464,7 +3477,7 @@ export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
     const introducerId = await ensureStaffIntroducerRecord(context.userId);
     const { data: introducer, error: introErr } = await supabaseAdmin
       .from("introducers")
-      .select("slug, company_name")
+      .select("slug, company_name, tenant_id")
       .eq("id", introducerId)
       .single();
     if (introErr) throw new Error(introErr.message);
@@ -3485,11 +3498,12 @@ export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
       .single();
     if (leadErr) throw new Error(leadErr.message);
 
-    const bookUrl = await buildIntroducerBookUrl(introducer, lead.id);
+    const { url: bookUrl, companyName } = await buildIntroducerBookUrl(introducer, lead.id);
     const body = await textChannelInviteMessage({
       customerName: data.customerName,
       bookUrl,
       introducerName: introducer.company_name ?? "Your advisor",
+      companyName,
     });
 
     let smsSent = false;
@@ -3678,7 +3692,7 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
     const db = viewAsMode ? supabaseAdmin : context.supabase;
     const { data: introducer, error: introErr } = await db
       .from("introducers")
-      .select("slug, company_name, active")
+      .select("slug, company_name, active, tenant_id")
       .eq("id", introducerId)
       .single();
     if (introErr) throw new Error(introErr.message);
@@ -3702,11 +3716,12 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
       .single();
     if (leadErr) throw new Error(leadErr.message);
 
-    const bookUrl = await buildIntroducerBookUrl(introducer, lead.id);
+    const { url: bookUrl, companyName } = await buildIntroducerBookUrl(introducer, lead.id);
     const body = await textChannelInviteMessage({
       customerName: data.customerName,
       bookUrl,
       introducerName: introducer.company_name ?? "Your introducer",
+      companyName,
     });
 
     let smsSent = false;
@@ -3836,6 +3851,7 @@ export const rescheduleAppointment = createServerFn({ method: "POST" })
           advisorName,
           sessionId: appt.session_id,
           appointmentId: appt.id,
+          tenantId: (appt as { tenant_id?: string | null }).tenant_id,
         });
       } catch (e) {
         console.error("reschedule confirmation failed", e);

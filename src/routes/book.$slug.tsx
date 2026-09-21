@@ -18,6 +18,7 @@ import { resolveReferralSlug } from "@/lib/introducer.functions";
 import { setReferralCookie } from "@/lib/referral";
 import { CalendarCheck, CheckCircle2 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
+import { buildAuthNavigateSearch } from "@/lib/post-auth-journey";
 
 type BookSearch = {
   lead?: string;
@@ -153,6 +154,9 @@ function DirectBookingPage() {
   }
 
   const introducer = introducerQ.data;
+  const authSearch = buildAuthNavigateSearch({
+    tenantSlug: (introducer as { tenantSlug?: string | null } | undefined)?.tenantSlug,
+  });
 
   if (booked) {
     return (
@@ -164,7 +168,7 @@ function DirectBookingPage() {
             You&apos;ll receive a text confirmation if SMS is enabled. Your advisor will call you at the
             scheduled time.
           </p>
-          <Link to="/auth">
+          <Link to="/auth" search={authSearch}>
             <Button>Done</Button>
           </Link>
         </div>
@@ -179,7 +183,7 @@ function DirectBookingPage() {
           <CalendarCheck className="w-5 h-5" />
           Book an appointment
         </div>
-        <Link to="/auth" className="text-sm text-muted-foreground hover:text-foreground">
+        <Link to="/auth" search={authSearch} className="text-sm text-muted-foreground hover:text-foreground">
           Sign in
         </Link>
       </header>

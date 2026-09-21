@@ -132,10 +132,12 @@ export function IntroducerPortalContent({
     );
   }
 
-  const profile = profileQ.data;
-  const referralUrl = referralLinkForSlug(profile.slug);
-  const journeyWebUrl = marketingJourneyLinkForSlug(profile.slug);
-  const calculatorWebUrl = marketingCalculatorLinkForSlug(profile.slug);
+  const profile = profileQ.data as typeof profileQ.data & { tenantSlug?: string | null };
+  const tenantSlug = profile.tenantSlug ?? null;
+  const referralUrl = referralLinkForSlug(profile.slug, tenantSlug);
+  const journeyWebUrl = marketingJourneyLinkForSlug(profile.slug, tenantSlug);
+  const calculatorWebUrl = marketingCalculatorLinkForSlug(profile.slug, tenantSlug);
+  const bookUrl = bookingLinkForSlug(profile.slug, tenantSlug);
   const companyCode = (profile as { company_code?: string | null }).company_code ?? null;
   const referrals = referralsQ.data?.referrals ?? [];
   const referralQuery = referralSearch.trim().toLowerCase();
@@ -182,23 +184,32 @@ export function IntroducerPortalContent({
           Your shareable link
         </div>
         <p className="text-sm text-muted-foreground">
-          Direct customers to Mortgage Hub to self-serve (voice, chat, or book). Attribution is
+          Direct customers to your firm on Mortgage Hub (voice, chat, or book). Attribution is
           recorded via your referral cookie.
         </p>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Input readOnly value={referralUrl} className="font-mono text-sm" />
-          <CopyLinkButton url={referralUrl} label="Copy hub link" />
-        </div>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Input readOnly value={bookingLinkForSlug(profile.slug)} className="font-mono text-sm" />
-          <CopyLinkButton url={bookingLinkForSlug(profile.slug)} label="Copy book link" />
-        </div>
+        {referralUrl && bookUrl ? (
+          <>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input readOnly value={referralUrl} className="font-mono text-sm" />
+              <CopyLinkButton url={referralUrl} label="Copy hub link" />
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input readOnly value={bookUrl} className="font-mono text-sm" />
+              <CopyLinkButton url={bookUrl} label="Copy book link" />
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Shareable links are unavailable until your firm assignment is confirmed.
+          </p>
+        )}
       </section>
 
+      {journeyWebUrl && calculatorWebUrl ? (
       <section className="rounded-2xl border bg-card p-6 space-y-4">
         <div className="flex items-center gap-2 font-medium">
           <Link2 className="w-4 h-4" />
-          MortgageEasy website links
+          Website links
         </div>
         <p className="text-sm text-muted-foreground">
           Share these on your website, email, or socials. The <code className="text-xs">ref</code>{" "}
@@ -224,6 +235,7 @@ export function IntroducerPortalContent({
           </div>
         </div>
       </section>
+      ) : null}
 
       <section className="rounded-2xl border bg-card p-6 space-y-4">
         <h3 className="font-medium">Your details</h3>
@@ -344,9 +356,13 @@ export function IntroducerPortalContent({
                       </dd>
                     </dl>
                   </div>
-                  {r.leadId && r.journeyStage === "Not started" && (
+                  {r.leadId && r.journeyStage === "Not started" && tenantSlug && (
                     <div className="flex flex-wrap gap-2 shrink-0">
-                      <Link to="/book/$slug" params={{ slug: profile.slug }} search={{ lead: r.leadId }}>
+                      <Link
+                        to="/$tenantSlug/book/$introducerSlug"
+                        params={{ tenantSlug, introducerSlug: profile.slug }}
+                        search={{ lead: r.leadId }}
+                      >
                         <Button size="sm" variant="secondary">
                           <Calendar className="w-3.5 h-3.5 mr-1.5" />
                           Book

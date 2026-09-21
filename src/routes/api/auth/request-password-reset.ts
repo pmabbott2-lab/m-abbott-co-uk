@@ -19,7 +19,7 @@ export const Route = createFileRoute("/api/auth/request-password-reset")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        let body: { email?: string };
+        let body: { email?: string; tenant?: string };
         try {
           body = await request.json();
         } catch {
@@ -41,7 +41,7 @@ export const Route = createFileRoute("/api/auth/request-password-reset")({
           );
         }
 
-        const redirectTo = getServerPasswordResetUrl(request);
+        const redirectTo = getServerPasswordResetUrl(request, body.tenant);
 
         // Localhost: return a direct Supabase recovery link (no email delivery required).
         if (isLocalRedirectTarget(redirectTo)) {

@@ -1,4 +1,11 @@
 import { getPublicAppUrl } from "@/lib/app-url";
+import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
+import {
+  buildTenantPath,
+  tryBuildCanonicalBookUrl,
+  tryBuildCanonicalRafUrl,
+  tryBuildCanonicalRefUrl,
+} from "@/lib/tenant-url";
 
 const REFERRAL_COOKIE = "introducer_ref";
 const REFERRAL_MAX_AGE_DAYS = 30;
@@ -25,40 +32,75 @@ export function clearReferralCookie() {
   document.cookie = `${REFERRAL_COOKIE}=; path=/; max-age=0`;
 }
 
-export function referralLinkForSlug(slug: string, origin?: string) {
-  const base = origin ?? (typeof window !== "undefined" ? window.location.origin : "");
-  return `${base}/go/${slug}`;
+function publicOrigin(origin?: string): string {
+  return (origin ?? (typeof window !== "undefined" ? window.location.origin : getPublicAppUrl())).replace(
+    /\/$/,
+    "",
+  );
 }
 
-/** Marketing site base (MortgageEasy). Prefer same-origin `/mortgageeasy/` so remote Hub never opens localhost. */
-export function getMarketingSiteUrl(): string {
-  if (typeof window !== "undefined") {
-    const { hostname, origin } = window.location;
-    if (hostname !== "localhost" && hostname !== "127.0.0.1") {
-      return `${origin}/mortgageeasy/`;
-    }
+/**
+ * Shareable introducer hub link. Requires the introducer's real tenant slug
+ * (from introducer.tenant_id → tenants.slug). Empty when tenant is unknown —
+ * never /go, never /home, never a hardcoded 001 URL.
+ */
+export function referralLinkForSlug(
+  introducerSlug: string,
+  tenantSlug?: string | null,
+  origin?: string,
+): string {
+  return tryBuildCanonicalRefUrl(tenantSlug, introducerSlug, publicOrigin(origin));
+}
+
+/**
+ * Marketing / calculator base for a known tenant. Empty when slug missing —
+ * never defaults to mortgageeasy.
+ */
+export function getMarketingSiteUrl(tenantSlug?: string | null, origin?: string): string {
+  const slug = normalisePublicTenantSlug(tenantSlug);
+  if (!slug) return "";
+  try {
+    const path = buildTenantPath(slug, "/");
+    return `${publicOrigin(origin)}${path}`;
+  } catch {
+    return "";
   }
-  const configured = import.meta.env.VITE_MOCKUP_SITE_URL?.trim().replace(/\/$/, "");
-  if (configured) return configured;
-  return "http://127.0.0.1:8081";
 }
 
-/** Partner link to MortgageEasy home — three ways to start (voice, chat, book). */
-export function marketingJourneyLinkForSlug(slug: string, origin?: string) {
-  const base = (origin ?? getMarketingSiteUrl()).replace(/\/$/, "");
-  return `${base}/?ref=${encodeURIComponent(slug)}#your-journey`;
+/** Partner link to the tenant landing — three ways to start (voice, chat, book). */
+export function marketingJourneyLinkForSlug(
+  introducerSlug: string,
+  tenantSlug?: string | null,
+  origin?: string,
+): string {
+  const base = getMarketingSiteUrl(tenantSlug, origin).replace(/\/$/, "");
+  if (!base || !introducerSlug) return "";
+  return `${base}/?ref=${encodeURIComponent(introducerSlug)}#your-journey`;
 }
 
-/** Partner link to MortgageEasy mortgage calculator with attribution. */
-export function marketingCalculatorLinkForSlug(slug: string, origin?: string) {
-  const base = (origin ?? getMarketingSiteUrl()).replace(/\/$/, "");
-  return `${base}/calculator.html?ref=${encodeURIComponent(slug)}`;
+/** Partner link to the tenant calculator path with attribution. */
+export function marketingCalculatorLinkForSlug(
+  introducerSlug: string,
+  tenantSlug?: string | null,
+  origin?: string,
+): string {
+  const slug = normalisePublicTenantSlug(tenantSlug);
+  if (!slug || !introducerSlug) return "";
+  try {
+    const path = buildTenantPath(slug, "/calculator.html");
+    return `${publicOrigin(origin)}${path}?ref=${encodeURIComponent(introducerSlug)}`;
+  } catch {
+    return "";
+  }
 }
 
-export function bookingLinkForSlug(slug: string, origin?: string, leadId?: string) {
-  const base = origin ?? (typeof window !== "undefined" ? window.location.origin : "");
-  const url = `${base}/book/${slug}`;
-  return leadId ? `${url}?lead=${leadId}` : url;
+export function bookingLinkForSlug(
+  introducerSlug: string,
+  tenantSlug?: string | null,
+  origin?: string,
+  leadId?: string,
+): string {
+  return tryBuildCanonicalBookUrl(tenantSlug, introducerSlug, publicOrigin(origin), leadId);
 }
 
 // ---------------------------------------------------------------------------
@@ -95,9 +137,12 @@ export function clearRafCookie() {
   document.cookie = `${RAF_COOKIE}=; path=/; max-age=0`;
 }
 
-export function rafLinkForCode(code: string, origin?: string) {
-  const base = (origin ?? getPublicAppUrl()).replace(/\/$/, "");
-  return `${base}/raf/${code}`;
+export function rafLinkForCode(
+  code: string,
+  tenantSlug?: string | null,
+  origin?: string,
+): string {
+  return tryBuildCanonicalRafUrl(tenantSlug, code, publicOrigin(origin));
 }
 
 /** Short OG / meta description for a RAF landing page. */
@@ -109,8 +154,14 @@ export function rafShareDescription(referrerName: string | null): string {
 }
 
 /** Full shareable message (SMS, email, WhatsApp) including who recommended and the link. */
-export function rafShareMessage(referrerName: string | null, code: string, origin?: string): string {
-  const url = rafLinkForCode(code, origin);
+export function rafShareMessage(
+  referrerName: string | null,
+  code: string,
+  tenantSlug?: string | null,
+  origin?: string,
+): string {
+  const url = rafLinkForCode(code, tenantSlug, origin);
+  if (!url) return "";
   const who = referrerName?.trim()
     ? `${referrerName.trim()} has recommended Mortgage Hub`
     : "A friend has recommended Mortgage Hub";

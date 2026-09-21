@@ -715,6 +715,7 @@ export type CustomerHubIntroducer = {
   companyName: string | null;
   companyCode: string | null;
   slug: string | null;
+  tenantSlug: string | null;
 } | null;
 
 export const getCustomerHub = createServerFn({ method: "POST" })
@@ -793,15 +794,27 @@ export const getCustomerHub = createServerFn({ method: "POST" })
     if (resolvedId) {
       const { data: intro } = await supabaseAdmin
         .from("introducers")
-        .select("id, company_name, company_code, slug")
+        .select("id, company_name, company_code, slug, tenant_id")
         .eq("id", resolvedId)
         .maybeSingle();
       if (intro) {
+        let tenantSlug: string | null = null;
+        const tenantId = (intro as { tenant_id?: string | null }).tenant_id;
+        if (tenantId) {
+          const { data: ten } = await supabaseAdmin
+            .from("tenants")
+            .select("slug, status")
+            .eq("id", tenantId)
+            .eq("status", "active")
+            .maybeSingle();
+          tenantSlug = ten?.slug ?? null;
+        }
         introducer = {
           id: intro.id,
           companyName: intro.company_name,
           companyCode: (intro as { company_code?: string | null }).company_code ?? null,
           slug: intro.slug,
+          tenantSlug,
         };
       }
     }

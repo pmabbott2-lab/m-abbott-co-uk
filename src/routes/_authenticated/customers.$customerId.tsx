@@ -152,7 +152,9 @@ export function CustomerHubPage() {
               {introducer.slug && (
                 <div className="sm:col-span-2">
                   <dt className="text-xs text-muted-foreground">Referral link</dt>
-                  <dd className="text-xs font-mono break-all">{referralLinkForSlug(introducer.slug)}</dd>
+                  <dd className="text-xs font-mono break-all">
+                    {referralLinkForSlug(introducer.slug, introducer.tenantSlug)}
+                  </dd>
                 </div>
               )}
             </dl>

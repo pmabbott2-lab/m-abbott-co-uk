@@ -50,6 +50,35 @@ function isMissingTableError(error: { code?: string; message?: string } | null):
   );
 }
 
+async function slugMapForTenantIds(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: { from: (table: string) => any },
+  tenantIds: Array<string | null | undefined>,
+): Promise<Map<string, string>> {
+  const ids = [...new Set(tenantIds.filter((id): id is string => Boolean(id)))];
+  const map = new Map<string, string>();
+  if (ids.length === 0) return map;
+  const { data } = await admin
+    .from("tenants")
+    .select("id, slug, status")
+    .in("id", ids)
+    .eq("status", "active");
+  for (const row of (data ?? []) as Array<{ id: string; slug: string | null }>) {
+    const slug = normalisePublicTenantSlug(row.slug);
+    if (slug) map.set(row.id, slug);
+  }
+  return map;
+}
+
+async function tenantSlugFromReferralRow(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: { from: (table: string) => any },
+  tenantId: string | null | undefined,
+): Promise<string | null> {
+  const map = await slugMapForTenantIds(admin, [tenantId]);
+  return tenantId ? map.get(tenantId) ?? null : null;
+}
+
 async function getRolesForUser(userId: string): Promise<string[]> {
   const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
@@ -312,6 +341,7 @@ export const createReferralLink = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const email = (context.claims as { email?: string }).email;
     await requireRafAmend(context.userId, email);
+    const actingUserId = context!.userId;
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
@@ -332,17 +362,27 @@ export const createReferralLink = createServerFn({ method: "POST" })
       if (!referrerPhone) referrerPhone = profile?.phone ?? null;
     }
 
+    const { resolveSoleMembershipTenant, withForcedTenantId } = await import(
+      "@/lib/tenant-assert.server"
+    );
+    const authorised = await resolveSoleMembershipTenant(actingUserId);
+
     const code = await generateUniqueReferralCode();
     const { data: created, error } = await supabaseAdmin
       .from("referral_codes")
-      .insert({
-        code,
-        referrer_user_id: data.referrerUserId ?? null,
-        referrer_name: referrerName,
-        referrer_phone: referrerPhone,
-        created_by: context.userId,
-      })
-      .select("id, code, referrer_user_id, referrer_name, referrer_phone, active, created_at")
+      .insert(
+        withForcedTenantId(
+          {
+            code,
+            referrer_user_id: data.referrerUserId ?? null,
+            referrer_name: referrerName,
+            referrer_phone: referrerPhone,
+            created_by: context.userId,
+          },
+          authorised.tenant.id,
+        ),
+      )
+      .select("id, code, referrer_user_id, referrer_name, referrer_phone, active, created_at, tenant_id")
       .single();
     if (error) {
       if (isMissingTableError(error)) {
@@ -350,7 +390,7 @@ export const createReferralLink = createServerFn({ method: "POST" })
       }
       throw new Error(error.message);
     }
-    return created;
+    return { ...created, tenantSlug: authorised.tenant.slug };
   });
 
 // ---------------------------------------------------------------------------
@@ -375,7 +415,7 @@ export const textReferralLink = createServerFn({ method: "POST" })
 
     const { data: link, error } = await supabaseAdmin
       .from("referral_codes")
-      .select("id, code, referrer_name, referrer_phone")
+      .select("id, code, referrer_name, referrer_phone, tenant_id")
       .eq("id", data.id)
       .single();
     if (error) {
@@ -386,7 +426,15 @@ export const textReferralLink = createServerFn({ method: "POST" })
       throw new Error("This referrer has no phone number. Add one or copy the link instead.");
     }
 
-    const url = `${getAppBaseUrl()}/raf/${link.code}`;
+    const tenantSlug = await tenantSlugFromReferralRow(
+      supabaseAdmin,
+      (link as { tenant_id?: string | null }).tenant_id,
+    );
+    if (!tenantSlug) {
+      throw new Error("Cannot send this referral link because the firm is not available.");
+    }
+    const { buildCanonicalRafPath } = await import("@/lib/tenant-url");
+    const url = `${getAppBaseUrl().replace(/\/$/, "")}${buildCanonicalRafPath(tenantSlug, link.code)}`;
     const name = link.referrer_name ? `${link.referrer_name}, ` : "";
     const body = `Hi ${name}thanks for recommending Mortgage Hub! Share your personal link with friends: ${url}`;
 
@@ -432,7 +480,7 @@ export const textRafInviteToFriend = createServerFn({ method: "POST" })
 
     const { data: link, error } = await supabaseAdmin
       .from("referral_codes")
-      .select("id, code, referrer_name")
+      .select("id, code, referrer_name, tenant_id")
       .eq("id", data.id)
       .single();
     if (error) {
@@ -440,7 +488,17 @@ export const textRafInviteToFriend = createServerFn({ method: "POST" })
       throw new Error(error.message);
     }
 
-    const body = rafShareMessage(link.referrer_name, link.code, getAppBaseUrl());
+    const tenantSlug = await tenantSlugFromReferralRow(
+      supabaseAdmin,
+      (link as { tenant_id?: string | null }).tenant_id,
+    );
+    if (!tenantSlug) {
+      throw new Error("Cannot send this referral link because the firm is not available.");
+    }
+    const body = rafShareMessage(link.referrer_name, link.code, tenantSlug, getAppBaseUrl());
+    if (!body) {
+      throw new Error("Cannot send this referral link because the firm is not available.");
+    }
     const { sid } = await sendSms({ to: data.friendPhone, body });
 
     try {
@@ -472,7 +530,7 @@ export const listReferralLinks = createServerFn({ method: "GET" })
 
     const { data: links, error } = await supabaseAdmin
       .from("referral_codes")
-      .select("id, code, referrer_user_id, referrer_name, referrer_phone, active, created_at")
+      .select("id, code, referrer_user_id, referrer_name, referrer_phone, active, created_at, tenant_id")
       .order("created_at", { ascending: false });
     if (error) {
       if (isMissingTableError(error)) return [];
@@ -487,7 +545,18 @@ export const listReferralLinks = createServerFn({ method: "GET" })
       if (r.code) counts.set(r.code, (counts.get(r.code) ?? 0) + 1);
     }
 
-    return (links ?? []).map((l) => ({ ...l, referralCount: counts.get(l.code) ?? 0 }));
+    const slugByTenant = await slugMapForTenantIds(
+      supabaseAdmin,
+      (links ?? []).map((l: { tenant_id?: string | null }) => l.tenant_id),
+    );
+
+    return (links ?? []).map((l: { tenant_id?: string | null; code: string }) => ({
+      ...l,
+      referralCount: counts.get(l.code) ?? 0,
+      tenantSlug: (l as { tenant_id?: string | null }).tenant_id
+        ? slugByTenant.get((l as { tenant_id: string }).tenant_id) ?? null
+        : null,
+    }));
   });
 
 // ---------------------------------------------------------------------------
@@ -656,7 +725,7 @@ export const listMyReferralActivity = createServerFn({ method: "GET" })
     );
     const { data: codes, error: codeErr } = await supabaseAdmin
       .from("referral_codes")
-      .select("id, code, active, created_at")
+      .select("id, code, active, created_at, tenant_id")
       .eq("referrer_user_id", context.userId)
       .order("created_at", { ascending: false });
     if (codeErr) {
@@ -692,8 +761,18 @@ export const listMyReferralActivity = createServerFn({ method: "GET" })
       }));
     }
 
+    const slugByTenant = await slugMapForTenantIds(
+      supabaseAdmin,
+      (codes ?? []).map((c: { tenant_id?: string | null }) => c.tenant_id),
+    );
+
     return {
-      codes: codes ?? [],
+      codes: (codes ?? []).map((c: { tenant_id?: string | null; id: string; code: string; active: boolean; created_at: string }) => ({
+        ...c,
+        tenantSlug: (c as { tenant_id?: string | null }).tenant_id
+          ? slugByTenant.get((c as { tenant_id: string }).tenant_id) ?? null
+          : null,
+      })),
       referrals,
       migrationRequired: false,
     };
@@ -705,39 +784,51 @@ export const ensureMyReferralLink = createServerFn({ method: "POST" })
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
+    const { resolveSoleMembershipTenant, withForcedTenantId } = await import(
+      "@/lib/tenant-assert.server"
+    );
+    const actingUserId = context!.userId;
+    const authorised = await resolveSoleMembershipTenant(actingUserId);
+
     const { data: existing } = await supabaseAdmin
       .from("referral_codes")
       .select("id, code")
-      .eq("referrer_user_id", context.userId)
+      .eq("referrer_user_id", actingUserId)
+      .eq("tenant_id", authorised.tenant.id)
       .eq("active", true)
       .limit(1)
       .maybeSingle();
-    if (existing) return { code: existing.code };
+    if (existing) return { code: existing.code, tenantSlug: authorised.tenant.slug };
 
     const { data: profile } = await supabaseAdmin
       .from("profiles")
       .select("full_name, phone")
-      .eq("id", context.userId)
+      .eq("id", actingUserId)
       .maybeSingle();
 
     const code = await generateUniqueReferralCode();
     const { data: inserted, error } = await supabaseAdmin
       .from("referral_codes")
-      .insert({
-        code,
-        referrer_user_id: context.userId,
-        referrer_name: profile?.full_name ?? null,
-        referrer_phone: profile?.phone ?? null,
-        active: true,
-        created_by: context.userId,
-      })
+      .insert(
+        withForcedTenantId(
+          {
+            code,
+            referrer_user_id: actingUserId,
+            referrer_name: profile?.full_name ?? null,
+            referrer_phone: profile?.phone ?? null,
+            active: true,
+            created_by: actingUserId,
+          },
+          authorised.tenant.id,
+        ),
+      )
       .select("code")
       .single();
     if (error) {
       if (isMissingTableError(error)) throw new Error("Run the Refer-a-friend migration first.");
       throw new Error(error.message);
     }
-    return { code: inserted.code };
+    return { code: inserted.code, tenantSlug: authorised.tenant.slug };
   });
 
 /** Customer self-serve: text or email their own referral link. */
@@ -803,9 +894,12 @@ export const sendMyReferralLink = createServerFn({ method: "POST" })
       .maybeSingle();
 
     const baseUrl = getAppBaseUrl();
-    const { buildTenantUrl } = await import("@/lib/tenant-url");
-    const link = buildTenantUrl(authorised.tenant.slug, `/raf/${code}`, baseUrl);
-    const message = rafShareMessage(profile?.full_name ?? null, code, baseUrl);
+    const { buildCanonicalRafPath } = await import("@/lib/tenant-url");
+    const link = `${baseUrl.replace(/\/$/, "")}${buildCanonicalRafPath(authorised.tenant.slug, code)}`;
+    const message = rafShareMessage(profile?.full_name ?? null, code, authorised.tenant.slug, baseUrl);
+    if (!message) {
+      throw new Error("Cannot send this referral link because the firm is not available.");
+    }
 
     if (data.channel === "sms") {
       if (!profile?.phone) throw new Error("Add your mobile number to your profile first.");

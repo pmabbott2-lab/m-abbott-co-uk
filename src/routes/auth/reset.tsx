@@ -7,6 +7,8 @@ import {
   isPasswordRecoveryUrl,
   markPasswordRecoveryPending,
 } from "@/lib/auth-recovery";
+import { buildAuthNavigateSearch, buildHomePathAfterAuth } from "@/lib/post-auth-journey";
+import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +19,7 @@ import avatarImg from "@/assets/susan.png";
 export const Route = createFileRoute("/auth/reset")({
   validateSearch: (search: Record<string, unknown>) => ({
     recovery: search.recovery === "1" || search.recovery === 1,
+    tenant: normalisePublicTenantSlug(typeof search.tenant === "string" ? search.tenant : null) ?? undefined,
   }),
   head: () => ({
     meta: [
@@ -28,6 +31,9 @@ export const Route = createFileRoute("/auth/reset")({
 });
 
 function ResetPasswordPage() {
+  const { tenant: tenantFromSearch } = Route.useSearch();
+  const tenantSlug = tenantFromSearch ?? null;
+  const authSearch = buildAuthNavigateSearch({ tenantSlug });
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -85,9 +91,9 @@ function ResetPasswordPage() {
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
       clearPasswordRecoveryPending();
-      window.history.replaceState({}, "", "/auth");
+      window.history.replaceState({}, "", tenantSlug ? `/auth?tenant=${encodeURIComponent(tenantSlug)}` : "/auth");
       toast.success("Password updated");
-      window.location.href = "/home";
+      window.location.href = buildHomePathAfterAuth(null, tenantSlug);
     } catch (err) {
       setStatus({
         type: "error",
@@ -121,7 +127,7 @@ function ResetPasswordPage() {
               {status.text}
               {status.type === "error" && (
                 <div className="mt-2">
-                  <Link to="/auth" className="underline font-medium">
+                  <Link to="/auth" search={authSearch} className="underline font-medium">
                     Back to sign in
                   </Link>
                 </div>
@@ -165,7 +171,7 @@ function ResetPasswordPage() {
           )}
         </div>
         <p className="text-xs text-center text-muted-foreground">
-          <Link to="/auth" className="hover:underline">← Back to sign in</Link>
+          <Link to="/auth" search={authSearch} className="hover:underline">← Back to sign in</Link>
         </p>
       </div>
     </div>

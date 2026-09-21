@@ -1,4 +1,5 @@
 import { getPasswordResetUrl } from "./app-url";
+import { readTenantSlugFromLocation } from "./post-auth-journey";
 
 export const PASSWORD_RECOVERY_KEY = "factfind_password_recovery_pending";
 
@@ -34,8 +35,8 @@ export function clearPasswordRecoveryPending(): void {
   sessionStorage.removeItem(PASSWORD_RECOVERY_KEY);
 }
 
-export function getAuthRedirectUrl(): string {
-  return getPasswordResetUrl();
+export function getAuthRedirectUrl(tenantSlug?: string | null): string {
+  return getPasswordResetUrl(tenantSlug ?? readTenantSlugFromLocation());
 }
 
 /** Full-page redirect that keeps Supabase hash tokens (router navigation strips them). */
@@ -43,7 +44,8 @@ export function goToPasswordRecoveryPage(): void {
   if (typeof window === "undefined") return;
   markPasswordRecoveryPending();
   const hash = window.location.hash || "";
-  const target = `${getPasswordResetUrl()}${hash}`;
+  const tenant = readTenantSlugFromLocation();
+  const target = `${getPasswordResetUrl(tenant)}${hash}`;
   if (window.location.href !== target) {
     window.location.replace(target);
   }

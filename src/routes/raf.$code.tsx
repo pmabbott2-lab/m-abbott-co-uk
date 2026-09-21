@@ -9,18 +9,22 @@ import { Gift, CalendarCheck, MessageSquare, Mic, ShieldCheck } from "lucide-rea
 import avatarImg from "@/assets/susan.png";
 import { useTenantUi } from "@/lib/tenant-ui";
 import { buildAuthNavigateSearch } from "@/lib/post-auth-journey";
+import { tryBuildCanonicalRafUrl } from "@/lib/tenant-url";
 
-function rafShareUrl(code: string): string {
+function rafShareUrl(code: string, tenantSlug?: string | null): string {
   const base =
     (typeof process !== "undefined" && (process.env.APP_BASE_URL || process.env.VITE_APP_URL)) ||
     (typeof window !== "undefined" ? window.location.origin : "http://localhost:8080");
-  return `${String(base).replace(/\/$/, "")}/raf/${code}`;
+  const origin = String(base).replace(/\/$/, "");
+  const canonical = tryBuildCanonicalRafUrl(tenantSlug, code, origin);
+  if (canonical) return canonical;
+  return `${origin}/raf/${code}`;
 }
 
 export const Route = createFileRoute("/raf/$code")({
   loader: async ({ params }) => {
     const meta = await resolveReferralCodeMeta(params.code);
-    return { meta, shareUrl: rafShareUrl(params.code) };
+    return { meta, shareUrl: rafShareUrl(params.code, meta?.tenantSlug) };
   },
   head: ({ loaderData, params }) => {
     const referrerName = loaderData?.meta?.referrer_name ?? null;
@@ -28,7 +32,7 @@ export const Route = createFileRoute("/raf/$code")({
       ? `${referrerName} invited you — Mortgage Hub`
       : "A friend invited you — Mortgage Hub";
     const description = rafShareDescription(referrerName);
-    const url = loaderData?.shareUrl ?? rafShareUrl(params.code);
+    const url = loaderData?.shareUrl ?? rafShareUrl(params.code, loaderData?.meta?.tenantSlug);
     return {
       meta: [
         { title },
@@ -46,6 +50,21 @@ export const Route = createFileRoute("/raf/$code")({
 function ReferAFriendLanding() {
   const { code } = Route.useParams();
   const loaderData = Route.useLoaderData();
+  const navigate = useNavigate();
+  const tenantSlug = loaderData?.meta?.tenantSlug ?? null;
+
+  useEffect(() => {
+    if (!tenantSlug) return;
+    void navigate({
+      to: "/$tenantSlug/raf/$code",
+      params: { tenantSlug, code },
+    } as never);
+  }, [tenantSlug, code, navigate]);
+
+  if (tenantSlug) {
+    return <div className="min-h-screen bg-background" />;
+  }
+
   return <RafLanding code={code} initialMeta={loaderData?.meta ?? null} />;
 }
 

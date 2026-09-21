@@ -1972,6 +1972,7 @@ type ReferralLink = {
   active: boolean;
   created_at: string;
   referralCount: number;
+  tenantSlug?: string | null;
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -2110,18 +2111,18 @@ function CreateReferralLinkDialog({ onCreated }: { onCreated: () => void }) {
                 Link ready for {created.referrer_name || "your referrer"}.
               </p>
               <p className="text-xs text-muted-foreground break-all font-mono">
-                {rafLinkForCode(created.code, shareBase)}
+                {rafLinkForCode(created.code, created.tenantSlug, shareBase)}
               </p>
               <p className="text-sm text-muted-foreground whitespace-pre-wrap border rounded-lg p-3 bg-muted/30">
-                {rafShareMessage(created.referrer_name, created.code, shareBase)}
+                {rafShareMessage(created.referrer_name, created.code, created.tenantSlug, shareBase)}
               </p>
               <div className="flex flex-wrap gap-2">
                 <CopyLinkButton
-                  value={rafShareMessage(created.referrer_name, created.code, shareBase)}
+                  value={rafShareMessage(created.referrer_name, created.code, created.tenantSlug, shareBase)}
                   label="Copy message for friend"
                   successToast="Share message copied"
                 />
-                <CopyLinkButton value={rafLinkForCode(created.code, shareBase)} label="Copy link only" />
+                <CopyLinkButton value={rafLinkForCode(created.code, created.tenantSlug, shareBase)} label="Copy link only" />
                 <Button
                   variant="outline"
                   size="sm"
@@ -2374,7 +2375,7 @@ export function RafLinksAccessCard() {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-1.5 shrink-0">
-                  <CopyLinkButton value={rafLinkForCode(l.code, shareBase)} label="Copy" />
+                  <CopyLinkButton value={rafLinkForCode(l.code, l.tenantSlug, shareBase)} label="Copy" />
                   <Button
                     variant="outline"
                     size="sm"

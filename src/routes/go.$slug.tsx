@@ -25,8 +25,15 @@ function ReferralRedirect() {
           return;
         }
         setReferralCookie(introducer.slug);
-        // Public landing (voice / chat / book). Referral cookie keeps the introducer attached.
-        navigate({ to: "/" });
+        const tenantSlug = introducer.tenantSlug?.trim() || null;
+        if (!tenantSlug) {
+          setError("This referral link cannot be opened because the firm is not available.");
+          return;
+        }
+        navigate({
+          to: "/$tenantSlug/ref/$introducerRef",
+          params: { tenantSlug, introducerRef: introducer.slug },
+        });
       } catch {
         if (!cancelled) setError("Something went wrong. Please try again later.");
       }

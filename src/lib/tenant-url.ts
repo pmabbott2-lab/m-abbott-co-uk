@@ -47,6 +47,23 @@ export function buildTenantUrl(
   return `${origin}${buildTenantPath(tenant, path)}`;
 }
 
+function withOrigin(path: string, origin?: string): string {
+  if (!path) return "";
+  const base = (origin ?? "").replace(/\/$/, "");
+  return base ? `${base}${path}` : path;
+}
+
+function tryCanonical(
+  build: () => string,
+  origin?: string,
+): string {
+  try {
+    return withOrigin(build(), origin);
+  } catch {
+    return "";
+  }
+}
+
 export function buildCanonicalBookPath(
   tenantSlug: string,
   introducerSlug: string,
@@ -62,4 +79,36 @@ export function buildCanonicalRafPath(tenantSlug: string, code: string): string 
 
 export function buildCanonicalRefPath(tenantSlug: string, introducerRef: string): string {
   return buildTenantPath(tenantSlug, `/ref/${encodeURIComponent(introducerRef)}`);
+}
+
+/** Absolute canonical URLs. Empty when tenant slug is missing or invalid — never defaults to 001. */
+export function tryBuildCanonicalRefUrl(
+  tenantSlug: string | null | undefined,
+  introducerRef: string,
+  origin?: string,
+): string {
+  if (!tenantSlug?.trim() || !introducerRef.trim()) return "";
+  return tryCanonical(() => buildCanonicalRefPath(tenantSlug, introducerRef), origin);
+}
+
+export function tryBuildCanonicalBookUrl(
+  tenantSlug: string | null | undefined,
+  introducerSlug: string,
+  origin?: string,
+  leadId?: string,
+): string {
+  if (!tenantSlug?.trim() || !introducerSlug.trim()) return "";
+  return tryCanonical(
+    () => buildCanonicalBookPath(tenantSlug, introducerSlug, leadId ? { lead: leadId } : undefined),
+    origin,
+  );
+}
+
+export function tryBuildCanonicalRafUrl(
+  tenantSlug: string | null | undefined,
+  code: string,
+  origin?: string,
+): string {
+  if (!tenantSlug?.trim() || !code.trim()) return "";
+  return tryCanonical(() => buildCanonicalRafPath(tenantSlug, code), origin);
 }

@@ -8,6 +8,16 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveTenantAuthenticatedEntry } from "../src/lib/tenant-access.ts";
 import { remapAppNavigate, remapAppHref } from "../src/lib/tenant-app-nav.ts";
+import {
+  referralLinkForSlug,
+  bookingLinkForSlug,
+  rafLinkForCode,
+  marketingJourneyLinkForSlug,
+  marketingCalculatorLinkForSlug,
+} from "../src/lib/referral.ts";
+import { buildTenantUrl, buildCanonicalRefPath, buildCanonicalBookPath, buildCanonicalRafPath } from "../src/lib/tenant-url.ts";
+import { buildHomePathAfterAuth } from "../src/lib/post-auth-journey.ts";
+import { getPasswordResetUrl } from "../src/lib/app-url.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -180,6 +190,137 @@ ok("raf_uses_tenant_slug", rafSrc.includes("tenantSlug"));
 ok("raf_no_silent_001", !rafSrc.includes("mortgageeasy"));
 
 ok("route_tree_keeps_platform_diary", routeTree.includes("'/diary': typeof AuthenticatedDiaryRoute") || routeTree.includes("AuthenticatedDiaryRoute"));
+
+const ORIGIN = "https://hub.test";
+
+ok(
+  "001_share_link",
+  referralLinkForSlug("alice", "mortgageeasy", ORIGIN) === `${ORIGIN}/mortgageeasy/ref/alice`,
+);
+ok(
+  "002_share_link",
+  referralLinkForSlug("alice", "trentvalleyfs", ORIGIN) === `${ORIGIN}/trentvalleyfs/ref/alice` &&
+    !referralLinkForSlug("alice", "trentvalleyfs", ORIGIN).includes("mortgageeasy"),
+);
+ok(
+  "001_book_link",
+  bookingLinkForSlug("alice", "mortgageeasy", ORIGIN) === `${ORIGIN}/mortgageeasy/book/alice`,
+);
+ok(
+  "002_book_link",
+  bookingLinkForSlug("alice", "trentvalleyfs", ORIGIN) === `${ORIGIN}/trentvalleyfs/book/alice` &&
+    !bookingLinkForSlug("alice", "trentvalleyfs", ORIGIN).includes("mortgageeasy"),
+);
+ok(
+  "001_raf_link",
+  rafLinkForCode("AB12CD34", "mortgageeasy", ORIGIN) === `${ORIGIN}/mortgageeasy/raf/AB12CD34`,
+);
+ok(
+  "002_raf_link",
+  rafLinkForCode("AB12CD34", "trentvalleyfs", ORIGIN) === `${ORIGIN}/trentvalleyfs/raf/AB12CD34` &&
+    !rafLinkForCode("AB12CD34", "trentvalleyfs", ORIGIN).includes("mortgageeasy"),
+);
+ok(
+  "001_session_sms_url",
+  buildTenantUrl("mortgageeasy", "/sessions/sess-1", ORIGIN) === `${ORIGIN}/mortgageeasy/sessions/sess-1`,
+);
+ok(
+  "002_session_sms_url",
+  buildTenantUrl("trentvalleyfs", "/sessions/sess-1", ORIGIN) === `${ORIGIN}/trentvalleyfs/sessions/sess-1` &&
+    !buildTenantUrl("trentvalleyfs", "/sessions/sess-1", ORIGIN).includes("mortgageeasy"),
+);
+ok(
+  "001_marketing_url",
+  marketingJourneyLinkForSlug("alice", "mortgageeasy", ORIGIN).startsWith(`${ORIGIN}/mortgageeasy/`) &&
+    marketingCalculatorLinkForSlug("alice", "mortgageeasy", ORIGIN).includes("/mortgageeasy/calculator.html"),
+);
+ok(
+  "002_marketing_url",
+  marketingJourneyLinkForSlug("alice", "trentvalleyfs", ORIGIN).startsWith(`${ORIGIN}/trentvalleyfs/`) &&
+    !marketingJourneyLinkForSlug("alice", "trentvalleyfs", ORIGIN).includes("mortgageeasy") &&
+    !marketingCalculatorLinkForSlug("alice", "trentvalleyfs", ORIGIN).includes("mortgageeasy"),
+);
+ok("001_reset_path", buildHomePathAfterAuth(null, "mortgageeasy") === "/mortgageeasy/workspace");
+ok(
+  "002_reset_path",
+  buildHomePathAfterAuth(null, "trentvalleyfs") === "/trentvalleyfs/workspace" &&
+    !buildHomePathAfterAuth(null, "trentvalleyfs").includes("mortgageeasy"),
+);
+let reset001 = false;
+let reset002 = false;
+let resetNone = false;
+try {
+  reset001 = getPasswordResetUrl("mortgageeasy").includes("tenant=mortgageeasy");
+  reset002 =
+    getPasswordResetUrl("trentvalleyfs").includes("tenant=trentvalleyfs") &&
+    !getPasswordResetUrl("trentvalleyfs").includes("mortgageeasy");
+  resetNone = !getPasswordResetUrl().includes("mortgageeasy") && !getPasswordResetUrl().includes("tenant=");
+} catch {
+  const appUrlSrc = readFileSync(resolve(root, "src/lib/app-url.ts"), "utf8");
+  reset001 =
+    appUrlSrc.includes("getPasswordResetUrl") &&
+    appUrlSrc.includes("/auth/reset") &&
+    appUrlSrc.includes("?tenant=");
+  reset002 = reset001 && !appUrlSrc.includes("mortgageeasy");
+  resetNone = !appUrlSrc.includes("mortgageeasy");
+}
+ok("001_reset_url", reset001);
+ok("002_reset_url", reset002);
+ok(
+  "no_default_001_share",
+  referralLinkForSlug("alice", null, ORIGIN) === "" &&
+    bookingLinkForSlug("alice", undefined, ORIGIN) === "" &&
+    rafLinkForCode("AB12CD34", null, ORIGIN) === "" &&
+    marketingJourneyLinkForSlug("alice", null, ORIGIN) === "",
+);
+ok(
+  "no_default_001_reset",
+  buildHomePathAfterAuth(null, null) === "/home" && resetNone,
+);
+ok(
+  "canonical_helpers",
+  buildCanonicalRefPath("mortgageeasy", "alice") === "/mortgageeasy/ref/alice" &&
+    buildCanonicalBookPath("trentvalleyfs", "alice") === "/trentvalleyfs/book/alice" &&
+    buildCanonicalRafPath("trentvalleyfs", "X") === "/trentvalleyfs/raf/X",
+);
+
+function publicLinkDenied(entityTenantSlug, urlTenantSlug) {
+  return Boolean(entityTenantSlug && urlTenantSlug && entityTenantSlug !== urlTenantSlug);
+}
+ok("cross_tenant_001_on_002", publicLinkDenied("mortgageeasy", "trentvalleyfs"));
+ok("cross_tenant_002_on_001", publicLinkDenied("trentvalleyfs", "mortgageeasy"));
+
+const goSrc = readFileSync(resolve(root, "src/routes/go.$slug.tsx"), "utf8");
+ok("go_uses_canonical_ref", goSrc.includes("/$tenantSlug/ref/$introducerRef"));
+ok("go_never_platform_root", !goSrc.includes('to: "/"') && !goSrc.includes('to: "/home"'));
+ok("go_fails_closed_without_tenant", goSrc.includes("firm is not available"));
+
+const tenantRaf = readFileSync(resolve(root, "src/routes/$tenantSlug/raf.$code.tsx"), "utf8");
+ok("raf_mismatch_notfound", tenantRaf.includes("meta.tenantSlug !== tenantSlug") && tenantRaf.includes("notFound()"));
+const tenantRef = readFileSync(resolve(root, "src/routes/$tenantSlug/ref.$introducerRef.tsx"), "utf8");
+ok("ref_mismatch_notfound", tenantRef.includes("throw notFound()"));
+
+const referralSrc = readFileSync(resolve(root, "src/lib/referral.ts"), "utf8");
+ok("referral_no_hardcoded_001", !referralSrc.includes("/mortgageeasy"));
+ok("referral_uses_canonical_helpers", referralSrc.includes("tryBuildCanonicalRefUrl") && referralSrc.includes("tryBuildCanonicalBookUrl") && referralSrc.includes("tryBuildCanonicalRafUrl"));
+
+const smsSrc = readFileSync(resolve(root, "src/lib/sms.server.ts"), "utf8");
+ok("sms_no_hardcoded_mortgageeasy_brand", !smsSrc.includes("MortgageEasy"));
+ok("sms_session_uses_tenant_url", smsSrc.includes("buildTenantUrl") && smsSrc.includes("/sessions/"));
+
+const bookingSrc = readFileSync(resolve(root, "src/lib/booking.functions.ts"), "utf8");
+ok("booking_sms_selects_tenant_id", bookingSrc.includes('.select("id, company_name, slug, tenant_id")'));
+ok("booking_confirm_tenant_url", bookingSrc.includes("buildTenantUrl") && bookingSrc.includes("/sessions/"));
+ok("booking_no_flat_home_fallback", !bookingSrc.includes("`${getAppBaseUrl()}/home`") && !bookingSrc.includes("`${getAppBaseUrl()}/sessions/"));
+
+const bookLegacy = readFileSync(resolve(root, "src/routes/book.$slug.tsx"), "utf8");
+ok("platform_book_remaps", bookLegacy.includes("/$tenantSlug/book/$introducerSlug"));
+ok("platform_book_auth_tenant", bookLegacy.includes("buildAuthNavigateSearch"));
+
+const resetSrc = readFileSync(resolve(root, "src/routes/auth/reset.tsx"), "utf8");
+ok("reset_success_tenant_workspace", resetSrc.includes("buildHomePathAfterAuth(null, tenantSlug)"));
+const resetApi = readFileSync(resolve(root, "src/routes/api/auth/request-password-reset.ts"), "utf8");
+ok("reset_api_passes_tenant", resetApi.includes("body.tenant"));
 
 if (failures.length) {
   console.error(`\n${failures.length} failure(s)`);

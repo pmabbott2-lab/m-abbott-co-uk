@@ -145,6 +145,7 @@ export async function bookingConfirmationMessage(opts: {
   startsAt: Date;
   advisorName?: string;
   bookingUrl?: string;
+  companyName?: string | null;
 }): Promise<string> {
   const whenParts = opts.startsAt.toLocaleString("en-GB", {
     weekday: "short",
@@ -183,7 +184,7 @@ export async function bookingConfirmationMessage(opts: {
       adviser_name: advisor ?? "",
       adviser_clause: advisor ? ` — you will meet ${advisor}` : "",
       booking_url: opts.bookingUrl ?? "",
-      company_name: "MortgageEasy",
+      company_name: opts.companyName?.trim() || "Mortgage Hub",
     },
     fallback,
   );
@@ -206,6 +207,7 @@ export async function callbackConfirmationMessage(opts: {
   customerName: string;
   window: string;
   advisorName?: string;
+  companyName?: string | null;
 }): Promise<string> {
   const advisor = opts.advisorName?.trim() || "your adviser";
   const firstName = opts.customerName.trim().split(/\s+/)[0] || opts.customerName;
@@ -220,7 +222,7 @@ export async function callbackConfirmationMessage(opts: {
       customer_first_name: firstName,
       adviser_name: advisor,
       callback_window: callbackWindowLabel(opts.window),
-      company_name: "MortgageEasy",
+      company_name: opts.companyName?.trim() || "Mortgage Hub",
     },
     fallback,
   );
@@ -229,6 +231,7 @@ export async function callbackConfirmationMessage(opts: {
 export async function interviewCompleteMessage(opts: {
   name: string;
   summaryUrl: string;
+  companyName?: string | null;
 }): Promise<string> {
   const fallback = [
     `Hi ${opts.name}, thank you for completing your mortgage fact-find.`,
@@ -240,7 +243,7 @@ export async function interviewCompleteMessage(opts: {
     {
       customer_first_name: opts.name,
       session_url: opts.summaryUrl,
-      company_name: "MortgageEasy",
+      company_name: opts.companyName?.trim() || "Mortgage Hub",
     },
     fallback,
   );
@@ -250,6 +253,7 @@ export async function textChannelInviteMessage(opts: {
   customerName: string;
   bookUrl: string;
   introducerName: string;
+  companyName?: string | null;
 }): Promise<string> {
   const firstName = opts.customerName.trim().split(/\s+/)[0] || opts.customerName;
   const fallback = `Hi ${firstName}, ${opts.introducerName} has referred you for a mortgage appointment. Book a convenient time here: ${opts.bookUrl}`;
@@ -260,7 +264,7 @@ export async function textChannelInviteMessage(opts: {
       customer_first_name: firstName,
       introducer_name: opts.introducerName,
       booking_url: opts.bookUrl,
-      company_name: "MortgageEasy",
+      company_name: opts.companyName?.trim() || "Mortgage Hub",
     },
     fallback,
   );
@@ -303,14 +307,28 @@ export async function sendJourneyMilestoneSms(
     if (!phone) return;
 
     const firstName = profile?.full_name?.trim().split(/\s+/)[0] || "there";
-    const sessionUrl = `${getAppBaseUrl()}/sessions/${sessionId}`;
+    const { data: session } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("tenant_id")
+      .eq("id", sessionId)
+      .maybeSingle();
+    const { resolveActiveTenantPublicNav } = await import("@/lib/tenant-presentation.impl.server");
+    const nav = await resolveActiveTenantPublicNav(
+      (session as { tenant_id?: string | null } | null)?.tenant_id,
+    );
+    if (!nav) {
+      console.error("sendJourneyMilestoneSms skipped: tenant slug unresolved");
+      return;
+    }
+    const { buildTenantUrl } = await import("@/lib/tenant-url");
+    const sessionUrl = buildTenantUrl(nav.slug, `/sessions/${sessionId}`, getAppBaseUrl());
     const { renderSmsFromTemplate } = await import("@/lib/comms.server");
     const body = await renderSmsFromTemplate(
       templateKey,
       {
         customer_first_name: firstName,
         session_url: sessionUrl,
-        company_name: "MortgageEasy",
+        company_name: nav.displayName,
       },
       `Hi ${firstName}, ${line}\nView your file: ${sessionUrl}`,
     );
@@ -347,8 +365,26 @@ export async function sendInterviewCompleteSms(customerId: string, sessionId: st
     if (!phone) return;
 
     const firstName = profile?.full_name?.trim().split(/\s+/)[0] || "there";
-    const summaryUrl = `${getAppBaseUrl()}/sessions/${sessionId}`;
-    const body = await interviewCompleteMessage({ name: firstName, summaryUrl });
+    const { data: session } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("tenant_id")
+      .eq("id", sessionId)
+      .maybeSingle();
+    const { resolveActiveTenantPublicNav } = await import("@/lib/tenant-presentation.impl.server");
+    const nav = await resolveActiveTenantPublicNav(
+      (session as { tenant_id?: string | null } | null)?.tenant_id,
+    );
+    if (!nav) {
+      console.error("sendInterviewCompleteSms skipped: tenant slug unresolved");
+      return;
+    }
+    const { buildTenantUrl } = await import("@/lib/tenant-url");
+    const summaryUrl = buildTenantUrl(nav.slug, `/sessions/${sessionId}`, getAppBaseUrl());
+    const body = await interviewCompleteMessage({
+      name: firstName,
+      summaryUrl,
+      companyName: nav.displayName,
+    });
 
     const { sid } = await sendSms({ to: phone, body });
     try {

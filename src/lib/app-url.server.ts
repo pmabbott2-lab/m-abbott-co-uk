@@ -2,6 +2,7 @@
  * Canonical public URL for Mortgage Hub (Azure).
  * Prefer this over legacy ngrok whenever we are serving production.
  */
+import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
 export const MMH_PUBLIC_URL = "https://mymortgagehub.uk";
 
 function stripSlash(url: string): string {
@@ -64,10 +65,16 @@ export function getServerAppOrigin(request?: Request): string {
   return "http://localhost:8080";
 }
 
-export function getServerPasswordResetUrl(request?: Request): string {
-  return `${getServerAppOrigin(request)}/auth/reset`;
+export function getServerPasswordResetUrl(request?: Request, tenantSlug?: string | null): string {
+  const base = `${getServerAppOrigin(request)}/auth/reset`;
+  const slug = normalisePublicTenantSlug(tenantSlug);
+  if (!slug) return base;
+  return `${base}?tenant=${encodeURIComponent(slug)}`;
 }
 
-export function getServerAuthCallbackUrl(request?: Request): string {
-  return `${getServerAppOrigin(request)}/auth`;
+export function getServerAuthCallbackUrl(request?: Request, tenantSlug?: string | null): string {
+  const base = `${getServerAppOrigin(request)}/auth`;
+  const slug = normalisePublicTenantSlug(tenantSlug);
+  if (!slug) return base;
+  return `${base}?tenant=${encodeURIComponent(slug)}`;
 }

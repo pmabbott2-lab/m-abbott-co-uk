@@ -56,8 +56,11 @@ export function getAuthCallbackUrl(tenantSlug?: string | null): string {
   return `${origin}/auth`;
 }
 
-export function getPasswordResetUrl(): string {
-  return `${getAppOrigin()}/auth/reset`;
+export function getPasswordResetUrl(tenantSlug?: string | null): string {
+  const base = `${getAppOrigin()}/auth/reset`;
+  const slug = normalisePublicTenantSlug(tenantSlug);
+  if (!slug) return base;
+  return `${base}?tenant=${encodeURIComponent(slug)}`;
 }
 
 export function isLocalDev(): boolean {

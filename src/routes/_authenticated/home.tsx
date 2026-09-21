@@ -488,7 +488,11 @@ function CustomerRafSelfServeCard({
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not open email"),
   });
 
-  const code = activityQ.data?.codes?.[0]?.code;
+  const codeRow = activityQ.data?.codes?.[0] as
+    | { code: string; tenantSlug?: string | null }
+    | undefined;
+  const code = codeRow?.code;
+  const rafTenantSlug = codeRow?.tenantSlug ?? null;
   const referrals = activityQ.data?.referrals ?? [];
 
   return (
@@ -510,9 +514,9 @@ function CustomerRafSelfServeCard({
           )}
           {code && (
             <div className="space-y-3">
-              <p className="text-xs font-mono break-all">{rafLinkForCode(code, shareBase)}</p>
+              <p className="text-xs font-mono break-all">{rafLinkForCode(code, rafTenantSlug, shareBase)}</p>
               <div className="flex flex-wrap gap-2">
-                <CopyLinkButton value={rafShareMessage(null, code, shareBase)} label="Copy share message" />
+                <CopyLinkButton value={rafShareMessage(null, code, rafTenantSlug, shareBase)} label="Copy share message" />
                 <Button
                   type="button"
                   size="sm"

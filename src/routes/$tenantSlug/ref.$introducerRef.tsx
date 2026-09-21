@@ -1,4 +1,4 @@
-import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound, redirect } from "@tanstack/react-router";
 import { useRequiredTenantUi } from "@/lib/tenant-ui";
 import { TenantPublicShell } from "@/components/tenant/TenantPublicShell";
 import { createServerFn } from "@tanstack/react-start";
@@ -43,7 +43,7 @@ export const Route = createFileRoute("/$tenantSlug/ref/$introducerRef")({
       data: { tenantSlug: params.tenantSlug, introducerRef: params.introducerRef },
     });
     if (!result.ok) {
-      throw redirect({ to: "/$tenantSlug", params: { tenantSlug: tenant.slug } });
+      throw notFound();
     }
     return { introducer: result };
   },

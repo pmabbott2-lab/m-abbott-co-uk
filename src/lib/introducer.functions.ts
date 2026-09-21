@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { calculatorLeadInput } from "@/lib/introducer-calculator-lead.server";
 import { z } from "zod";
+import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
 
 function slugify(value: string): string {
   return value
@@ -103,8 +104,9 @@ export const resolveReferralSlug = createServerFn({ method: "GET" })
         if (!tenantSlugOut && introducer.tenant_id) {
           const { data: ten } = await supabaseAdmin
             .from("tenants")
-            .select("slug")
+            .select("slug, status")
             .eq("id", introducer.tenant_id)
+            .eq("status", "active")
             .maybeSingle();
           tenantSlugOut = ten?.slug ?? null;
           if (introducer.tenant_id) {
@@ -238,6 +240,34 @@ export async function resolveViewAsIntroducer(
   return { targetUserId: viewAsIntroducerUserId, viewAsMode: true };
 }
 
+async function activeTenantSlugForIntroducer(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: { from: (table: string) => any },
+  introducer: { tenant_id?: string | null; user_id?: string | null } | null,
+  fallbackUserId?: string,
+): Promise<string | null> {
+  const tenantId = introducer?.tenant_id ?? null;
+  if (tenantId) {
+    const { data: ten } = await admin
+      .from("tenants")
+      .select("slug, status")
+      .eq("id", tenantId)
+      .eq("status", "active")
+      .maybeSingle();
+    const slug = normalisePublicTenantSlug(ten?.slug);
+    if (slug) return slug;
+  }
+  const userId = introducer?.user_id ?? fallbackUserId;
+  if (!userId) return null;
+  try {
+    const { resolveSoleMembershipTenant } = await import("@/lib/tenant-assert.server");
+    const authorised = await resolveSoleMembershipTenant(userId);
+    return normalisePublicTenantSlug(authorised.tenant.slug);
+  } catch {
+    return null;
+  }
+}
+
 export const getIntroducerProfile = createServerFn({ method: "GET" })
   .inputValidator((d: unknown) =>
     z.object({ viewAsIntroducerUserId: z.string().uuid().optional() }).parse(d ?? {}),
@@ -284,9 +314,13 @@ export const getIntroducerProfile = createServerFn({ method: "GET" })
           .from("introducers")
           .update({ company_code: code })
           .eq("id", existing.id);
-        if (!codeErr) return { ...existing, company_code: code };
+        if (!codeErr) {
+          const tenantSlug = await activeTenantSlugForIntroducer(supabaseAdmin, { ...existing, company_code: code }, targetUserId);
+          return { ...existing, company_code: code, tenantSlug };
+        }
       }
-      return existing;
+      const tenantSlug = await activeTenantSlugForIntroducer(supabaseAdmin, existing, targetUserId);
+      return { ...existing, tenantSlug };
     }
 
     if (viewAsMode) {
@@ -322,11 +356,13 @@ export const getIntroducerProfile = createServerFn({ method: "GET" })
           .select()
           .single();
         if (fbErr) throw new Error(fbErr.message);
-        return fallback;
+        const tenantSlug = await activeTenantSlugForIntroducer(supabaseAdmin, fallback, targetUserId);
+        return { ...fallback, tenantSlug };
       }
       throw new Error(error.message);
     }
-    return created;
+    const tenantSlug = await activeTenantSlugForIntroducer(supabaseAdmin, created, targetUserId);
+    return { ...created, tenantSlug };
   });
 
 export const updateIntroducerProfile = createServerFn({ method: "POST" })

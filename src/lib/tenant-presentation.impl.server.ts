@@ -12,6 +12,7 @@ import {
 import {
   buildTenantPageTitle,
   isReservedTenantSlug,
+  normalisePublicTenantSlug,
   type TenantPresentation,
   type TenantSlugLayoutResult,
 } from "@/lib/tenant-presentation";
@@ -24,6 +25,23 @@ function publicLogoUrl(logoPath: string | null | undefined): string | null {
   const p = logoPath.trim();
   if (p.startsWith("http://") || p.startsWith("https://") || p.startsWith("/")) return p;
   return `/tenant-branding/${p.replace(/^\/+/, "")}`;
+}
+
+export async function resolveActiveTenantPublicNav(
+  tenantId: string | null | undefined,
+): Promise<{ slug: string; displayName: string } | null> {
+  if (!tenantId) return null;
+  const { data } = await db
+    .from("tenants")
+    .select("slug, status, company_name, trading_name")
+    .eq("id", tenantId)
+    .maybeSingle();
+  if (!data || data.status !== "active") return null;
+  const slug = normalisePublicTenantSlug(data.slug);
+  if (!slug) return null;
+  const displayName = String(data.trading_name || data.company_name || "").trim();
+  if (!displayName) return null;
+  return { slug, displayName };
 }
 
 export async function loadTenantPresentationBySlug(slug: string): Promise<TenantPresentation> {

@@ -563,7 +563,7 @@ function AuthPage() {
         const res = await fetch("/api/auth/request-password-reset", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: email.trim() }),
+          body: JSON.stringify({ email: email.trim(), tenant: tenantSlug ?? undefined }),
         });
         const data = (await res.json()) as {
           ok?: boolean;
@@ -581,7 +581,7 @@ function AuthPage() {
           setDevResetLink(data.resetLink);
           showStatus(
             "success",
-            `Reset link ready for ${data.redirectTo ?? getPasswordResetUrl()}. Click the button below.`,
+            `Reset link ready for ${data.redirectTo ?? getPasswordResetUrl(tenantSlug)}. Click the button below.`,
           );
           if (data.setupHint) {
             toast.message("Supabase redirect URLs", { description: data.setupHint });
@@ -589,7 +589,7 @@ function AuthPage() {
           return;
         }
 
-        const target = data.redirectTo ?? getPasswordResetUrl();
+        const target = data.redirectTo ?? getPasswordResetUrl(tenantSlug);
         let message = `If an account exists for that email, we've sent a reset link. It should open at ${target}.`;
         if (data.setupHint) message += ` ${data.setupHint}`;
         showStatus("success", message);
