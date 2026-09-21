@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router";
+import { TenantAppLink as Link, useTenantAwareNavigate } from "@/components/tenant/TenantAppLink";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState, type ReactNode } from "react";
@@ -634,7 +634,7 @@ export function CustomerHomeLanding({
   hasSubmitted: boolean;
   caseCount: number;
 }) {
-  const navigate = useNavigate();
+  const navigate = useTenantAwareNavigate();
   const createFn = useServerFn(createSession);
   const [homePanel, setHomePanel] = useState<"none" | "appointment" | "callback" | "raf">("none");
   const toggle = (panel: "appointment" | "callback" | "raf") =>

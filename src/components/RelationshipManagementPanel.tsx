@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Link } from "@tanstack/react-router";
+import { TenantAppLink as Link } from "@/components/tenant/TenantAppLink";
 import { format } from "date-fns";
 import { useEffect, useState } from "react";
 import {

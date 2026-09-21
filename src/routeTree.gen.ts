@@ -31,6 +31,12 @@ import { Route as AuthenticatedCasesRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedBookingRouteImport } from './routes/_authenticated/booking'
 import { Route as TenantSlugWorkspaceRouteImport } from './routes/$tenantSlug/workspace'
 import { Route as TenantSlugLoginRouteImport } from './routes/$tenantSlug/login'
+import { Route as TenantSlugIntroducerRouteImport } from './routes/$tenantSlug/introducer'
+import { Route as TenantSlugHomeRouteImport } from './routes/$tenantSlug/home'
+import { Route as TenantSlugDiaryRouteImport } from './routes/$tenantSlug/diary'
+import { Route as TenantSlugCompaniesRouteImport } from './routes/$tenantSlug/companies'
+import { Route as TenantSlugCasesRouteImport } from './routes/$tenantSlug/cases'
+import { Route as TenantSlugBookingRouteImport } from './routes/$tenantSlug/booking'
 import { Route as ApiTeamsCallbackRouteImport } from './routes/api/teams/callback'
 import { Route as ApiSmsInboundRouteImport } from './routes/api/sms/inbound'
 import { Route as ApiIntroducerCalculatorLeadRouteImport } from './routes/api/introducer/calculator-lead'
@@ -42,7 +48,13 @@ import { Route as AuthenticatedSessionsSessionIdRouteImport } from './routes/_au
 import { Route as AuthenticatedInterviewSessionIdRouteImport } from './routes/_authenticated/interview.$sessionId'
 import { Route as AuthenticatedCustomersCustomerIdRouteImport } from './routes/_authenticated/customers.$customerId'
 import { Route as AuthenticatedChatSessionIdRouteImport } from './routes/_authenticated/chat.$sessionId'
+import { Route as TenantSlugTextSessionIdRouteImport } from './routes/$tenantSlug/text.$sessionId'
+import { Route as TenantSlugSessionsSessionIdRouteImport } from './routes/$tenantSlug/sessions.$sessionId'
 import { Route as TenantSlugRefIntroducerRefRouteImport } from './routes/$tenantSlug/ref.$introducerRef'
+import { Route as TenantSlugRafCodeRouteImport } from './routes/$tenantSlug/raf.$code'
+import { Route as TenantSlugInterviewSessionIdRouteImport } from './routes/$tenantSlug/interview.$sessionId'
+import { Route as TenantSlugCustomersCustomerIdRouteImport } from './routes/$tenantSlug/customers.$customerId'
+import { Route as TenantSlugChatSessionIdRouteImport } from './routes/$tenantSlug/chat.$sessionId'
 import { Route as TenantSlugBookIntroducerSlugRouteImport } from './routes/$tenantSlug/book.$introducerSlug'
 import { Route as ApiTwilioVoiceVoicemailDoneRouteImport } from './routes/api/twilio/voice/voicemail-done'
 import { Route as ApiTwilioVoiceSusanPromptRouteImport } from './routes/api/twilio/voice/susan-prompt'
@@ -162,6 +174,36 @@ const TenantSlugLoginRoute = TenantSlugLoginRouteImport.update({
   path: '/login',
   getParentRoute: () => TenantSlugRouteRoute,
 } as any)
+const TenantSlugIntroducerRoute = TenantSlugIntroducerRouteImport.update({
+  id: '/introducer',
+  path: '/introducer',
+  getParentRoute: () => TenantSlugRouteRoute,
+} as any)
+const TenantSlugHomeRoute = TenantSlugHomeRouteImport.update({
+  id: '/home',
+  path: '/home',
+  getParentRoute: () => TenantSlugRouteRoute,
+} as any)
+const TenantSlugDiaryRoute = TenantSlugDiaryRouteImport.update({
+  id: '/diary',
+  path: '/diary',
+  getParentRoute: () => TenantSlugRouteRoute,
+} as any)
+const TenantSlugCompaniesRoute = TenantSlugCompaniesRouteImport.update({
+  id: '/companies',
+  path: '/companies',
+  getParentRoute: () => TenantSlugRouteRoute,
+} as any)
+const TenantSlugCasesRoute = TenantSlugCasesRouteImport.update({
+  id: '/cases',
+  path: '/cases',
+  getParentRoute: () => TenantSlugRouteRoute,
+} as any)
+const TenantSlugBookingRoute = TenantSlugBookingRouteImport.update({
+  id: '/booking',
+  path: '/booking',
+  getParentRoute: () => TenantSlugRouteRoute,
+} as any)
 const ApiTeamsCallbackRoute = ApiTeamsCallbackRouteImport.update({
   id: '/api/teams/callback',
   path: '/api/teams/callback',
@@ -226,12 +268,45 @@ const AuthenticatedChatSessionIdRoute =
     path: '/chat/$sessionId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const TenantSlugTextSessionIdRoute = TenantSlugTextSessionIdRouteImport.update({
+  id: '/text/$sessionId',
+  path: '/text/$sessionId',
+  getParentRoute: () => TenantSlugRouteRoute,
+} as any)
+const TenantSlugSessionsSessionIdRoute =
+  TenantSlugSessionsSessionIdRouteImport.update({
+    id: '/sessions/$sessionId',
+    path: '/sessions/$sessionId',
+    getParentRoute: () => TenantSlugRouteRoute,
+  } as any)
 const TenantSlugRefIntroducerRefRoute =
   TenantSlugRefIntroducerRefRouteImport.update({
     id: '/ref/$introducerRef',
     path: '/ref/$introducerRef',
     getParentRoute: () => TenantSlugRouteRoute,
   } as any)
+const TenantSlugRafCodeRoute = TenantSlugRafCodeRouteImport.update({
+  id: '/raf/$code',
+  path: '/raf/$code',
+  getParentRoute: () => TenantSlugRouteRoute,
+} as any)
+const TenantSlugInterviewSessionIdRoute =
+  TenantSlugInterviewSessionIdRouteImport.update({
+    id: '/interview/$sessionId',
+    path: '/interview/$sessionId',
+    getParentRoute: () => TenantSlugRouteRoute,
+  } as any)
+const TenantSlugCustomersCustomerIdRoute =
+  TenantSlugCustomersCustomerIdRouteImport.update({
+    id: '/customers/$customerId',
+    path: '/customers/$customerId',
+    getParentRoute: () => TenantSlugRouteRoute,
+  } as any)
+const TenantSlugChatSessionIdRoute = TenantSlugChatSessionIdRouteImport.update({
+  id: '/chat/$sessionId',
+  path: '/chat/$sessionId',
+  getParentRoute: () => TenantSlugRouteRoute,
+} as any)
 const TenantSlugBookIntroducerSlugRoute =
   TenantSlugBookIntroducerSlugRouteImport.update({
     id: '/book/$introducerSlug',
@@ -288,6 +363,12 @@ export interface FileRoutesByFullPath {
   '/$tenantSlug': typeof TenantSlugRouteRouteWithChildren
   '/auth': typeof AuthRouteWithChildren
   '/register': typeof RegisterRoute
+  '/$tenantSlug/booking': typeof TenantSlugBookingRoute
+  '/$tenantSlug/cases': typeof TenantSlugCasesRoute
+  '/$tenantSlug/companies': typeof TenantSlugCompaniesRoute
+  '/$tenantSlug/diary': typeof TenantSlugDiaryRoute
+  '/$tenantSlug/home': typeof TenantSlugHomeRoute
+  '/$tenantSlug/introducer': typeof TenantSlugIntroducerRoute
   '/$tenantSlug/login': typeof TenantSlugLoginRoute
   '/$tenantSlug/workspace': typeof TenantSlugWorkspaceRoute
   '/booking': typeof AuthenticatedBookingRoute
@@ -306,7 +387,13 @@ export interface FileRoutesByFullPath {
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug/': typeof TenantSlugIndexRoute
   '/$tenantSlug/book/$introducerSlug': typeof TenantSlugBookIntroducerSlugRoute
+  '/$tenantSlug/chat/$sessionId': typeof TenantSlugChatSessionIdRoute
+  '/$tenantSlug/customers/$customerId': typeof TenantSlugCustomersCustomerIdRoute
+  '/$tenantSlug/interview/$sessionId': typeof TenantSlugInterviewSessionIdRoute
+  '/$tenantSlug/raf/$code': typeof TenantSlugRafCodeRoute
   '/$tenantSlug/ref/$introducerRef': typeof TenantSlugRefIntroducerRefRoute
+  '/$tenantSlug/sessions/$sessionId': typeof TenantSlugSessionsSessionIdRoute
+  '/$tenantSlug/text/$sessionId': typeof TenantSlugTextSessionIdRoute
   '/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
@@ -331,6 +418,12 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRouteWithChildren
   '/register': typeof RegisterRoute
+  '/$tenantSlug/booking': typeof TenantSlugBookingRoute
+  '/$tenantSlug/cases': typeof TenantSlugCasesRoute
+  '/$tenantSlug/companies': typeof TenantSlugCompaniesRoute
+  '/$tenantSlug/diary': typeof TenantSlugDiaryRoute
+  '/$tenantSlug/home': typeof TenantSlugHomeRoute
+  '/$tenantSlug/introducer': typeof TenantSlugIntroducerRoute
   '/$tenantSlug/login': typeof TenantSlugLoginRoute
   '/$tenantSlug/workspace': typeof TenantSlugWorkspaceRoute
   '/booking': typeof AuthenticatedBookingRoute
@@ -349,7 +442,13 @@ export interface FileRoutesByTo {
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug': typeof TenantSlugIndexRoute
   '/$tenantSlug/book/$introducerSlug': typeof TenantSlugBookIntroducerSlugRoute
+  '/$tenantSlug/chat/$sessionId': typeof TenantSlugChatSessionIdRoute
+  '/$tenantSlug/customers/$customerId': typeof TenantSlugCustomersCustomerIdRoute
+  '/$tenantSlug/interview/$sessionId': typeof TenantSlugInterviewSessionIdRoute
+  '/$tenantSlug/raf/$code': typeof TenantSlugRafCodeRoute
   '/$tenantSlug/ref/$introducerRef': typeof TenantSlugRefIntroducerRefRoute
+  '/$tenantSlug/sessions/$sessionId': typeof TenantSlugSessionsSessionIdRoute
+  '/$tenantSlug/text/$sessionId': typeof TenantSlugTextSessionIdRoute
   '/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
@@ -377,6 +476,12 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRouteWithChildren
   '/register': typeof RegisterRoute
+  '/$tenantSlug/booking': typeof TenantSlugBookingRoute
+  '/$tenantSlug/cases': typeof TenantSlugCasesRoute
+  '/$tenantSlug/companies': typeof TenantSlugCompaniesRoute
+  '/$tenantSlug/diary': typeof TenantSlugDiaryRoute
+  '/$tenantSlug/home': typeof TenantSlugHomeRoute
+  '/$tenantSlug/introducer': typeof TenantSlugIntroducerRoute
   '/$tenantSlug/login': typeof TenantSlugLoginRoute
   '/$tenantSlug/workspace': typeof TenantSlugWorkspaceRoute
   '/_authenticated/booking': typeof AuthenticatedBookingRoute
@@ -395,7 +500,13 @@ export interface FileRoutesById {
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug/': typeof TenantSlugIndexRoute
   '/$tenantSlug/book/$introducerSlug': typeof TenantSlugBookIntroducerSlugRoute
+  '/$tenantSlug/chat/$sessionId': typeof TenantSlugChatSessionIdRoute
+  '/$tenantSlug/customers/$customerId': typeof TenantSlugCustomersCustomerIdRoute
+  '/$tenantSlug/interview/$sessionId': typeof TenantSlugInterviewSessionIdRoute
+  '/$tenantSlug/raf/$code': typeof TenantSlugRafCodeRoute
   '/$tenantSlug/ref/$introducerRef': typeof TenantSlugRefIntroducerRefRoute
+  '/$tenantSlug/sessions/$sessionId': typeof TenantSlugSessionsSessionIdRoute
+  '/$tenantSlug/text/$sessionId': typeof TenantSlugTextSessionIdRoute
   '/_authenticated/chat/$sessionId': typeof AuthenticatedChatSessionIdRoute
   '/_authenticated/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/_authenticated/interview/$sessionId': typeof AuthenticatedInterviewSessionIdRoute
@@ -423,6 +534,12 @@ export interface FileRouteTypes {
     | '/$tenantSlug'
     | '/auth'
     | '/register'
+    | '/$tenantSlug/booking'
+    | '/$tenantSlug/cases'
+    | '/$tenantSlug/companies'
+    | '/$tenantSlug/diary'
+    | '/$tenantSlug/home'
+    | '/$tenantSlug/introducer'
     | '/$tenantSlug/login'
     | '/$tenantSlug/workspace'
     | '/booking'
@@ -441,7 +558,13 @@ export interface FileRouteTypes {
     | '/raf/$code'
     | '/$tenantSlug/'
     | '/$tenantSlug/book/$introducerSlug'
+    | '/$tenantSlug/chat/$sessionId'
+    | '/$tenantSlug/customers/$customerId'
+    | '/$tenantSlug/interview/$sessionId'
+    | '/$tenantSlug/raf/$code'
     | '/$tenantSlug/ref/$introducerRef'
+    | '/$tenantSlug/sessions/$sessionId'
+    | '/$tenantSlug/text/$sessionId'
     | '/chat/$sessionId'
     | '/customers/$customerId'
     | '/interview/$sessionId'
@@ -466,6 +589,12 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/register'
+    | '/$tenantSlug/booking'
+    | '/$tenantSlug/cases'
+    | '/$tenantSlug/companies'
+    | '/$tenantSlug/diary'
+    | '/$tenantSlug/home'
+    | '/$tenantSlug/introducer'
     | '/$tenantSlug/login'
     | '/$tenantSlug/workspace'
     | '/booking'
@@ -484,7 +613,13 @@ export interface FileRouteTypes {
     | '/raf/$code'
     | '/$tenantSlug'
     | '/$tenantSlug/book/$introducerSlug'
+    | '/$tenantSlug/chat/$sessionId'
+    | '/$tenantSlug/customers/$customerId'
+    | '/$tenantSlug/interview/$sessionId'
+    | '/$tenantSlug/raf/$code'
     | '/$tenantSlug/ref/$introducerRef'
+    | '/$tenantSlug/sessions/$sessionId'
+    | '/$tenantSlug/text/$sessionId'
     | '/chat/$sessionId'
     | '/customers/$customerId'
     | '/interview/$sessionId'
@@ -511,6 +646,12 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/auth'
     | '/register'
+    | '/$tenantSlug/booking'
+    | '/$tenantSlug/cases'
+    | '/$tenantSlug/companies'
+    | '/$tenantSlug/diary'
+    | '/$tenantSlug/home'
+    | '/$tenantSlug/introducer'
     | '/$tenantSlug/login'
     | '/$tenantSlug/workspace'
     | '/_authenticated/booking'
@@ -529,7 +670,13 @@ export interface FileRouteTypes {
     | '/raf/$code'
     | '/$tenantSlug/'
     | '/$tenantSlug/book/$introducerSlug'
+    | '/$tenantSlug/chat/$sessionId'
+    | '/$tenantSlug/customers/$customerId'
+    | '/$tenantSlug/interview/$sessionId'
+    | '/$tenantSlug/raf/$code'
     | '/$tenantSlug/ref/$introducerRef'
+    | '/$tenantSlug/sessions/$sessionId'
+    | '/$tenantSlug/text/$sessionId'
     | '/_authenticated/chat/$sessionId'
     | '/_authenticated/customers/$customerId'
     | '/_authenticated/interview/$sessionId'
@@ -736,6 +883,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TenantSlugLoginRouteImport
       parentRoute: typeof TenantSlugRouteRoute
     }
+    '/$tenantSlug/introducer': {
+      id: '/$tenantSlug/introducer'
+      path: '/introducer'
+      fullPath: '/$tenantSlug/introducer'
+      preLoaderRoute: typeof TenantSlugIntroducerRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
+    '/$tenantSlug/home': {
+      id: '/$tenantSlug/home'
+      path: '/home'
+      fullPath: '/$tenantSlug/home'
+      preLoaderRoute: typeof TenantSlugHomeRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
+    '/$tenantSlug/diary': {
+      id: '/$tenantSlug/diary'
+      path: '/diary'
+      fullPath: '/$tenantSlug/diary'
+      preLoaderRoute: typeof TenantSlugDiaryRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
+    '/$tenantSlug/companies': {
+      id: '/$tenantSlug/companies'
+      path: '/companies'
+      fullPath: '/$tenantSlug/companies'
+      preLoaderRoute: typeof TenantSlugCompaniesRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
+    '/$tenantSlug/cases': {
+      id: '/$tenantSlug/cases'
+      path: '/cases'
+      fullPath: '/$tenantSlug/cases'
+      preLoaderRoute: typeof TenantSlugCasesRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
+    '/$tenantSlug/booking': {
+      id: '/$tenantSlug/booking'
+      path: '/booking'
+      fullPath: '/$tenantSlug/booking'
+      preLoaderRoute: typeof TenantSlugBookingRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
     '/api/teams/callback': {
       id: '/api/teams/callback'
       path: '/api/teams/callback'
@@ -813,11 +1002,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChatSessionIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/$tenantSlug/text/$sessionId': {
+      id: '/$tenantSlug/text/$sessionId'
+      path: '/text/$sessionId'
+      fullPath: '/$tenantSlug/text/$sessionId'
+      preLoaderRoute: typeof TenantSlugTextSessionIdRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
+    '/$tenantSlug/sessions/$sessionId': {
+      id: '/$tenantSlug/sessions/$sessionId'
+      path: '/sessions/$sessionId'
+      fullPath: '/$tenantSlug/sessions/$sessionId'
+      preLoaderRoute: typeof TenantSlugSessionsSessionIdRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
     '/$tenantSlug/ref/$introducerRef': {
       id: '/$tenantSlug/ref/$introducerRef'
       path: '/ref/$introducerRef'
       fullPath: '/$tenantSlug/ref/$introducerRef'
       preLoaderRoute: typeof TenantSlugRefIntroducerRefRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
+    '/$tenantSlug/raf/$code': {
+      id: '/$tenantSlug/raf/$code'
+      path: '/raf/$code'
+      fullPath: '/$tenantSlug/raf/$code'
+      preLoaderRoute: typeof TenantSlugRafCodeRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
+    '/$tenantSlug/interview/$sessionId': {
+      id: '/$tenantSlug/interview/$sessionId'
+      path: '/interview/$sessionId'
+      fullPath: '/$tenantSlug/interview/$sessionId'
+      preLoaderRoute: typeof TenantSlugInterviewSessionIdRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
+    '/$tenantSlug/customers/$customerId': {
+      id: '/$tenantSlug/customers/$customerId'
+      path: '/customers/$customerId'
+      fullPath: '/$tenantSlug/customers/$customerId'
+      preLoaderRoute: typeof TenantSlugCustomersCustomerIdRouteImport
+      parentRoute: typeof TenantSlugRouteRoute
+    }
+    '/$tenantSlug/chat/$sessionId': {
+      id: '/$tenantSlug/chat/$sessionId'
+      path: '/chat/$sessionId'
+      fullPath: '/$tenantSlug/chat/$sessionId'
+      preLoaderRoute: typeof TenantSlugChatSessionIdRouteImport
       parentRoute: typeof TenantSlugRouteRoute
     }
     '/$tenantSlug/book/$introducerSlug': {
@@ -887,19 +1118,43 @@ declare module '@tanstack/react-router' {
 }
 
 interface TenantSlugRouteRouteChildren {
+  TenantSlugBookingRoute: typeof TenantSlugBookingRoute
+  TenantSlugCasesRoute: typeof TenantSlugCasesRoute
+  TenantSlugCompaniesRoute: typeof TenantSlugCompaniesRoute
+  TenantSlugDiaryRoute: typeof TenantSlugDiaryRoute
+  TenantSlugHomeRoute: typeof TenantSlugHomeRoute
+  TenantSlugIntroducerRoute: typeof TenantSlugIntroducerRoute
   TenantSlugLoginRoute: typeof TenantSlugLoginRoute
   TenantSlugWorkspaceRoute: typeof TenantSlugWorkspaceRoute
   TenantSlugIndexRoute: typeof TenantSlugIndexRoute
   TenantSlugBookIntroducerSlugRoute: typeof TenantSlugBookIntroducerSlugRoute
+  TenantSlugChatSessionIdRoute: typeof TenantSlugChatSessionIdRoute
+  TenantSlugCustomersCustomerIdRoute: typeof TenantSlugCustomersCustomerIdRoute
+  TenantSlugInterviewSessionIdRoute: typeof TenantSlugInterviewSessionIdRoute
+  TenantSlugRafCodeRoute: typeof TenantSlugRafCodeRoute
   TenantSlugRefIntroducerRefRoute: typeof TenantSlugRefIntroducerRefRoute
+  TenantSlugSessionsSessionIdRoute: typeof TenantSlugSessionsSessionIdRoute
+  TenantSlugTextSessionIdRoute: typeof TenantSlugTextSessionIdRoute
 }
 
 const TenantSlugRouteRouteChildren: TenantSlugRouteRouteChildren = {
+  TenantSlugBookingRoute: TenantSlugBookingRoute,
+  TenantSlugCasesRoute: TenantSlugCasesRoute,
+  TenantSlugCompaniesRoute: TenantSlugCompaniesRoute,
+  TenantSlugDiaryRoute: TenantSlugDiaryRoute,
+  TenantSlugHomeRoute: TenantSlugHomeRoute,
+  TenantSlugIntroducerRoute: TenantSlugIntroducerRoute,
   TenantSlugLoginRoute: TenantSlugLoginRoute,
   TenantSlugWorkspaceRoute: TenantSlugWorkspaceRoute,
   TenantSlugIndexRoute: TenantSlugIndexRoute,
   TenantSlugBookIntroducerSlugRoute: TenantSlugBookIntroducerSlugRoute,
+  TenantSlugChatSessionIdRoute: TenantSlugChatSessionIdRoute,
+  TenantSlugCustomersCustomerIdRoute: TenantSlugCustomersCustomerIdRoute,
+  TenantSlugInterviewSessionIdRoute: TenantSlugInterviewSessionIdRoute,
+  TenantSlugRafCodeRoute: TenantSlugRafCodeRoute,
   TenantSlugRefIntroducerRefRoute: TenantSlugRefIntroducerRefRoute,
+  TenantSlugSessionsSessionIdRoute: TenantSlugSessionsSessionIdRoute,
+  TenantSlugTextSessionIdRoute: TenantSlugTextSessionIdRoute,
 }
 
 const TenantSlugRouteRouteWithChildren = TenantSlugRouteRoute._addFileChildren(

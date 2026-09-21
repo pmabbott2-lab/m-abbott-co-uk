@@ -1,7 +1,9 @@
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, LogOut } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { TenantAppLink } from "@/components/tenant/TenantAppLink";
+import { useTenantUi } from "@/lib/tenant-ui";
 
 type TabPageNavProps = {
   backTo?: string;
@@ -15,10 +17,15 @@ export function TabPageNav({
   onBack,
 }: TabPageNavProps) {
   const navigate = useNavigate();
+  const tenant = useTenantUi();
 
   const signOut = async () => {
     await supabase.auth.signOut();
-    navigate({ to: "/auth", replace: true });
+    navigate({
+      to: "/auth",
+      search: tenant ? { tenant: tenant.slug } : {},
+      replace: true,
+    });
   };
 
   return (
@@ -30,10 +37,10 @@ export function TabPageNav({
         </Button>
       ) : (
         <Button variant="ghost" size="sm" asChild>
-          <Link to={backTo}>
+          <TenantAppLink to={backTo}>
             <ArrowLeft className="w-4 h-4 mr-1.5" />
             {backLabel}
-          </Link>
+          </TenantAppLink>
         </Button>
       )}
       <Button variant="ghost" size="sm" onClick={() => void signOut()} className="text-muted-foreground">

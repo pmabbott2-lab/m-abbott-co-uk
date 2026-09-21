@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -12,6 +12,7 @@ import {
   User,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { TenantAppLink as Link } from "@/components/tenant/TenantAppLink";
 import { CustomerHubBookingDialog } from "@/components/CustomerHubBookingDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,8 +47,8 @@ export const Route = createFileRoute("/_authenticated/customers/$customerId")({
   component: CustomerHubPage,
 });
 
-function CustomerHubPage() {
-  const { customerId } = Route.useParams();
+export function CustomerHubPage() {
+  const { customerId } = useParams({ strict: false }) as { customerId: string };
   const qc = useQueryClient();
   const hubFn = useServerFn(getCustomerHub);
   const roleFn = useServerFn(getMyRole);

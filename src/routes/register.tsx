@@ -12,6 +12,8 @@ import { ShieldCheck, Link2 } from "lucide-react";
 import avatarImg from "@/assets/susan.png";
 
 type ResolvedInvite = {
+  tenantId: string;
+  tenantSlug: string | null;
   role: "advisor" | "introducer" | "admin";
   email: string | null;
   companyName: string | null;
@@ -87,6 +89,17 @@ function RegisterPage() {
     else toast.error(text);
   };
 
+  const goAfterInvite = (tenantSlug: string | null | undefined) => {
+    if (tenantSlug) {
+      void navigate({
+        to: "/$tenantSlug/workspace",
+        params: { tenantSlug },
+      } as never);
+      return;
+    }
+    void navigate({ to: "/" });
+  };
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || !invite) return;
@@ -98,7 +111,7 @@ function RegisterPage() {
         email: trimmedEmail,
         password,
         options: {
-          emailRedirectTo: getAuthCallbackUrl(),
+          emailRedirectTo: getAuthCallbackUrl(invite.tenantSlug),
           data: { full_name: fullName.trim(), phone: phone.trim() },
         },
       });
@@ -121,7 +134,7 @@ function RegisterPage() {
         }
         await markUsedFn({ data: { token, userId: signedIn.user.id } });
         showStatus("success", "Invite attached to your existing account — taking you to your dashboard…");
-        navigate({ to: "/home" });
+        goAfterInvite(invite.tenantSlug);
         return;
       }
 
@@ -138,7 +151,7 @@ function RegisterPage() {
 
       if (data.session) {
         showStatus("success", "Welcome aboard — taking you to your dashboard…");
-        navigate({ to: "/home" });
+        goAfterInvite(invite.tenantSlug);
         return;
       }
 
@@ -264,7 +277,13 @@ function RegisterPage() {
         <p className="text-xs text-center text-muted-foreground space-x-3">
           <Link to="/" className="hover:underline">← Back home</Link>
           <span>·</span>
-          <Link to="/auth" search={{ recovery: false }} className="hover:underline">Already have an account? Sign in</Link>
+          <Link
+            to="/auth"
+            search={invite?.tenantSlug ? { tenant: invite.tenantSlug } : {}}
+            className="hover:underline"
+          >
+            Already have an account? Sign in
+          </Link>
         </p>
       </div>
     </div>

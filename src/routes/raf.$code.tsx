@@ -7,6 +7,8 @@ import { resolveReferralCode, resolveReferralCodeMeta } from "@/lib/referrals.fu
 import { Button } from "@/components/ui/button";
 import { Gift, CalendarCheck, MessageSquare, Mic, ShieldCheck } from "lucide-react";
 import avatarImg from "@/assets/susan.png";
+import { useTenantUi } from "@/lib/tenant-ui";
+import { buildAuthNavigateSearch } from "@/lib/post-auth-journey";
 
 function rafShareUrl(code: string): string {
   const base =
@@ -44,56 +46,93 @@ export const Route = createFileRoute("/raf/$code")({
 function ReferAFriendLanding() {
   const { code } = Route.useParams();
   const loaderData = Route.useLoaderData();
+  return <RafLanding code={code} initialMeta={loaderData?.meta ?? null} />;
+}
+
+export function RafLanding({
+  code,
+  initialMeta,
+}: {
+  code: string;
+  initialMeta: {
+    referrer_name: string | null;
+    tenantSlug: string | null;
+  } | null;
+}) {
   const navigate = useNavigate();
+  const tenantUi = useTenantUi();
   const resolveFn = useServerFn(resolveReferralCode);
   const [referrerName, setReferrerName] = useState<string | null>(
-    loaderData?.meta?.referrer_name ?? null,
+    initialMeta?.referrer_name ?? null,
   );
-  const [ready, setReady] = useState(!!loaderData?.meta);
+  const [tenantSlug, setTenantSlug] = useState<string | null>(
+    initialMeta?.tenantSlug ?? tenantUi?.slug ?? null,
+  );
+  const [ready, setReady] = useState(!!initialMeta);
 
   useEffect(() => {
     let cancelled = false;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!cancelled && data.session) navigate({ to: "/home" });
-    });
+    if (code) setRafCookie(code);
 
-    if (loaderData?.meta) return;
-
-    (async () => {
-      try {
-        const link = await resolveFn({ data: { code } });
-        if (cancelled) return;
-        if (link) {
-          setRafCookie(link.code);
-          setReferrerName(link.referrer_name ?? null);
+    if (!initialMeta) {
+      (async () => {
+        try {
+          const link = await resolveFn({ data: { code } });
+          if (cancelled) return;
+          if (link) {
+            setRafCookie(link.code);
+            setReferrerName(link.referrer_name ?? null);
+            setTenantSlug(link.tenantSlug ?? tenantUi?.slug ?? null);
+          }
+        } catch {
+          // Network/server hiccup — still show the welcoming page.
+        } finally {
+          if (!cancelled) setReady(true);
         }
-      } catch {
-        // Network/server hiccup — still show the welcoming page.
-      } finally {
-        if (!cancelled) setReady(true);
-      }
-    })();
+      })();
+    }
 
     return () => {
       cancelled = true;
     };
-  }, [code, resolveFn, navigate, loaderData]);
+  }, [code, resolveFn, initialMeta, tenantUi?.slug]);
+
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled || !data.session) return;
+      if (tenantSlug) {
+        void navigate({
+          to: "/$tenantSlug/workspace",
+          params: { tenantSlug },
+        } as never);
+        return;
+      }
+      void navigate({ to: "/home" });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, tenantSlug, navigate]);
 
   if (!ready) return <div className="min-h-screen bg-background" />;
 
+  const firmLabel = tenantUi?.tradingName || tenantUi?.companyName || "Mortgage Hub";
+  const authSearch = buildAuthNavigateSearch({ tenantSlug });
   const headline = referrerName
-    ? `${referrerName} has invited you to Mortgage Hub`
-    : "A friend has invited you to Mortgage Hub";
+    ? `${referrerName} has invited you to ${firmLabel}`
+    : `A friend has invited you to ${firmLabel}`;
 
   return (
     <div className="min-h-screen bg-background">
       <header className="px-6 py-5 flex items-center justify-between max-w-6xl mx-auto">
         <div className="flex items-center gap-2 font-semibold">
           <span className="inline-block w-7 h-7 rounded-full bg-accent" />
-          Mortgage Hub
+          {firmLabel}
         </div>
-        <Link to="/auth" search={{ recovery: false }}>
+        <Link to="/auth" search={authSearch}>
           <Button variant="ghost">Sign in</Button>
         </Link>
       </header>
@@ -115,10 +154,10 @@ function ReferAFriendLanding() {
               easier.
             </p>
             <div className="flex flex-wrap gap-3">
-              <Link to="/auth" search={{ recovery: false }}>
+              <Link to="/auth" search={authSearch}>
                 <Button size="lg">Start your mortgage journey</Button>
               </Link>
-              <Link to="/auth" search={{ recovery: false }}>
+              <Link to="/auth" search={authSearch}>
                 <Button size="lg" variant="outline">
                   I already have an account
                 </Button>

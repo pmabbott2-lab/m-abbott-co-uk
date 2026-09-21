@@ -7,8 +7,11 @@ import { TenantPublicShell } from "@/components/tenant/TenantPublicShell";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/$tenantSlug/login")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    join: search.join === true || search.join === "1" || search.join === 1,
+  validateSearch: (search: Record<string, unknown>): {
+    join?: boolean;
+    start?: "voice" | "chat" | "book";
+  } => ({
+    join: search.join === true || search.join === "1" || search.join === 1 ? true : undefined,
     start:
       search.start === "voice" || search.start === "chat" || search.start === "book"
         ? (search.start as "voice" | "chat" | "book")

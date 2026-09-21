@@ -3,6 +3,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { isTwilioConfigured, sendSms, getAppBaseUrl, getSmsSenderLabel } from "@/lib/sms.server";
 import { rafShareMessage } from "@/lib/referral";
+import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
 
 // ============================================================================
 // Refer a friend (RAF) — ADMIN-DRIVEN.
@@ -156,13 +157,14 @@ export async function resolveReferralCodeMeta(code: string): Promise<{
   id: string;
   code: string;
   referrer_name: string | null;
+  tenantSlug: string | null;
 } | null> {
   const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
   const { data: row, error } = await supabaseAdmin
     .from("referral_codes")
-    .select("id, code, referrer_name, referrer_user_id")
+    .select("id, code, referrer_name, referrer_user_id, tenant_id")
     .eq("code", code)
     .eq("active", true)
     .maybeSingle();
@@ -182,7 +184,20 @@ export async function resolveReferralCodeMeta(code: string): Promise<{
     referrerName = profile?.full_name?.trim() || profile?.email?.split("@")[0] || null;
   }
 
-  return { id: row.id, code: row.code, referrer_name: referrerName };
+  let tenantSlug: string | null = null;
+  const tenantId = (row as { tenant_id?: string | null }).tenant_id;
+  if (tenantId) {
+    const { data: tenantRow } = await supabaseAdmin
+      .from("tenants")
+      .select("slug, status")
+      .eq("id", tenantId)
+      .maybeSingle();
+    if (tenantRow?.status === "active") {
+      tenantSlug = normalisePublicTenantSlug(tenantRow.slug);
+    }
+  }
+
+  return { id: row.id, code: row.code, referrer_name: referrerName, tenantSlug };
 }
 
 export const resolveReferralCode = createServerFn({ method: "GET" })

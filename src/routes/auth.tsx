@@ -31,7 +31,10 @@ import {
   savePostAuthStart,
   syncPostAuthStart,
   usesAppointmentSignupFlow,
+  buildAuthNavigateSearch,
+  type AuthSearch,
 } from "@/lib/post-auth-journey";
+import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
 
 function hasTestLoginBypass(session: Session): boolean {
   const meta = session.user.app_metadata as { test_email_bypass?: boolean } | undefined;
@@ -56,10 +59,11 @@ export const Route = createFileRoute("/auth")({
   pendingMs: 0,
   pendingMinMs: 0,
   pendingComponent: () => null,
-  validateSearch: (search: Record<string, unknown>) => {
+  validateSearch: (search: Record<string, unknown>): AuthSearch => {
     const fromBroker =
       search.from === "broker" ||
-      search.from === "mortgageeasy";
+      search.from === "mortgageeasy" ||
+      search.fromBroker === true;
     const start =
       parsePostAuthStart(typeof search.start === "string" ? search.start : null) ?? undefined;
     const joinRaw = search.join;
@@ -72,8 +76,8 @@ export const Route = createFileRoute("/auth")({
       search.mode === "signup" ||
       search.mode === "join" ||
       start !== undefined;
-    const tenantRaw = typeof search.tenant === "string" ? search.tenant.trim().toLowerCase() : "";
-    const tenant = /^[a-z0-9-]{2,64}$/.test(tenantRaw) ? tenantRaw : undefined;
+    const tenantRaw = typeof search.tenant === "string" ? search.tenant : "";
+    const tenant = normalisePublicTenantSlug(tenantRaw) ?? undefined;
     return {
       recovery: search.recovery === "1" || search.recovery === 1 || search.recovery === true,
       join,
@@ -271,18 +275,22 @@ function AuthPage() {
         if (preservedStart) savePostAuthStart(preservedStart);
         void navigate({
           to: "/auth",
-          search: {
-            ...(broker ? { from: "broker" as const } : {}),
-            join: "1",
-            ...(preservedStart ? { start: preservedStart } : {}),
-          },
+          search: buildAuthNavigateSearch({
+            tenantSlug,
+            fromBroker: broker,
+            join: true,
+            start: preservedStart,
+          }),
           replace: true,
         });
       } else if (next === "signin") {
         clearPostAuthStart();
         void navigate({
           to: "/auth",
-          search: broker ? { from: "broker" as const } : {},
+          search: buildAuthNavigateSearch({
+            tenantSlug,
+            fromBroker: broker,
+          }),
           replace: true,
         });
       }
@@ -619,7 +627,7 @@ function AuthPage() {
           email: emailValue,
           password: passwordValue,
           options: {
-            emailRedirectTo: getAuthCallbackUrl(),
+            emailRedirectTo: getAuthCallbackUrl(tenantSlug),
             data: { full_name: nameValue, phone: phoneValue },
           },
         });
@@ -693,7 +701,7 @@ function AuthPage() {
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: getAuthCallbackUrl() },
+        options: { redirectTo: getAuthCallbackUrl(tenantSlug) },
       });
       if (error) throw error;
     } catch (err) {

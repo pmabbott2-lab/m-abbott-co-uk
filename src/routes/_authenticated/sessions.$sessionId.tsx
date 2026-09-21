@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
@@ -47,6 +47,7 @@ import {
 } from "@/lib/booking.functions";
 import { MarkContactedButton } from "@/components/MarkContactedButton";
 import { AppShell } from "@/components/AppShell";
+import { TenantAppLink as Link } from "@/components/tenant/TenantAppLink";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { safeFormat } from "@/lib/safe-format";
@@ -72,8 +73,8 @@ export const Route = createFileRoute("/_authenticated/sessions/$sessionId")({
   component: SessionDetail,
 });
 
-function SessionDetail() {
-  const { sessionId } = Route.useParams();
+export function SessionDetail() {
+  const { sessionId } = useParams({ strict: false }) as { sessionId: string };
   const qc = useQueryClient();
   const getFn = useServerFn(getSession);
   const submitFn = useServerFn(submitSession);

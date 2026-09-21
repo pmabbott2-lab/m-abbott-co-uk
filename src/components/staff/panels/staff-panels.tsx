@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router";
+import { TenantAppLink as Link, useTenantAwareNavigate } from "@/components/tenant/TenantAppLink";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
@@ -3101,7 +3101,7 @@ export function DashboardSessionRow({
         ? "Unallocated"
         : null;
 
-  const navigate = useNavigate();
+  const navigate = useTenantAwareNavigate();
 
   const openSession = () => {
     if (callback) onCallbackOpen(callback.id);
@@ -3444,7 +3444,7 @@ export function ContactsCard({
   isOwner: boolean;
 }) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
+  const navigate = useTenantAwareNavigate();
   const contactsFn = useServerFn(listAdvisorContacts);
   const openFn = useServerFn(markContactOpened);
   const completeTaskFn = useServerFn(completeStaffContactTask);

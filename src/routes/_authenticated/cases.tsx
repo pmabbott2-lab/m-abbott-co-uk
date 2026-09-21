@@ -1,10 +1,11 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { format, formatDistanceToNow } from "date-fns";
 import { ArrowRight, CalendarCheck, FileText, MapPin } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { TabPageNav } from "@/components/TabPageNav";
+import { TenantAppLink as Link } from "@/components/tenant/TenantAppLink";
 import { listMyCases } from "@/lib/sessions.functions";
 import { getSessionBooking } from "@/lib/booking.functions";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,7 @@ export const Route = createFileRoute("/_authenticated/cases")({
   component: CasesPage,
 });
 
-function CasesPage() {
+export function CasesPage() {
   const casesFn = useServerFn(listMyCases);
   const casesQ = useQuery({ queryKey: ["my-cases"], queryFn: () => casesFn() });
 

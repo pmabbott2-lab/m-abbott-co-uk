@@ -1,4 +1,6 @@
 /** Persist which customer journey to open after brokerage → Hub sign-up. */
+import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
+
 export type PostAuthStart = "voice" | "chat" | "book";
 
 const STORAGE_KEY = "hub_post_auth_start";
@@ -91,14 +93,17 @@ export function buildAuthPath(opts?: {
   if (opts?.fromBroker) params.set("from", "broker");
   if (opts?.join) params.set("join", "1");
   if (opts?.start) params.set("start", opts.start);
-  if (opts?.tenantSlug) params.set("tenant", opts.tenantSlug);
+  if (opts?.tenantSlug) {
+    const slug = normalisePublicTenantSlug(opts.tenantSlug);
+    if (slug) params.set("tenant", slug);
+  }
   const q = params.toString();
   return q ? `/auth?${q}` : "/auth";
 }
 
 /** After auth: prefer tenant workspace gate when a tenant slug was requested. */
 export function buildHomePathAfterAuth(start: PostAuthStart | null, tenantSlug?: string | null) {
-  const slug = tenantSlug?.trim().toLowerCase();
+  const slug = normalisePublicTenantSlug(tenantSlug);
   if (slug) {
     const q = start ? `?start=${encodeURIComponent(start)}` : "";
     return `/${encodeURIComponent(slug)}/workspace${q}`;
@@ -108,8 +113,33 @@ export function buildHomePathAfterAuth(start: PostAuthStart | null, tenantSlug?:
 
 export function readTenantSlugFromLocation(): string | null {
   if (typeof window === "undefined") return null;
-  const t = new URLSearchParams(window.location.search).get("tenant");
-  return t?.trim().toLowerCase() || null;
+  return normalisePublicTenantSlug(new URLSearchParams(window.location.search).get("tenant"));
+}
+
+/** Shared `/auth` search. All keys optional so missing tenant fails to platform, never 001. */
+export type AuthSearch = {
+  recovery?: boolean;
+  join?: boolean;
+  fromBroker?: boolean;
+  start?: PostAuthStart;
+  tenant?: string;
+};
+
+export function buildAuthNavigateSearch(opts: {
+  tenantSlug?: string | null;
+  join?: boolean;
+  fromBroker?: boolean;
+  start?: PostAuthStart | null;
+  recovery?: boolean;
+}): AuthSearch {
+  const search: AuthSearch = {};
+  const tenant = normalisePublicTenantSlug(opts.tenantSlug);
+  if (tenant) search.tenant = tenant;
+  if (opts.join) search.join = true;
+  if (opts.fromBroker) search.fromBroker = true;
+  if (opts.start) search.start = opts.start;
+  if (opts.recovery) search.recovery = true;
+  return search;
 }
 
 /** Only book uses appointment-first signup; voice and chat use the classic create-account form. */

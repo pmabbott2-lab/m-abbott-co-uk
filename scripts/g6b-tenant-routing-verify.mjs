@@ -1,0 +1,188 @@
+/**
+ * Static G6B tenant-routing + client/server boundary checks.
+ * No secrets. No network.
+ * Run: npx tsx scripts/g6b-tenant-routing-verify.mjs
+ */
+import { readFileSync, existsSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { resolveTenantAuthenticatedEntry } from "../src/lib/tenant-access.ts";
+import { remapAppNavigate, remapAppHref } from "../src/lib/tenant-app-nav.ts";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const failures = [];
+function ok(name, cond, detail = "") {
+  if (cond) console.log(`PASS  ${name}${detail ? ` — ${detail}` : ""}`);
+  else {
+    console.error(`FAIL  ${name}${detail ? ` — ${detail}` : ""}`);
+    failures.push(name);
+  }
+}
+
+const route = readFileSync(resolve(root, "src/routes/$tenantSlug/route.tsx"), "utf8");
+ok("layout_uses_server_fn", route.includes("getTenantSlugLayoutFn"));
+ok(
+  "layout_no_direct_presentation_load",
+  !route.includes("loadTenantPresentationBySlug") && !route.includes("peekTenantBySlug("),
+);
+ok("layout_no_client_server_import", !route.includes("client.server"));
+ok("layout_no_supabase_admin", !route.includes("supabaseAdmin"));
+const presentationServer = readFileSync(resolve(root, "src/lib/tenant-presentation.server.ts"), "utf8");
+ok(
+  "presentation_wrappers_no_static_admin",
+  !/from ["']@\/integrations\/supabase\/client\.server["']/.test(presentationServer) &&
+    !/from ["']@\/lib\/tenant-context\.server["']/.test(presentationServer),
+);
+ok("presentation_wrappers_dynamic_impl", presentationServer.includes("tenant-presentation.impl.server"));
+ok(
+  "impl_not_imported_from_layout",
+  !route.includes("tenant-presentation.impl.server"),
+);
+
+const workspace = readFileSync(resolve(root, "src/routes/$tenantSlug/workspace.tsx"), "utf8");
+ok("workspace_goes_to_tenant_home", workspace.includes("/$tenantSlug/home"));
+const routeTree = readFileSync(resolve(root, "src/routeTree.gen.ts"), "utf8");
+ok("route_tree_has_tenant_home", routeTree.includes("/$tenantSlug/home"));
+ok("route_tree_keeps_platform_home", routeTree.includes("'/home': typeof AuthenticatedHomeRoute"));
+ok(
+  "src_no_vite_service_role",
+  !readFileSync(resolve(root, "src/integrations/supabase/client.ts"), "utf8").includes(
+    "VITE_SUPABASE_SERVICE_ROLE_KEY",
+  ),
+);
+ok("workspace_no_platform_home_success", !workspace.includes('to: "/home"'));
+
+ok("tenant_home_file", existsSync(resolve(root, "src/routes/$tenantSlug/home.tsx")));
+const tenantHome = readFileSync(resolve(root, "src/routes/$tenantSlug/home.tsx"), "utf8");
+ok("tenant_home_reuses_home", tenantHome.includes('from "@/routes/_authenticated/home"'));
+ok("tenant_home_membership_gate", tenantHome.includes("TenantAuthenticatedGate"));
+ok("platform_home_retained", existsSync(resolve(root, "src/routes/_authenticated/home.tsx")));
+ok(
+  "platform_home_route_unchanged",
+  readFileSync(resolve(root, "src/routes/_authenticated/home.tsx"), "utf8").includes(
+    'createFileRoute("/_authenticated/home")',
+  ),
+);
+
+const clientTs = readFileSync(resolve(root, "src/integrations/supabase/client.ts"), "utf8");
+ok("no_vite_service_role_env", !clientTs.includes("VITE_SUPABASE_SERVICE_ROLE_KEY"));
+ok("client_ts_no_service_role_read", !clientTs.includes("process.env.SUPABASE_SERVICE_ROLE_KEY"));
+
+const srcFiles = [
+  "src/routes/$tenantSlug/route.tsx",
+  "src/routes/$tenantSlug/home.tsx",
+  "src/routes/$tenantSlug/workspace.tsx",
+  "src/lib/tenant-access.ts",
+  "src/lib/post-auth-journey.ts",
+  "src/lib/app-url.ts",
+  "src/components/tenant/TenantAuthenticatedGate.tsx",
+];
+for (const rel of srcFiles) {
+  const t = readFileSync(resolve(root, rel), "utf8");
+  ok(`${rel}_no_prod_ref`, !t.includes("tiuplmftooauihulhtws"));
+}
+
+ok("tenant_home_not_hardcoded_001", !tenantHome.includes("mortgageeasy") && !tenantHome.includes("001"));
+ok("workspace_not_hardcoded_001", !workspace.includes("mortgageeasy") && !workspace.includes("001"));
+
+const owner001 = "67b22f6e-c15a-4193-b61c-ed39c63e3dc5";
+ok("001_member_ok", resolveTenantAuthenticatedEntry({ userId: owner001, member: true }) === "ok");
+ok("001_to_002_denied", resolveTenantAuthenticatedEntry({ userId: owner001, member: false }) === "denied");
+const owner002 = "00000000-0000-0000-0000-000000000002";
+ok("002_member_ok", resolveTenantAuthenticatedEntry({ userId: owner002, member: true }) === "ok");
+ok("002_to_001_denied", resolveTenantAuthenticatedEntry({ userId: owner002, member: false }) === "denied");
+ok("anonymous_login", resolveTenantAuthenticatedEntry({ userId: null, member: true }) === "login");
+
+const postAuth = readFileSync(resolve(root, "src/lib/post-auth-journey.ts"), "utf8");
+ok("after_auth_uses_normalised_slug", postAuth.includes("normalisePublicTenantSlug(tenantSlug)"));
+ok("after_auth_fallback_platform_home", postAuth.includes('return start ? `/home?start=${encodeURIComponent(start)}` : "/home"'));
+ok("auth_path_sets_tenant_param", postAuth.includes('params.set("tenant", slug)'));
+
+const appUrl = readFileSync(resolve(root, "src/lib/app-url.ts"), "utf8");
+ok("callback_includes_tenant_query", appUrl.includes("/auth?tenant="));
+ok("callback_no_silent_001", !appUrl.includes("mortgageeasy"));
+
+const gate = readFileSync(resolve(root, "src/components/tenant/TenantAuthenticatedGate.tsx"), "utf8");
+ok("gate_uses_membership_rpc", gate.includes("checkTenantMembershipFn"));
+ok("gate_uses_session_user_id", gate.includes("user?.id") || gate.includes("user.id"));
+ok("gate_not_email_acl", !gate.toLowerCase().includes("email"));
+
+const tenantAppPages = [
+  ["diary", "DiaryPage"],
+  ["cases", "CasesPage"],
+  ["booking", "BookingPage"],
+  ["introducer", "IntroducerPortalPage"],
+  ["companies", "CompaniesPage"],
+];
+for (const [page, exported] of tenantAppPages) {
+  const rel = `src/routes/$tenantSlug/${page}.tsx`;
+  ok(`tenant_${page}_file`, existsSync(resolve(root, rel)));
+  const src = readFileSync(resolve(root, rel), "utf8");
+  ok(`tenant_${page}_gated`, src.includes("TenantAuthenticatedApp"));
+  ok(`tenant_${page}_reuses`, src.includes(`from "@/routes/_authenticated/${page}"`));
+  ok(`platform_${page}_retained`, existsSync(resolve(root, `src/routes/_authenticated/${page}.tsx`)));
+  ok(`${rel}_no_prod_ref`, !src.includes("tiuplmftooauihulhtws"));
+  ok(`tenant_${page}_not_hardcoded_001`, !src.includes("mortgageeasy") && !src.includes("001"));
+}
+
+const tenantParamPages = [
+  ["customers.$customerId", "CustomerHubPage", "customers.$customerId"],
+  ["sessions.$sessionId", "SessionDetail", "sessions.$sessionId"],
+  ["interview.$sessionId", "InterviewPage", "interview.$sessionId"],
+  ["chat.$sessionId", "ChatPage", "chat.$sessionId"],
+  ["text.$sessionId", "TextInterviewPage", "text.$sessionId"],
+];
+for (const [file, exported, authFile] of tenantParamPages) {
+  const rel = `src/routes/$tenantSlug/${file}.tsx`;
+  ok(`tenant_${file}_file`, existsSync(resolve(root, rel)));
+  const src = readFileSync(resolve(root, rel), "utf8");
+  ok(`tenant_${file}_gated`, src.includes("TenantAuthenticatedApp"));
+  ok(`tenant_${file}_reuses`, src.includes(exported));
+  ok(`platform_${file}_retained`, existsSync(resolve(root, `src/routes/_authenticated/${authFile}.tsx`)));
+}
+
+ok(
+  "remap_home_with_slug",
+  remapAppNavigate({ to: "/home", tenantSlug: "trentvalleyfs" }).to === "/$tenantSlug/home" &&
+    remapAppNavigate({ to: "/home", tenantSlug: "trentvalleyfs" }).params?.tenantSlug === "trentvalleyfs",
+);
+ok(
+  "remap_no_slug_stays_platform",
+  remapAppNavigate({ to: "/home" }).to === "/home" && !remapAppNavigate({ to: "/home" }).params,
+);
+ok(
+  "remap_invalid_slug_stays_platform",
+  remapAppNavigate({ to: "/diary", tenantSlug: "home" }).to === "/diary",
+);
+ok(
+  "remap_never_injects_001",
+  remapAppHref({ to: "/cases" }) === "/cases" &&
+    !remapAppHref({ to: "/cases" }).includes("mortgageeasy") &&
+    remapAppHref({ to: "/sessions/$sessionId", params: { sessionId: "abc" }, tenantSlug: "trentvalleyfs" }) ===
+      "/trentvalleyfs/sessions/abc",
+);
+ok(
+  "remap_ignores_auth",
+  remapAppNavigate({ to: "/auth", tenantSlug: "trentvalleyfs" }).to === "/auth",
+);
+
+const appShell = readFileSync(resolve(root, "src/components/AppShell.tsx"), "utf8");
+ok("appshell_remaps_back", appShell.includes("remapAppNavigate"));
+const tabNav = readFileSync(resolve(root, "src/components/TabPageNav.tsx"), "utf8");
+ok("tabnav_tenant_link", tabNav.includes("TenantAppLink"));
+ok("tabnav_signout_preserves_tenant", tabNav.includes("tenant.slug"));
+
+const registerSrc = readFileSync(resolve(root, "src/routes/register.tsx"), "utf8");
+ok("register_uses_invite_slug", registerSrc.includes("goAfterInvite") && registerSrc.includes("invite.tenantSlug"));
+ok("register_no_silent_001", !registerSrc.includes("mortgageeasy"));
+const rafSrc = readFileSync(resolve(root, "src/routes/raf.$code.tsx"), "utf8");
+ok("raf_uses_tenant_slug", rafSrc.includes("tenantSlug"));
+ok("raf_no_silent_001", !rafSrc.includes("mortgageeasy"));
+
+ok("route_tree_keeps_platform_diary", routeTree.includes("'/diary': typeof AuthenticatedDiaryRoute") || routeTree.includes("AuthenticatedDiaryRoute"));
+
+if (failures.length) {
+  console.error(`\n${failures.length} failure(s)`);
+  process.exit(1);
+}
+console.log("\nG6B tenant routing verify PASS");

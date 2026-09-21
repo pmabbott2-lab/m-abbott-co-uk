@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -12,6 +12,7 @@ import { PostCompletionBooking } from "@/components/PostCompletionBooking";
 import { ArrowLeft, Send } from "lucide-react";
 import { toast } from "sonner";
 import { totalQuestions, questionIndexGlobal, getQuestion, findSection, prevStep, buildQuestionSayText, type Section, type AnswersMap } from "@/lib/interview-script";
+import { useTenantAwareNavigate } from "@/components/tenant/TenantAppLink";
 
 export const Route = createFileRoute("/_authenticated/text/$sessionId")({
   component: TextInterviewPage,
@@ -33,9 +34,9 @@ function buildPromptText(section: Section, index: number, answers: AnswersMap, f
   return buildQuestionSayText(section, index, answers, firstName, { isFirstQuestion: section === "personal" && index === 0 });
 }
 
-function TextInterviewPage() {
-  const { sessionId } = Route.useParams();
-  const navigate = useNavigate();
+export function TextInterviewPage() {
+  const { sessionId } = useParams({ strict: false }) as { sessionId: string };
+  const navigate = useTenantAwareNavigate();
   const getSessionFn = useServerFn(getSession);
   const submitFn = useServerFn(submitSession);
   const setPositionFn = useServerFn(setSessionPosition);

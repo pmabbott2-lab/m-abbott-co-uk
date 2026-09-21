@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AppShell } from "@/components/AppShell";
 import { TabPageNav } from "@/components/TabPageNav";
+import { TenantAppLink as Link } from "@/components/tenant/TenantAppLink";
 import { createAppointmentAuth, getAvailableSlots, requestCallbackAuth } from "@/lib/booking.functions";
 import { CALLBACK_WINDOW_OPTIONS, CALLBACK_WINDOW_RANGES } from "@/components/PostCompletionBooking";
 import { getReferralSlug } from "@/lib/referral";
@@ -16,10 +17,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { CalendarCheck, CheckCircle2, PhoneCall } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/booking")({
-  component: DirectBookingPage,
+  component: BookingPage,
 });
 
-function DirectBookingPage() {
+export function BookingPage() {
   const slotsFn = useServerFn(getAvailableSlots);
   const bookFn = useServerFn(createAppointmentAuth);
   const callbackFn = useServerFn(requestCallbackAuth);

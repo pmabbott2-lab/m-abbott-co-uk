@@ -3,6 +3,7 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 import { type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { remapAppNavigate } from "@/lib/tenant-app-nav";
 import { useTenantUi } from "@/lib/tenant-ui";
 
 export function AppShell({
@@ -32,27 +33,44 @@ export function AppShell({
     } catch {
       /* ignore */
     }
-    navigate({ to: "/auth", replace: true });
+    navigate({
+      to: "/auth",
+      search: tenant ? { tenant: tenant.slug } : {},
+      replace: true,
+    });
   };
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card/60 backdrop-blur sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2">
-          <Link to="/home" className="flex items-center gap-2 font-semibold shrink-0">
-            <span className="inline-flex w-7 h-7 items-center justify-center rounded-lg bg-primary text-primary-foreground text-xs font-bold shadow-sm">
-              MH
-            </span>
-            <span className="hidden sm:inline">
-              {companyLabel ? (
-                <>
-                  <span className="text-foreground">{companyLabel}</span>
-                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">via Mortgage Hub</span>
-                </>
-              ) : (
-                "Mortgage Hub"
-              )}
-            </span>
-          </Link>
+          {tenant ? (
+            <Link
+              to="/$tenantSlug/home"
+              params={{ tenantSlug: tenant.slug }}
+              className="flex items-center gap-2 font-semibold shrink-0"
+            >
+              <span className="inline-flex w-7 h-7 items-center justify-center rounded-lg bg-primary text-primary-foreground text-xs font-bold shadow-sm">
+                MH
+              </span>
+              <span className="hidden sm:inline">
+                {companyLabel ? (
+                  <>
+                    <span className="text-foreground">{companyLabel}</span>
+                    <span className="ml-1.5 text-xs font-normal text-muted-foreground">via Mortgage Hub</span>
+                  </>
+                ) : (
+                  "Mortgage Hub"
+                )}
+              </span>
+            </Link>
+          ) : (
+            <Link to="/home" className="flex items-center gap-2 font-semibold shrink-0">
+              <span className="inline-flex w-7 h-7 items-center justify-center rounded-lg bg-primary text-primary-foreground text-xs font-bold shadow-sm">
+                MH
+              </span>
+              <span className="hidden sm:inline">Mortgage Hub</span>
+            </Link>
+          )}
           <h1 className="text-sm font-medium text-muted-foreground hidden sm:block min-w-0 truncate">{title}</h1>
           <div className="flex items-center justify-end gap-1 sm:gap-2 min-w-0">
             {action}
@@ -70,11 +88,15 @@ export function AppShell({
                 size="sm"
                 className="shrink-0"
                 onClick={() => {
-                  if (backParams) {
-                    void navigate({ to: backTo, params: backParams });
-                  } else {
-                    void navigate({ to: backTo });
-                  }
+                  const remapped = remapAppNavigate({
+                    to: backTo,
+                    params: backParams,
+                    tenantSlug: tenant?.slug,
+                  });
+                  void navigate({
+                    to: remapped.to,
+                    params: remapped.params,
+                  } as never);
                 }}
               >
                 <ArrowLeft className="w-4 h-4 mr-1.5" />

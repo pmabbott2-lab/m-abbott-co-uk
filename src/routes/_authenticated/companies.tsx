@@ -5,6 +5,6 @@ export const Route = createFileRoute("/_authenticated/companies")({
   component: CompaniesPage,
 });
 
-function CompaniesPage() {
+export function CompaniesPage() {
   return <CreateCompanyWizard />;
 }

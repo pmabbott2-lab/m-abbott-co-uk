@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -33,6 +33,7 @@ import {
   type DependantFlow,
 } from "@/lib/interview-wizards";
 import { OPEN_FIELD_KEY } from "@/lib/interview-opening";
+import { useTenantAwareNavigate } from "@/components/tenant/TenantAppLink";
 
 export const Route = createFileRoute("/_authenticated/interview/$sessionId")({
   component: InterviewPage,
@@ -93,9 +94,9 @@ function asSusan(text: string) {
   return text.replace("Hi! I'll guide you", "Hi, I'm Susan. I'll guide you");
 }
 
-function InterviewPage() {
-  const { sessionId } = Route.useParams();
-  const navigate = useNavigate();
+export function InterviewPage() {
+  const { sessionId } = useParams({ strict: false }) as { sessionId: string };
+  const navigate = useTenantAwareNavigate();
   const getSessionFn = useServerFn(getSession);
   const submitFn = useServerFn(submitSession);
   const setPositionFn = useServerFn(setSessionPosition);

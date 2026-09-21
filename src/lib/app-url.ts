@@ -2,6 +2,8 @@
  * Canonical app URL for auth email links (reset password, confirm email, OAuth).
  * Set VITE_APP_URL in .env / Azure so emails return to the deployed site.
  */
+import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
+
 export const MMH_PUBLIC_URL = "https://mymortgagehub.uk";
 
 function stripSlash(url: string): string {
@@ -47,8 +49,11 @@ export function getAppOrigin(): string {
   return "http://localhost:8080";
 }
 
-export function getAuthCallbackUrl(): string {
-  return `${getAppOrigin()}/auth`;
+export function getAuthCallbackUrl(tenantSlug?: string | null): string {
+  const origin = getAppOrigin();
+  const slug = normalisePublicTenantSlug(tenantSlug);
+  if (slug) return `${origin}/auth?tenant=${encodeURIComponent(slug)}`;
+  return `${origin}/auth`;
 }
 
 export function getPasswordResetUrl(): string {

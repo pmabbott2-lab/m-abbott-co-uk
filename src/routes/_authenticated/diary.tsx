@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect } from "react";
@@ -10,18 +10,19 @@ import {
 import { getAdvisorView } from "@/lib/advisor-view";
 import { getMyRole } from "@/lib/sessions.functions";
 import { Button } from "@/components/ui/button";
+import { useTenantAwareNavigate } from "@/components/tenant/TenantAppLink";
 
 export const Route = createFileRoute("/_authenticated/diary")({
   validateSearch: (search: Record<string, unknown>) => ({
     teams: typeof search.teams === "string" ? search.teams : undefined,
     reason: typeof search.reason === "string" ? search.reason : undefined,
   }),
-  component: AdvisorDiaryPage,
+  component: DiaryPage,
 });
 
-function AdvisorDiaryPage() {
-  const search = Route.useSearch();
-  const navigate = useNavigate();
+export function DiaryPage() {
+  const search = useSearch({ strict: false }) as { teams?: string; reason?: string };
+  const navigate = useTenantAwareNavigate();
   const roleFn = useServerFn(getMyRole);
   const advisorViewId = getAdvisorView()?.advisorId;
 

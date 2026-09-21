@@ -1,4 +1,4 @@
-import { useNavigate } from "@tanstack/react-router";
+import { useTenantAwareNavigate } from "@/components/tenant/TenantAppLink";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -124,7 +124,7 @@ function normaliseStep(data: StepResp): StepResp {
 }
 
 export function ChatInterview({ sessionId }: { sessionId: string }) {
-  const navigate = useNavigate();
+  const navigate = useTenantAwareNavigate();
   const getSessionFn = useServerFn(getSession);
   const submitFn = useServerFn(submitSession);
 

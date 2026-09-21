@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -10,6 +10,7 @@ import { clearPostAuthStart, resolvePostAuthStart } from "@/lib/post-auth-journe
 import { StaffDashboardLoader } from "@/components/staff/StaffDashboard";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
+import { TenantAppLink as Link, useTenantAwareNavigate } from "@/components/tenant/TenantAppLink";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { HubSubNav } from "@/components/ui/tabs";
@@ -552,8 +553,8 @@ function CustomerRafSelfServeCard({
   );
 }
 
-function Home() {
-  const navigate = useNavigate();
+export function Home() {
+  const navigate = useTenantAwareNavigate();
   const qc = useQueryClient();
   const roleFn = useServerFn(getMyRole);
   const sessionsFn = useServerFn(listMySessions);

@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect } from "react";
@@ -7,14 +7,15 @@ import { TabPageNav } from "@/components/TabPageNav";
 import { IntroducerPortalContent } from "@/components/introducer/IntroducerPortalContent";
 import { checkIsIntroducer } from "@/lib/introducer.functions";
 import { Button } from "@/components/ui/button";
+import { useTenantAwareNavigate } from "@/components/tenant/TenantAppLink";
 
 export const Route = createFileRoute("/_authenticated/introducer")({
   component: IntroducerPortalPage,
 });
 
 /** Standalone /introducer URL — same inline UI as staff dashboard Introducers tab. */
-function IntroducerPortalPage() {
-  const navigate = useNavigate();
+export function IntroducerPortalPage() {
+  const navigate = useTenantAwareNavigate();
   const roleFn = useServerFn(checkIsIntroducer);
   const roleQ = useQuery({ queryKey: ["is-introducer"], queryFn: () => roleFn() });
 

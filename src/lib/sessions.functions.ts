@@ -11,6 +11,7 @@ import {
 } from "@/lib/sms.server";
 import { canAmend } from "@/lib/admin-access";
 import type { OwnerCustomerExportRow } from "@/lib/report-export.types";
+import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
 
 // Each customer file (session) can be allocated to at most this many advisors.
 const MAX_ADVISORS_PER_SESSION = 3;
@@ -3659,6 +3660,7 @@ export const revokeStaffInvite = createServerFn({ method: "POST" })
 
 type ResolvedInvite = {
   tenantId: string;
+  tenantSlug: string | null;
   role: "advisor" | "introducer" | "admin";
   /** Intended tenant_membership.role — never derived from URL/slug. */
   membershipRole: "owner" | "supervisor" | "general" | "adviser" | "introducer";
@@ -3718,6 +3720,15 @@ async function resolveInviteByToken(token: string): Promise<{
   if (!invite.tenant_id) {
     throw new Error("This invite link is not valid.");
   }
+  let tenantSlug: string | null = null;
+  const { data: tenantRow } = await supabaseAdmin
+    .from("tenants")
+    .select("slug, status")
+    .eq("id", invite.tenant_id)
+    .maybeSingle();
+  if (tenantRow && (tenantRow as { status?: string }).status === "active") {
+    tenantSlug = normalisePublicTenantSlug((tenantRow as { slug?: string }).slug);
+  }
   const role =
     invite.role === "introducer"
       ? "introducer"
@@ -3729,6 +3740,7 @@ async function resolveInviteByToken(token: string): Promise<{
     tenantId: invite.tenant_id,
     resolved: {
       tenantId: invite.tenant_id,
+      tenantSlug,
       role,
       membershipRole: resolveMembershipRoleFromInvite(invite),
       email: invite.email ?? null,

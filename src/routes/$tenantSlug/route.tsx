@@ -1,9 +1,5 @@
 import { createFileRoute, Outlet, notFound } from "@tanstack/react-router";
-import { TenantContextError } from "@/lib/tenant-context.server";
-import {
-  loadTenantPresentationBySlug,
-  peekTenantBySlug,
-} from "@/lib/tenant-presentation.server";
+import { getTenantSlugLayoutFn } from "@/lib/tenant-presentation.server";
 import { isReservedTenantSlug, type TenantPresentation } from "@/lib/tenant-presentation";
 import { TenantUiProvider } from "@/lib/tenant-ui";
 
@@ -20,23 +16,18 @@ export const Route = createFileRoute("/$tenantSlug")({
       throw notFound();
     }
 
-    try {
-      const record = await peekTenantBySlug(slug);
-      if (record.status !== "active") {
-        return {
-          tenant: null,
-          inactive: true,
-          inactiveName: record.companyName,
-        };
-      }
-      const tenant = await loadTenantPresentationBySlug(slug);
-      return { tenant, inactive: false, inactiveName: null };
-    } catch (e) {
-      if (e instanceof TenantContextError && e.code === "TENANT_NOT_FOUND") {
-        throw notFound();
-      }
-      throw e;
+    const layout = await getTenantSlugLayoutFn({ data: { slug } });
+    if (layout.status === "not_found") {
+      throw notFound();
     }
+    if (layout.status === "inactive") {
+      return {
+        tenant: null,
+        inactive: true,
+        inactiveName: layout.inactiveName,
+      };
+    }
+    return { tenant: layout.tenant, inactive: false, inactiveName: null };
   },
   component: TenantSlugLayout,
 });

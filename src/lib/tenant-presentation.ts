@@ -34,6 +34,12 @@ export type PlatformPresentation = {
   pageTitle: "Mortgage Hub";
 };
 
+/** Result of the tenant layout server fn — no secrets. */
+export type TenantSlugLayoutResult =
+  | { status: "not_found" }
+  | { status: "inactive"; inactiveName: string | null }
+  | { status: "ok"; tenant: TenantPresentation };
+
 /** First-path segments reserved by the Hub SPA — never treat as tenant slugs. */
 export const RESERVED_TENANT_SLUGS = new Set([
   "api",
@@ -63,6 +69,13 @@ export const RESERVED_TENANT_SLUGS = new Set([
 
 export function isReservedTenantSlug(slug: string): boolean {
   return RESERVED_TENANT_SLUGS.has(slug.trim().toLowerCase());
+}
+
+/** Presentation/navigation slug only — never an access grant. */
+export function normalisePublicTenantSlug(value: string | null | undefined): string | null {
+  const slug = (value ?? "").trim().toLowerCase();
+  if (!slug || !/^[a-z0-9-]{2,64}$/.test(slug) || isReservedTenantSlug(slug)) return null;
+  return slug;
 }
 
 export function buildTenantPageTitle(companyName: string): string {
