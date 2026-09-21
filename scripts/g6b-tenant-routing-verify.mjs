@@ -18,6 +18,7 @@ import {
 import { buildTenantUrl, buildCanonicalRefPath, buildCanonicalBookPath, buildCanonicalRafPath } from "../src/lib/tenant-url.ts";
 import { buildHomePathAfterAuth } from "../src/lib/post-auth-journey.ts";
 import { getPasswordResetUrl } from "../src/lib/app-url.ts";
+import { resolvePublicIntroducerRefAccess, parseCanonicalRefPath } from "../src/lib/tenant-introducer-ref.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -299,6 +300,79 @@ const tenantRaf = readFileSync(resolve(root, "src/routes/$tenantSlug/raf.$code.t
 ok("raf_mismatch_notfound", tenantRaf.includes("meta.tenantSlug !== tenantSlug") && tenantRaf.includes("notFound()"));
 const tenantRef = readFileSync(resolve(root, "src/routes/$tenantSlug/ref.$introducerRef.tsx"), "utf8");
 ok("ref_mismatch_notfound", tenantRef.includes("throw notFound()"));
+ok("ref_uses_resolveReferralSlug", tenantRef.includes("resolveReferralSlug"));
+ok("ref_no_raw_or_filter", !tenantRef.includes(".or("));
+ok(
+  "ref_registered_path",
+  routeTree.includes("fullPath: '/$tenantSlug/ref/$introducerRef'") ||
+    routeTree.includes("/$tenantSlug/ref/$introducerRef"),
+);
+
+function consumeGeneratedRef(introducerSlug, tenantSlug) {
+  const generated = referralLinkForSlug(introducerSlug, tenantSlug, ORIGIN);
+  const parsed = parseCanonicalRefPath(generated);
+  if (!parsed) return "not_found";
+  return resolvePublicIntroducerRefAccess({
+    urlTenantSlug: parsed.tenantSlug,
+    introducerTenantSlug: tenantSlug,
+    introducerSlug,
+    introducerRef: parsed.introducerRef,
+  });
+}
+
+ok("001_valid_ref_route", consumeGeneratedRef("peter-mabbott", "mortgageeasy") === "ok");
+ok(
+  "002_valid_ref_route",
+  consumeGeneratedRef("peter-mabbott", "trentvalleyfs") === "ok" &&
+    !referralLinkForSlug("peter-mabbott", "trentvalleyfs", ORIGIN).includes("mortgageeasy"),
+);
+ok(
+  "001_as_002_ref_denied",
+  resolvePublicIntroducerRefAccess({
+    urlTenantSlug: "trentvalleyfs",
+    introducerTenantSlug: "mortgageeasy",
+    introducerSlug: "peter-mabbott",
+    introducerRef: "peter-mabbott",
+  }) === "not_found",
+);
+ok(
+  "002_as_001_ref_denied",
+  resolvePublicIntroducerRefAccess({
+    urlTenantSlug: "mortgageeasy",
+    introducerTenantSlug: "trentvalleyfs",
+    introducerSlug: "tvfs-introducer",
+    introducerRef: "tvfs-introducer",
+  }) === "not_found",
+);
+ok(
+  "unknown_introducer_ref",
+  resolvePublicIntroducerRefAccess({
+    urlTenantSlug: "mortgageeasy",
+    introducerTenantSlug: "mortgageeasy",
+    introducerSlug: "peter-mabbott",
+    introducerRef: "does-not-exist",
+  }) === "not_found",
+);
+ok(
+  "unknown_tenant_ref",
+  resolvePublicIntroducerRefAccess({
+    urlTenantSlug: "not-a-registered-firm",
+    introducerTenantSlug: "mortgageeasy",
+    introducerSlug: "peter-mabbott",
+    introducerRef: "peter-mabbott",
+  }) === "not_found",
+);
+ok(
+  "ref_no_default_001",
+  resolvePublicIntroducerRefAccess({
+    urlTenantSlug: null,
+    introducerTenantSlug: null,
+    introducerSlug: "peter-mabbott",
+    introducerRef: "peter-mabbott",
+  }) === "not_found" &&
+    consumeGeneratedRef("peter-mabbott", null) === "not_found" &&
+    parseCanonicalRefPath("/ref/peter-mabbott") === null,
+);
 
 const referralSrc = readFileSync(resolve(root, "src/lib/referral.ts"), "utf8");
 ok("referral_no_hardcoded_001", !referralSrc.includes("/mortgageeasy"));

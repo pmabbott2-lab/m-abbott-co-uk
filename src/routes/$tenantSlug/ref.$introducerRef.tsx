@@ -1,86 +1,95 @@
-import { createFileRoute, Link, notFound, redirect } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { useRequiredTenantUi } from "@/lib/tenant-ui";
 import { TenantPublicShell } from "@/components/tenant/TenantPublicShell";
-import { createServerFn } from "@tanstack/react-start";
-import { z } from "zod";
-
-const assertTenantIntroducerRef = createServerFn({ method: "GET" })
-  .inputValidator((d: unknown) =>
-    z.object({ tenantSlug: z.string().min(1), introducerRef: z.string().min(1) }).parse(d),
-  )
-  .handler(async ({ data }) => {
-    const { getTenantContextBySlug } = await import("@/lib/tenant-assert.server");
-    const { requireTenantFeature } = await import("@/lib/tenant-features.server");
-    const { supabaseAdminUntyped } = await import("@/integrations/supabase/client.server");
-    const ctx = await getTenantContextBySlug(data.tenantSlug);
-    await requireTenantFeature(ctx.tenant.id, "introducer_journey");
-    const ref = data.introducerRef.trim().toLowerCase();
-    const { data: intro } = await supabaseAdminUntyped
-      .from("introducers")
-      .select("id, slug, company_name, tenant_id")
-      .eq("tenant_id", ctx.tenant.id)
-      .eq("active", true)
-      .or(`slug.eq.${ref},company_code.eq.${ref}`)
-      .maybeSingle();
-    if (!intro) {
-      return { ok: false as const };
-    }
-    return {
-      ok: true as const,
-      companyName: intro.company_name as string,
-      slug: intro.slug as string,
-    };
-  });
+import { Button } from "@/components/ui/button";
+import { resolveReferralSlug } from "@/lib/introducer.functions";
+import { resolvePublicIntroducerRefAccess } from "@/lib/tenant-introducer-ref";
+import { setReferralCookie } from "@/lib/referral";
 
 export const Route = createFileRoute("/$tenantSlug/ref/$introducerRef")({
   beforeLoad: async ({ params, context }) => {
     const tenant = context.tenant;
-    if (!tenant) throw redirect({ to: "/" });
+    if (!tenant) throw notFound();
     if (!tenant.features?.introducer_journey) {
-      throw redirect({ to: "/$tenantSlug", params: { tenantSlug: tenant.slug } });
-    }
-    const result = await assertTenantIntroducerRef({
-      data: { tenantSlug: params.tenantSlug, introducerRef: params.introducerRef },
-    });
-    if (!result.ok) {
       throw notFound();
     }
-    return { introducer: result };
+
+    let intro: Awaited<ReturnType<typeof resolveReferralSlug>> = null;
+    try {
+      intro = await resolveReferralSlug({
+        data: { slug: params.introducerRef, tenantSlug: params.tenantSlug },
+      });
+    } catch {
+      throw notFound();
+    }
+
+    const access = resolvePublicIntroducerRefAccess({
+      urlTenantSlug: params.tenantSlug,
+      introducerTenantSlug: intro?.tenantSlug ?? null,
+      introducerSlug: intro?.slug ?? null,
+      introducerRef: params.introducerRef,
+    });
+    if (access !== "ok" || !intro) {
+      throw notFound();
+    }
+
+    return {
+      introducer: {
+        companyName: intro.company_name as string,
+        slug: intro.slug as string,
+      },
+    };
   },
   component: TenantRefEntry,
 });
 
 function TenantRefEntry() {
   const tenant = useRequiredTenantUi();
-  const { introducerRef } = Route.useParams();
   const { introducer } = Route.useRouteContext();
 
+  useEffect(() => {
+    if (introducer.slug) setReferralCookie(introducer.slug);
+  }, [introducer.slug]);
+
+  const displayName = tenant.tradingName || tenant.companyName;
+
   return (
-    <TenantPublicShell tenant={tenant}>
-      <div className="mx-auto max-w-lg space-y-4">
-        <h1 className="text-2xl font-semibold">Introducer link</h1>
-        <p className="text-sm text-muted-foreground">
-          Firm: <strong>{tenant.tradingName || tenant.companyName}</strong>. Introducer{" "}
-          <strong>{introducer.companyName}</strong> (<code>{introducer.slug}</code>) verified for
-          this tenant. Reference <code>{introducerRef}</code>.
-        </p>
-        {tenant.features?.appointment_booking ? (
-          <Link
-            to="/$tenantSlug/book/$introducerSlug"
-            params={{ tenantSlug: tenant.slug, introducerSlug: introducer.slug }}
-            className="text-sm text-primary underline-offset-4 hover:underline"
-          >
-            Book an appointment
-          </Link>
-        ) : null}
-        <div>
-          <Link
-            to="/$tenantSlug/login"
-            params={{ tenantSlug: tenant.slug }}
-            className="text-sm text-primary underline-offset-4 hover:underline"
-          >
-            Continue to {tenant.tradingName || tenant.companyName} sign in
-          </Link>
+    <TenantPublicShell tenant={tenant} showSusanCta={tenant.susanEnabled}>
+      <div className="mx-auto max-w-lg space-y-6">
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">Referred by</p>
+          <h1 className="text-2xl font-semibold">{introducer.companyName}</h1>
+          <p className="text-sm text-muted-foreground">
+            Continue with {displayName}. Your introducer stays attached to this journey.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          {tenant.features?.appointment_booking ? (
+            <Link
+              to="/$tenantSlug/book/$introducerSlug"
+              params={{ tenantSlug: tenant.slug, introducerSlug: introducer.slug }}
+            >
+              <Button size="lg">Book an appointment</Button>
+            </Link>
+          ) : null}
+          {tenant.susanEnabled ? (
+            <Link
+              to="/$tenantSlug/login"
+              params={{ tenantSlug: tenant.slug }}
+              search={{ join: true, start: "voice" } as never}
+            >
+              <Button size="lg" variant="outline">
+                Start with Susan
+              </Button>
+            </Link>
+          ) : (
+            <Link to="/$tenantSlug/login" params={{ tenantSlug: tenant.slug }} search={{ join: true } as never}>
+              <Button size="lg" variant="outline">
+                Continue
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
     </TenantPublicShell>
