@@ -277,6 +277,12 @@ export const PLATFORM_AUDIT_EVENT_LABELS: Record<string, string> = {
   TENANT_OWNER_REMOVED: "Company owner removed",
   TENANT_OWNER_ROLE_CHANGED: "Company owner role changed",
   LAST_TENANT_OWNER_ACTION_DENIED: "Last company owner action denied",
+  PLATFORM_ADMIN_INVITED: "Platform administrator invited",
+  PLATFORM_ADMIN_INVITE_CANCELLED: "Platform administrator invitation cancelled",
+  PLATFORM_ROLE_GRANTED: "Platform role granted",
+  PLATFORM_ROLE_CHANGED: "Platform role changed",
+  PLATFORM_ROLE_REVOKED: "Platform role revoked",
+  LAST_PLATFORM_OWNER_ACTION_DENIED: "Final Super Owner action denied",
 };
 
 const AUDIT_SAFE_META_KEYS = new Set([
@@ -287,9 +293,14 @@ const AUDIT_SAFE_META_KEYS = new Set([
   "tenant_type",
   "status",
   "role",
+  "oldRole",
+  "newRole",
   "authorityBasis",
   "accessLevel",
   "reason",
+  "action",
+  "subjectName",
+  "subjectEmail",
 ]);
 
 export function presentPlatformAuditEvent(input: {
@@ -306,7 +317,12 @@ export function presentPlatformAuditEvent(input: {
     if (!AUDIT_SAFE_META_KEYS.has(key)) continue;
     if (typeof value !== "string" && typeof value !== "number") continue;
     const text = String(value);
-    if (looksLikeEmail(text) || looksLikeUuid(text)) continue;
+    // Allow subjectEmail / subjectName for platform-admin audit rows; still hide UUIDs.
+    if (key !== "subjectEmail" && key !== "subjectName") {
+      if (looksLikeEmail(text) || looksLikeUuid(text)) continue;
+    } else if (looksLikeUuid(text)) {
+      continue;
+    }
     bits.push(text);
   }
   const companyLabel =

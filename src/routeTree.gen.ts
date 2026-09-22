@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as RegisterRouteImport } from './routes/register'
+import { Route as PlatformInviteRouteImport } from './routes/platform-invite'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as PlatformRouteRouteImport } from './routes/platform/route'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
@@ -76,6 +77,11 @@ import { Route as ApiTwilioVoiceAmdStatusRouteImport } from './routes/api/twilio
 const RegisterRoute = RegisterRouteImport.update({
   id: '/register',
   path: '/register',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlatformInviteRoute = PlatformInviteRouteImport.update({
+  id: '/platform-invite',
+  path: '/platform-invite',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -412,6 +418,7 @@ export interface FileRoutesByFullPath {
   '/$tenantSlug': typeof TenantSlugRouteRouteWithChildren
   '/platform': typeof PlatformRouteRouteWithChildren
   '/auth': typeof AuthRouteWithChildren
+  '/platform-invite': typeof PlatformInviteRoute
   '/register': typeof RegisterRoute
   '/$tenantSlug/booking': typeof TenantSlugBookingRoute
   '/$tenantSlug/cases': typeof TenantSlugCasesRoute
@@ -474,6 +481,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRouteWithChildren
+  '/platform-invite': typeof PlatformInviteRoute
   '/register': typeof RegisterRoute
   '/$tenantSlug/booking': typeof TenantSlugBookingRoute
   '/$tenantSlug/cases': typeof TenantSlugCasesRoute
@@ -539,6 +547,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/platform': typeof PlatformRouteRouteWithChildren
   '/auth': typeof AuthRouteWithChildren
+  '/platform-invite': typeof PlatformInviteRoute
   '/register': typeof RegisterRoute
   '/$tenantSlug/booking': typeof TenantSlugBookingRoute
   '/$tenantSlug/cases': typeof TenantSlugCasesRoute
@@ -605,6 +614,7 @@ export interface FileRouteTypes {
     | '/$tenantSlug'
     | '/platform'
     | '/auth'
+    | '/platform-invite'
     | '/register'
     | '/$tenantSlug/booking'
     | '/$tenantSlug/cases'
@@ -667,6 +677,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/platform-invite'
     | '/register'
     | '/$tenantSlug/booking'
     | '/$tenantSlug/cases'
@@ -731,6 +742,7 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/platform'
     | '/auth'
+    | '/platform-invite'
     | '/register'
     | '/$tenantSlug/booking'
     | '/$tenantSlug/cases'
@@ -797,6 +809,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   PlatformRouteRoute: typeof PlatformRouteRouteWithChildren
   AuthRoute: typeof AuthRouteWithChildren
+  PlatformInviteRoute: typeof PlatformInviteRoute
   RegisterRoute: typeof RegisterRoute
   ApiAvatarTokenRoute: typeof ApiAvatarTokenRoute
   ApiInterviewStepRoute: typeof ApiInterviewStepRoute
@@ -828,6 +841,13 @@ declare module '@tanstack/react-router' {
       path: '/register'
       fullPath: '/register'
       preLoaderRoute: typeof RegisterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/platform-invite': {
+      id: '/platform-invite'
+      path: '/platform-invite'
+      fullPath: '/platform-invite'
+      preLoaderRoute: typeof PlatformInviteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -1391,6 +1411,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   PlatformRouteRoute: PlatformRouteRouteWithChildren,
   AuthRoute: AuthRouteWithChildren,
+  PlatformInviteRoute: PlatformInviteRoute,
   RegisterRoute: RegisterRoute,
   ApiAvatarTokenRoute: ApiAvatarTokenRoute,
   ApiInterviewStepRoute: ApiInterviewStepRoute,

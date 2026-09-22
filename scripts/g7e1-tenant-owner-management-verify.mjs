@@ -92,7 +92,11 @@ ok(
   read("src/lib/platform-dashboard.ts").includes("Company owner invited"),
 );
 
-ok("admins_still_placeholder", read("src/routes/platform/admins.tsx").includes("not yet enabled"));
+ok(
+  "admins_page_g7e2a",
+  read("src/routes/platform/admins.tsx").includes("Platform Administrators") &&
+    !read("src/routes/platform/admins.tsx").includes("super_admin_tenant_access"),
+);
 ok("g7d_untouched_cookie", read("src/lib/platform-tenant-entry.ts").includes("mh_platform_tenant_access"));
 ok(
   "last_so_still_protected",

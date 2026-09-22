@@ -9,7 +9,6 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolvePlatformAuthorityFromRoles } from "../src/lib/platform-authority.ts";
 import {
-  ADMINS_PLACEHOLDER_COPY,
   ENTER_TENANT_FORBIDDEN_IDENTIFIERS,
   TENANT_ACCESS_AVAILABLE,
   TENANT_ACCESS_FUTURE_LABEL,
@@ -229,9 +228,16 @@ ok(
 ok("audit_schema_sufficient", dashServer.includes("security_audit_events"));
 
 const adminsSrc = read("src/routes/platform/admins.tsx");
-ok("admins_placeholder", adminsSrc.includes(ADMINS_PLACEHOLDER_COPY) || adminsSrc.includes("not yet enabled"));
-ok("admins_no_grant_ui", !adminsSrc.includes("super_admin_tenant_access") && !adminsSrc.includes("Create Super Admin"));
-
+ok(
+  "admins_page_live",
+  adminsSrc.includes("Platform Administrators") && adminsSrc.includes("Add platform administrator"),
+);
+ok(
+  "admins_no_grant_ui",
+  !adminsSrc.includes("super_admin_tenant_access") &&
+    !adminsSrc.includes("Grant:") &&
+    adminsSrc.includes("No grants configured"),
+);
 const g7cFiles = [
   "src/routes/platform/route.tsx",
   "src/routes/platform/index.tsx",
