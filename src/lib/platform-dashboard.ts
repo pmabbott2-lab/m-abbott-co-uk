@@ -58,6 +58,48 @@ export type PlatformCompanyDetail = PlatformCompanySummary & {
   };
 };
 
+/** Safe client-facing reason codes for company detail load failures. */
+export type PlatformCompanyDetailFailureReason =
+  | "not_found"
+  | "unauthorized"
+  | "invalid_code"
+  | "query_failure";
+
+export type PlatformCompanyDetailResult =
+  | { ok: true; company: PlatformCompanyDetail }
+  | { ok: false; reason: PlatformCompanyDetailFailureReason };
+
+export const COMPANY_CODE_PARAM_PATTERN = /^[0-9]{3}$/;
+
+/** Company list identifier → detail URL segment (must match route param). */
+export function buildPlatformCompanyDetailPath(companyCode: string): string {
+  return `/platform/companies/${companyCode}`;
+}
+
+export function isValidCompanyCodeParam(value: string | null | undefined): boolean {
+  return typeof value === "string" && COMPANY_CODE_PARAM_PATTERN.test(value.trim());
+}
+
+/**
+ * Resolve a company from list/overview rows by company_code.
+ * Lookup field is companyCode (maps to tenants.company_code), never slug or UUID.
+ */
+export function resolveCompanySummaryByCode(
+  companies: readonly PlatformCompanySummary[],
+  companyCode: string,
+): PlatformCompanySummary | null {
+  const code = companyCode.trim();
+  if (!isValidCompanyCodeParam(code)) return null;
+  return companies.find((row) => row.companyCode === code) ?? null;
+}
+
+export function companyDetailFailureMessage(reason: PlatformCompanyDetailFailureReason): string {
+  if (reason === "not_found") return "Company not found or not in your platform scope.";
+  if (reason === "unauthorized") return "You do not have platform access to this company.";
+  if (reason === "invalid_code") return "That company code is not valid.";
+  return "Could not load company.";
+}
+
 export type PlatformRoleCounts = Record<TenantMemberRole, number>;
 
 export type PlatformDashboardOverview = {

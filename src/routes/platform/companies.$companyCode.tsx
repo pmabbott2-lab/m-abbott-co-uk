@@ -3,6 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { PlatformCompanyDetailCard } from "@/components/platform/PlatformCompanyViews";
 import { getPlatformCompanyDetail } from "@/lib/platform-dashboard.server";
+import {
+  companyDetailFailureMessage,
+  isValidCompanyCodeParam,
+} from "@/lib/platform-dashboard";
 import { usePlatformAuthority } from "@/lib/platform-ui";
 
 export const Route = createFileRoute("/platform/companies/$companyCode")({
@@ -13,11 +17,23 @@ function PlatformCompanyDetailPage() {
   const { companyCode } = Route.useParams();
   const authority = usePlatformAuthority();
   const detailFn = useServerFn(getPlatformCompanyDetail);
+  const codeOk = isValidCompanyCodeParam(companyCode);
   const detailQ = useQuery({
     queryKey: ["platform-company-detail", companyCode],
-    queryFn: () => detailFn({ companyCode }),
-    enabled: authority.canAccessPlatform && Boolean(companyCode),
+    // TanStack Start: validated input must be wrapped as { data: ... }.
+    queryFn: () => detailFn({ data: { companyCode } }),
+    enabled: authority.canAccessPlatform && codeOk,
   });
+
+  const result = detailQ.data;
+  const failureReason =
+    !codeOk
+      ? ("invalid_code" as const)
+      : detailQ.isError
+        ? ("query_failure" as const)
+        : result && !result.ok
+          ? result.reason
+          : null;
 
   return (
     <div className="space-y-4">
@@ -27,14 +43,14 @@ function PlatformCompanyDetailPage() {
       >
         ← Companies
       </Link>
-      {detailQ.isLoading ? (
+      {detailQ.isLoading && codeOk ? (
         <p className="text-sm text-muted-foreground">Loading company…</p>
-      ) : detailQ.isError ? (
-        <p className="text-sm text-destructive">Could not load company.</p>
-      ) : !detailQ.data ? (
-        <p className="text-sm text-muted-foreground">Company not found or not in your platform scope.</p>
+      ) : failureReason ? (
+        <p className="text-sm text-destructive">{companyDetailFailureMessage(failureReason)}</p>
+      ) : result?.ok ? (
+        <PlatformCompanyDetailCard company={result.company} />
       ) : (
-        <PlatformCompanyDetailCard company={detailQ.data} />
+        <p className="text-sm text-muted-foreground">Loading company…</p>
       )}
     </div>
   );

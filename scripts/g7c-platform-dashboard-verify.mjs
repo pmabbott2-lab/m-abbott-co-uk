@@ -13,13 +13,16 @@ import {
   ENTER_TENANT_FORBIDDEN_IDENTIFIERS,
   TENANT_ACCESS_AVAILABLE,
   TENANT_ACCESS_FUTURE_LABEL,
+  buildPlatformCompanyDetailPath,
   companyMayBeInspected,
   createCompanyRequiresSuperOwner,
   dashboardPayloadContainsPii,
   emptyDashboard,
   filterTenantsForScope,
   isPlatformNavActive,
+  isValidCompanyCodeParam,
   presentPlatformAuditEvent,
+  resolveCompanySummaryByCode,
   resolveVisibleTenantScope,
   summariseDashboard,
   tenantTypePresentation,
@@ -290,6 +293,65 @@ ok("platform_companies_route_file", platformDir.includes("companies.tsx"));
 ok("platform_companies_index_route_file", platformDir.includes("companies.index.tsx"));
 ok("platform_company_detail_route_file", platformDir.includes("companies.$companyCode.tsx"));
 ok("companies_layout_has_outlet", read("src/routes/platform/companies.tsx").includes("Outlet"));
+
+// Runtime contract: list identifier → route → param → tenants.company_code lookup
+const detailRouteSrc = read("src/routes/platform/companies.$companyCode.tsx");
+const companyViewsSrc = read("src/components/platform/PlatformCompanyViews.tsx");
+const dashServerSrc = read("src/lib/platform-dashboard.server.ts");
+ok(
+  "detail_link_uses_company_code",
+  companyViewsSrc.includes('to="/platform/companies/$companyCode"') &&
+    companyViewsSrc.includes("params={{ companyCode: company.companyCode }}"),
+);
+ok(
+  "detail_call_wraps_server_fn_data",
+  detailRouteSrc.includes("detailFn({ data: { companyCode } })") &&
+    !detailRouteSrc.includes("detailFn({ companyCode })"),
+);
+ok(
+  "detail_lookup_field_is_company_code",
+  dashServerSrc.includes('.eq("company_code", code)') ||
+    dashServerSrc.includes('.eq("company_code", data.companyCode)'),
+);
+ok("detail_lookup_not_by_slug", !/eq\("slug"/.test(dashServerSrc));
+ok("detail_lookup_not_by_uuid_param", !detailRouteSrc.includes("tenantId"));
+ok("detail_path_001", buildPlatformCompanyDetailPath("001") === "/platform/companies/001");
+ok("detail_path_002", buildPlatformCompanyDetailPath("002") === "/platform/companies/002");
+ok("detail_path_future_003", buildPlatformCompanyDetailPath("003") === "/platform/companies/003");
+ok("company_code_param_valid_001", isValidCompanyCodeParam("001"));
+ok("company_code_param_valid_002", isValidCompanyCodeParam("002"));
+ok("company_code_param_rejects_slug", !isValidCompanyCodeParam("mortgageeasy"));
+ok("company_code_param_rejects_uuid", !isValidCompanyCodeParam("f8c24260-fe31-4277-9589-d4000e18a782"));
+
+const fixtureCompanies = soDash.companies;
+const me001 = resolveCompanySummaryByCode(fixtureCompanies, "001");
+const tv002 = resolveCompanySummaryByCode(fixtureCompanies, "002");
+const unknown999 = resolveCompanySummaryByCode(fixtureCompanies, "999");
+ok(
+  "mortgage_easy_001_resolves",
+  me001?.companyName === "Mortgage Easy" &&
+    me001.slug === "mortgageeasy" &&
+    me001.companyCode === "001",
+);
+ok(
+  "trent_valley_002_resolves",
+  tv002?.companyName === "Trent Valley Financial Services" &&
+    tv002.slug === "trentvalleyfs" &&
+    tv002.companyCode === "002",
+);
+ok("unknown_code_fails_closed", unknown999 === null);
+ok(
+  "detail_result_shape_safe",
+  dashServerSrc.includes("PlatformCompanyDetailResult") &&
+    dashServerSrc.includes('reason: "not_found"') &&
+    dashServerSrc.includes('reason: "unauthorized"') &&
+    dashServerSrc.includes('reason: "query_failure"'),
+);
+ok(
+  "detail_ui_uses_safe_failure_message",
+  detailRouteSrc.includes("companyDetailFailureMessage") &&
+    !detailRouteSrc.includes("error.message"),
+);
 
 if (failures.length) {
   console.error(`\n${failures.length} failure(s)`);

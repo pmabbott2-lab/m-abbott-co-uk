@@ -9,16 +9,18 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdminUntyped as db } from "@/integrations/supabase/client.server";
 import { PLATFORM_AUDIT_EVENT_TYPES } from "@/lib/platform-audit";
 import { superAdminGrantAllowsVisibility, type PlatformAuthorityView } from "@/lib/platform-authority";
-import { requirePlatformRouteAccess } from "@/lib/platform-authority.server";
+import { PlatformRouteDeniedError, requirePlatformRouteAccess } from "@/lib/platform-authority.server";
 import {
   companyMayBeInspected,
   emptyDashboard,
   isPlatformTenantType,
+  isValidCompanyCodeParam,
   presentPlatformAuditEvent,
   resolveVisibleTenantScope,
   summariseDashboard,
   type PlatformAuditListItem,
   type PlatformCompanyDetail,
+  type PlatformCompanyDetailResult,
   type PlatformDashboardOverview,
   type VisibleTenantScope,
 } from "@/lib/platform-dashboard";
@@ -134,62 +136,100 @@ const companyCodeSchema = z.object({
 export const getPlatformCompanyDetail = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => companyCodeSchema.parse(d))
-  .handler(async ({ data, context }): Promise<PlatformCompanyDetail | null> => {
+  .handler(async ({ data, context }): Promise<PlatformCompanyDetailResult> => {
     const userId = (context as { userId?: string } | undefined)?.userId;
-    if (!userId) return null;
-    const authority = await requirePlatformRouteAccess(userId);
+    if (!userId) return { ok: false, reason: "unauthorized" };
+
+    const code = data.companyCode.trim();
+    if (!isValidCompanyCodeParam(code)) return { ok: false, reason: "invalid_code" };
+
+    let authority;
+    try {
+      authority = await requirePlatformRouteAccess(userId);
+    } catch (error) {
+      if (error instanceof PlatformRouteDeniedError) {
+        return { ok: false, reason: "unauthorized" };
+      }
+      console.error("[platform-company-detail] authority", error instanceof Error ? error.message : "unknown");
+      return { ok: false, reason: "query_failure" };
+    }
+
     const scope = resolveVisibleTenantScope(authority);
-    const grantedTenantIds = scope === "granted" ? await loadGrantedTenantIds(userId) : [];
+    let grantedTenantIds: string[] = [];
+    try {
+      grantedTenantIds = scope === "granted" ? await loadGrantedTenantIds(userId) : [];
+    } catch (error) {
+      console.error("[platform-company-detail] grants", error instanceof Error ? error.message : "unknown");
+      return { ok: false, reason: "query_failure" };
+    }
 
-    const { data: tenant, error } = await db
-      .from("tenants")
-      .select("id, company_code, slug, company_name, trading_name, tenant_type, status, created_at")
-      .eq("company_code", data.companyCode)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!tenant || !isPlatformTenantType(tenant.tenant_type)) return null;
-    if (!companyMayBeInspected(tenant.id, scope, grantedTenantIds)) return null;
+    let tenant: TenantRow | null = null;
+    try {
+      const { data: row, error } = await db
+        .from("tenants")
+        .select("id, company_code, slug, company_name, trading_name, tenant_type, status, created_at")
+        .eq("company_code", code)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      tenant = (row as TenantRow | null) ?? null;
+    } catch (error) {
+      console.error("[platform-company-detail] tenant", error instanceof Error ? error.message : "unknown");
+      return { ok: false, reason: "query_failure" };
+    }
 
-    const memberships = await loadActiveMemberships([tenant.id]);
-    const { data: featureRows, error: featureErr } = await db
-      .from("tenant_features")
-      .select("feature_key, state")
-      .eq("tenant_id", tenant.id);
-    if (featureErr) throw new Error(featureErr.message);
+    if (!tenant || !isPlatformTenantType(tenant.tenant_type)) {
+      return { ok: false, reason: "not_found" };
+    }
+    if (!companyMayBeInspected(tenant.id, scope, grantedTenantIds)) {
+      return { ok: false, reason: "unauthorized" };
+    }
 
-    const features = (featureRows ?? []).map((row: { feature_key: string; state: string }) => ({
-      key: row.feature_key,
-      name: row.feature_key,
-      state: row.state,
-    }));
+    try {
+      const memberships = await loadActiveMemberships([tenant.id]);
+      const { data: featureRows, error: featureErr } = await db
+        .from("tenant_features")
+        .select("feature_key, state")
+        .eq("tenant_id", tenant.id);
+      if (featureErr) throw new Error(featureErr.message);
 
-    const { data: settings } = await db
-      .from("tenant_settings")
-      .select("tenant_id")
-      .eq("tenant_id", tenant.id)
-      .maybeSingle();
-    const { data: branding } = await db
-      .from("tenant_branding")
-      .select("tenant_id")
-      .eq("tenant_id", tenant.id)
-      .maybeSingle();
+      const features = (featureRows ?? []).map((row: { feature_key: string; state: string }) => ({
+        key: row.feature_key,
+        name: row.feature_key,
+        state: row.state,
+      }));
 
-    return {
-      companyCode: tenant.company_code,
-      companyName: tenant.company_name,
-      tradingName: tenant.trading_name,
-      slug: tenant.slug,
-      tenantType: tenant.tenant_type,
-      status: tenant.status,
-      createdAt: tenant.created_at,
-      activeMemberCount: memberships.length,
-      features,
-      config: {
-        settingsPresent: Boolean(settings),
-        brandingPresent: Boolean(branding),
-        enabledFeatureCount: features.filter((row) => row.state === "enabled").length,
-      },
-    };
+      const { data: settings } = await db
+        .from("tenant_settings")
+        .select("tenant_id")
+        .eq("tenant_id", tenant.id)
+        .maybeSingle();
+      const { data: branding } = await db
+        .from("tenant_branding")
+        .select("tenant_id")
+        .eq("tenant_id", tenant.id)
+        .maybeSingle();
+
+      const company: PlatformCompanyDetail = {
+        companyCode: tenant.company_code,
+        companyName: tenant.company_name,
+        tradingName: tenant.trading_name,
+        slug: tenant.slug,
+        tenantType: tenant.tenant_type,
+        status: tenant.status,
+        createdAt: tenant.created_at,
+        activeMemberCount: memberships.length,
+        features,
+        config: {
+          settingsPresent: Boolean(settings),
+          brandingPresent: Boolean(branding),
+          enabledFeatureCount: features.filter((row) => row.state === "enabled").length,
+        },
+      };
+      return { ok: true, company };
+    } catch (error) {
+      console.error("[platform-company-detail] metadata", error instanceof Error ? error.message : "unknown");
+      return { ok: false, reason: "query_failure" };
+    }
   });
 
 export const listPlatformAuditEvents = createServerFn({ method: "GET" })
