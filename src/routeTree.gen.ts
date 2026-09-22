@@ -19,6 +19,9 @@ import { Route as PlatformIndexRouteImport } from './routes/platform/index'
 import { Route as TenantSlugIndexRouteImport } from './routes/$tenantSlug/index'
 import { Route as RafCodeRouteImport } from './routes/raf.$code'
 import { Route as PlatformTenantsRouteImport } from './routes/platform/tenants'
+import { Route as PlatformCompaniesRouteImport } from './routes/platform/companies'
+import { Route as PlatformAuditRouteImport } from './routes/platform/audit'
+import { Route as PlatformAdminsRouteImport } from './routes/platform/admins'
 import { Route as GoSlugRouteImport } from './routes/go.$slug'
 import { Route as BookSlugRouteImport } from './routes/book.$slug'
 import { Route as AuthResetRouteImport } from './routes/auth/reset'
@@ -40,6 +43,8 @@ import { Route as TenantSlugDiaryRouteImport } from './routes/$tenantSlug/diary'
 import { Route as TenantSlugCompaniesRouteImport } from './routes/$tenantSlug/companies'
 import { Route as TenantSlugCasesRouteImport } from './routes/$tenantSlug/cases'
 import { Route as TenantSlugBookingRouteImport } from './routes/$tenantSlug/booking'
+import { Route as PlatformCompaniesIndexRouteImport } from './routes/platform/companies.index'
+import { Route as PlatformCompaniesCompanyCodeRouteImport } from './routes/platform/companies.$companyCode'
 import { Route as ApiTeamsCallbackRouteImport } from './routes/api/teams/callback'
 import { Route as ApiSmsInboundRouteImport } from './routes/api/sms/inbound'
 import { Route as ApiIntroducerCalculatorLeadRouteImport } from './routes/api/introducer/calculator-lead'
@@ -115,6 +120,21 @@ const RafCodeRoute = RafCodeRouteImport.update({
 const PlatformTenantsRoute = PlatformTenantsRouteImport.update({
   id: '/tenants',
   path: '/tenants',
+  getParentRoute: () => PlatformRouteRoute,
+} as any)
+const PlatformCompaniesRoute = PlatformCompaniesRouteImport.update({
+  id: '/companies',
+  path: '/companies',
+  getParentRoute: () => PlatformRouteRoute,
+} as any)
+const PlatformAuditRoute = PlatformAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
+  getParentRoute: () => PlatformRouteRoute,
+} as any)
+const PlatformAdminsRoute = PlatformAdminsRouteImport.update({
+  id: '/admins',
+  path: '/admins',
   getParentRoute: () => PlatformRouteRoute,
 } as any)
 const GoSlugRoute = GoSlugRouteImport.update({
@@ -222,6 +242,17 @@ const TenantSlugBookingRoute = TenantSlugBookingRouteImport.update({
   path: '/booking',
   getParentRoute: () => TenantSlugRouteRoute,
 } as any)
+const PlatformCompaniesIndexRoute = PlatformCompaniesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => PlatformCompaniesRoute,
+} as any)
+const PlatformCompaniesCompanyCodeRoute =
+  PlatformCompaniesCompanyCodeRouteImport.update({
+    id: '/$companyCode',
+    path: '/$companyCode',
+    getParentRoute: () => PlatformCompaniesRoute,
+  } as any)
 const ApiTeamsCallbackRoute = ApiTeamsCallbackRouteImport.update({
   id: '/api/teams/callback',
   path: '/api/teams/callback',
@@ -403,6 +434,9 @@ export interface FileRoutesByFullPath {
   '/auth/reset': typeof AuthResetRoute
   '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
+  '/platform/admins': typeof PlatformAdminsRoute
+  '/platform/audit': typeof PlatformAuditRoute
+  '/platform/companies': typeof PlatformCompaniesRouteWithChildren
   '/platform/tenants': typeof PlatformTenantsRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug/': typeof TenantSlugIndexRoute
@@ -426,6 +460,8 @@ export interface FileRoutesByFullPath {
   '/api/introducer/calculator-lead': typeof ApiIntroducerCalculatorLeadRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
   '/api/teams/callback': typeof ApiTeamsCallbackRoute
+  '/platform/companies/$companyCode': typeof PlatformCompaniesCompanyCodeRoute
+  '/platform/companies/': typeof PlatformCompaniesIndexRoute
   '/api/twilio/voice/amd-status': typeof ApiTwilioVoiceAmdStatusRoute
   '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
   '/api/twilio/voice/inbound': typeof ApiTwilioVoiceInboundRoute
@@ -460,6 +496,8 @@ export interface FileRoutesByTo {
   '/auth/reset': typeof AuthResetRoute
   '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
+  '/platform/admins': typeof PlatformAdminsRoute
+  '/platform/audit': typeof PlatformAuditRoute
   '/platform/tenants': typeof PlatformTenantsRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug': typeof TenantSlugIndexRoute
@@ -483,6 +521,8 @@ export interface FileRoutesByTo {
   '/api/introducer/calculator-lead': typeof ApiIntroducerCalculatorLeadRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
   '/api/teams/callback': typeof ApiTeamsCallbackRoute
+  '/platform/companies/$companyCode': typeof PlatformCompaniesCompanyCodeRoute
+  '/platform/companies': typeof PlatformCompaniesIndexRoute
   '/api/twilio/voice/amd-status': typeof ApiTwilioVoiceAmdStatusRoute
   '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
   '/api/twilio/voice/inbound': typeof ApiTwilioVoiceInboundRoute
@@ -521,6 +561,9 @@ export interface FileRoutesById {
   '/auth/reset': typeof AuthResetRoute
   '/book/$slug': typeof BookSlugRoute
   '/go/$slug': typeof GoSlugRoute
+  '/platform/admins': typeof PlatformAdminsRoute
+  '/platform/audit': typeof PlatformAuditRoute
+  '/platform/companies': typeof PlatformCompaniesRouteWithChildren
   '/platform/tenants': typeof PlatformTenantsRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug/': typeof TenantSlugIndexRoute
@@ -544,6 +587,8 @@ export interface FileRoutesById {
   '/api/introducer/calculator-lead': typeof ApiIntroducerCalculatorLeadRoute
   '/api/sms/inbound': typeof ApiSmsInboundRoute
   '/api/teams/callback': typeof ApiTeamsCallbackRoute
+  '/platform/companies/$companyCode': typeof PlatformCompaniesCompanyCodeRoute
+  '/platform/companies/': typeof PlatformCompaniesIndexRoute
   '/api/twilio/voice/amd-status': typeof ApiTwilioVoiceAmdStatusRoute
   '/api/twilio/voice/client-outbound': typeof ApiTwilioVoiceClientOutboundRoute
   '/api/twilio/voice/inbound': typeof ApiTwilioVoiceInboundRoute
@@ -582,6 +627,9 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/book/$slug'
     | '/go/$slug'
+    | '/platform/admins'
+    | '/platform/audit'
+    | '/platform/companies'
     | '/platform/tenants'
     | '/raf/$code'
     | '/$tenantSlug/'
@@ -605,6 +653,8 @@ export interface FileRouteTypes {
     | '/api/introducer/calculator-lead'
     | '/api/sms/inbound'
     | '/api/teams/callback'
+    | '/platform/companies/$companyCode'
+    | '/platform/companies/'
     | '/api/twilio/voice/amd-status'
     | '/api/twilio/voice/client-outbound'
     | '/api/twilio/voice/inbound'
@@ -639,6 +689,8 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/book/$slug'
     | '/go/$slug'
+    | '/platform/admins'
+    | '/platform/audit'
     | '/platform/tenants'
     | '/raf/$code'
     | '/$tenantSlug'
@@ -662,6 +714,8 @@ export interface FileRouteTypes {
     | '/api/introducer/calculator-lead'
     | '/api/sms/inbound'
     | '/api/teams/callback'
+    | '/platform/companies/$companyCode'
+    | '/platform/companies'
     | '/api/twilio/voice/amd-status'
     | '/api/twilio/voice/client-outbound'
     | '/api/twilio/voice/inbound'
@@ -699,6 +753,9 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/book/$slug'
     | '/go/$slug'
+    | '/platform/admins'
+    | '/platform/audit'
+    | '/platform/companies'
     | '/platform/tenants'
     | '/raf/$code'
     | '/$tenantSlug/'
@@ -722,6 +779,8 @@ export interface FileRouteTypes {
     | '/api/introducer/calculator-lead'
     | '/api/sms/inbound'
     | '/api/teams/callback'
+    | '/platform/companies/$companyCode'
+    | '/platform/companies/'
     | '/api/twilio/voice/amd-status'
     | '/api/twilio/voice/client-outbound'
     | '/api/twilio/voice/inbound'
@@ -832,6 +891,27 @@ declare module '@tanstack/react-router' {
       path: '/tenants'
       fullPath: '/platform/tenants'
       preLoaderRoute: typeof PlatformTenantsRouteImport
+      parentRoute: typeof PlatformRouteRoute
+    }
+    '/platform/companies': {
+      id: '/platform/companies'
+      path: '/companies'
+      fullPath: '/platform/companies'
+      preLoaderRoute: typeof PlatformCompaniesRouteImport
+      parentRoute: typeof PlatformRouteRoute
+    }
+    '/platform/audit': {
+      id: '/platform/audit'
+      path: '/audit'
+      fullPath: '/platform/audit'
+      preLoaderRoute: typeof PlatformAuditRouteImport
+      parentRoute: typeof PlatformRouteRoute
+    }
+    '/platform/admins': {
+      id: '/platform/admins'
+      path: '/admins'
+      fullPath: '/platform/admins'
+      preLoaderRoute: typeof PlatformAdminsRouteImport
       parentRoute: typeof PlatformRouteRoute
     }
     '/go/$slug': {
@@ -980,6 +1060,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/$tenantSlug/booking'
       preLoaderRoute: typeof TenantSlugBookingRouteImport
       parentRoute: typeof TenantSlugRouteRoute
+    }
+    '/platform/companies/': {
+      id: '/platform/companies/'
+      path: '/'
+      fullPath: '/platform/companies/'
+      preLoaderRoute: typeof PlatformCompaniesIndexRouteImport
+      parentRoute: typeof PlatformCompaniesRoute
+    }
+    '/platform/companies/$companyCode': {
+      id: '/platform/companies/$companyCode'
+      path: '/$companyCode'
+      fullPath: '/platform/companies/$companyCode'
+      preLoaderRoute: typeof PlatformCompaniesCompanyCodeRouteImport
+      parentRoute: typeof PlatformCompaniesRoute
     }
     '/api/teams/callback': {
       id: '/api/teams/callback'
@@ -1248,12 +1342,31 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
 const AuthenticatedRouteRouteWithChildren =
   AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
 
+interface PlatformCompaniesRouteChildren {
+  PlatformCompaniesCompanyCodeRoute: typeof PlatformCompaniesCompanyCodeRoute
+  PlatformCompaniesIndexRoute: typeof PlatformCompaniesIndexRoute
+}
+
+const PlatformCompaniesRouteChildren: PlatformCompaniesRouteChildren = {
+  PlatformCompaniesCompanyCodeRoute: PlatformCompaniesCompanyCodeRoute,
+  PlatformCompaniesIndexRoute: PlatformCompaniesIndexRoute,
+}
+
+const PlatformCompaniesRouteWithChildren =
+  PlatformCompaniesRoute._addFileChildren(PlatformCompaniesRouteChildren)
+
 interface PlatformRouteRouteChildren {
+  PlatformAdminsRoute: typeof PlatformAdminsRoute
+  PlatformAuditRoute: typeof PlatformAuditRoute
+  PlatformCompaniesRoute: typeof PlatformCompaniesRouteWithChildren
   PlatformTenantsRoute: typeof PlatformTenantsRoute
   PlatformIndexRoute: typeof PlatformIndexRoute
 }
 
 const PlatformRouteRouteChildren: PlatformRouteRouteChildren = {
+  PlatformAdminsRoute: PlatformAdminsRoute,
+  PlatformAuditRoute: PlatformAuditRoute,
+  PlatformCompaniesRoute: PlatformCompaniesRouteWithChildren,
   PlatformTenantsRoute: PlatformTenantsRoute,
   PlatformIndexRoute: PlatformIndexRoute,
 }
