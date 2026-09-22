@@ -272,6 +272,11 @@ export const PLATFORM_AUDIT_EVENT_LABELS: Record<string, string> = {
   PLATFORM_TENANT_ENTRY_STARTED: "Tenant entry started",
   PLATFORM_TENANT_ENTRY_ENDED: "Tenant entry ended",
   PLATFORM_TENANT_ENTRY_DENIED: "Tenant entry denied",
+  TENANT_OWNER_INVITED: "Company owner invited",
+  TENANT_OWNER_ADDED: "Company owner added",
+  TENANT_OWNER_REMOVED: "Company owner removed",
+  TENANT_OWNER_ROLE_CHANGED: "Company owner role changed",
+  LAST_TENANT_OWNER_ACTION_DENIED: "Last company owner action denied",
 };
 
 const AUDIT_SAFE_META_KEYS = new Set([

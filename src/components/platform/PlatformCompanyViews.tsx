@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   EXTERNAL_ENTRY_REQUIRES_GRANT_COPY,
   TENANT_MEMBER_ROLE_LABELS,
@@ -22,6 +24,12 @@ import {
   type PlatformCompanySummary,
   type PlatformDashboardOverview,
 } from "@/lib/platform-dashboard";
+import {
+  addPlatformTenantOwner,
+  cancelPlatformOwnerInvite,
+  listPlatformCompanyOwners,
+  removePlatformTenantOwner,
+} from "@/lib/platform-tenant-owners.functions";
 import { startPlatformTenantEntry } from "@/lib/platform-tenant-entry.functions";
 import { usePlatformAuthority } from "@/lib/platform-ui";
 import { toast } from "sonner";
@@ -271,7 +279,314 @@ export function PlatformCompanyDetailCard({ company }: { company: PlatformCompan
       <div className="space-y-2">
         <EnterCompanyControl company={company} />
       </div>
+
+      <CompanyOwnersPanel companyCode={company.companyCode} companyName={company.companyName} />
     </div>
+  );
+}
+
+function CompanyOwnersPanel({
+  companyCode,
+  companyName,
+}: {
+  companyCode: string;
+  companyName: string;
+}) {
+  const authority = usePlatformAuthority();
+  const queryClient = useQueryClient();
+  const listFn = useServerFn(listPlatformCompanyOwners);
+  const addFn = useServerFn(addPlatformTenantOwner);
+  const removeFn = useServerFn(removePlatformTenantOwner);
+  const cancelFn = useServerFn(cancelPlatformOwnerInvite);
+  const [addOpen, setAddOpen] = useState(false);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [elevateConfirm, setElevateConfirm] = useState<{
+    email: string;
+    existingRoles: string[];
+  } | null>(null);
+
+  const ownersQ = useQuery({
+    queryKey: ["platform-company-owners", companyCode],
+    queryFn: () => listFn({ data: { companyCode } }),
+    enabled: authority.isSuperOwner,
+  });
+
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ["platform-company-owners", companyCode] });
+  };
+
+  const addMut = useMutation({
+    mutationFn: (opts?: { confirmElevate?: boolean }) =>
+      addFn({
+        data: {
+          companyCode,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          email: email.trim(),
+          confirmElevate: opts?.confirmElevate,
+        },
+      }),
+    onSuccess: (res) => {
+      if (res.outcome === "needs_confirmation") {
+        setElevateConfirm({ email: res.email, existingRoles: res.existingRoles });
+        return;
+      }
+      if (res.outcome === "already_owner") {
+        toast.message(`${res.email} is already an Owner of this company.`);
+      } else if (res.outcome === "added") {
+        toast.success(`Owner added: ${res.email}`);
+      } else if (res.outcome === "invited") {
+        toast.success(`Owner invitation sent to ${res.email}`);
+      }
+      setAddOpen(false);
+      setElevateConfirm(null);
+      setFirstName("");
+      setLastName("");
+      setEmail("");
+      refresh();
+    },
+    onError: (e: unknown) => {
+      toast.error(e instanceof Error ? e.message : "Could not add Owner.");
+    },
+  });
+
+  const removeMut = useMutation({
+    mutationFn: (ownerEmail: string) =>
+      removeFn({ data: { companyCode, ownerEmail } }),
+    onSuccess: () => {
+      toast.success("Owner removed.");
+      refresh();
+    },
+    onError: (e: unknown) => {
+      toast.error(e instanceof Error ? e.message : "Could not remove Owner.");
+    },
+  });
+
+  const cancelMut = useMutation({
+    mutationFn: (inviteEmail: string) =>
+      cancelFn({ data: { companyCode, inviteEmail } }),
+    onSuccess: () => {
+      toast.success("Invitation cancelled.");
+      refresh();
+    },
+    onError: (e: unknown) => {
+      toast.error(e instanceof Error ? e.message : "Could not cancel invitation.");
+    },
+  });
+
+  if (!authority.isSuperOwner) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Company Owners</CardTitle>
+          <CardDescription>
+            Owner administration is available to Super Owners only.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  const data = ownersQ.data;
+  const noOwners =
+    data && !data.hasActiveOwner && !data.hasValidPendingInvite;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+        <div>
+          <CardTitle className="text-base">Company Owners</CardTitle>
+          <CardDescription>
+            Platform administration of tenant Owner memberships. Does not enter the company workspace.
+          </CardDescription>
+        </div>
+        <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
+          {noOwners ? "Add first owner" : "Add owner"}
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {ownersQ.isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading owners…</p>
+        ) : ownersQ.isError ? (
+          <p className="text-sm text-destructive">Could not load Company Owners.</p>
+        ) : (
+          <>
+            {noOwners ? (
+              <p className="text-sm text-muted-foreground">No owner assigned</p>
+            ) : null}
+
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Active owners
+              </p>
+              {(data?.owners ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">None</p>
+              ) : (
+                <ul className="space-y-2">
+                  {data!.owners.map((owner) => (
+                    <li
+                      key={owner.email}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+                    >
+                      <div>
+                        <p className="text-sm font-medium">{owner.fullName || owner.email}</p>
+                        <p className="text-xs text-muted-foreground">{owner.email}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Active
+                          {owner.joinedAt
+                            ? ` · Joined ${new Date(owner.joinedAt).toLocaleDateString("en-GB")}`
+                            : ""}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={removeMut.isPending}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Remove Owner ${owner.email} from ${companyName}? This does not delete their account.`,
+                            )
+                          ) {
+                            removeMut.mutate(owner.email);
+                          }
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Pending invitations
+              </p>
+              {(data?.pendingInvites ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">None</p>
+              ) : (
+                <ul className="space-y-2">
+                  {data!.pendingInvites.map((invite) => (
+                    <li
+                      key={invite.email}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-border px-3 py-2"
+                    >
+                      <div>
+                        <p className="text-sm font-medium">
+                          {invite.displayName || invite.email}
+                        </p>
+                        <p className="text-xs text-muted-foreground">{invite.email}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Invitation expires{" "}
+                          {new Date(invite.expiresAt).toLocaleDateString("en-GB", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={cancelMut.isPending}
+                        onClick={() => cancelMut.mutate(invite.email)}
+                      >
+                        Cancel invitation
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
+        )}
+      </CardContent>
+
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add owner — {companyName}</DialogTitle>
+            <DialogDescription>
+              Creates an Owner membership for an existing user, or a secure Owner invitation for a
+              new email. Does not create a platform role.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 py-2">
+            <div className="space-y-1">
+              <Label htmlFor="owner-first">First name</Label>
+              <Input
+                id="owner-first"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                autoComplete="given-name"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="owner-last">Last name</Label>
+              <Input
+                id="owner-last"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                autoComplete="family-name"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="owner-email">Email</Label>
+              <Input
+                id="owner-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setAddOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={addMut.isPending || !firstName.trim() || !lastName.trim() || !email.trim()}
+              onClick={() => addMut.mutate({})}
+            >
+              {addMut.isPending ? "Saving…" : "Add owner"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(elevateConfirm)} onOpenChange={(o) => !o && setElevateConfirm(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Owner elevation</DialogTitle>
+            <DialogDescription>
+              {elevateConfirm?.email} is already a member of this company (
+              {(elevateConfirm?.existingRoles ?? []).join(", ")}). Add Owner authority as well?
+              Existing membership roles are kept.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setElevateConfirm(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={addMut.isPending}
+              onClick={() => addMut.mutate({ confirmElevate: true })}
+            >
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
   );
 }
 
