@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import {
   clearPasswordRecoveryPending,
@@ -8,6 +9,7 @@ import {
   markPasswordRecoveryPending,
 } from "@/lib/auth-recovery";
 import { buildAuthNavigateSearch, buildHomePathAfterAuth } from "@/lib/post-auth-journey";
+import { resolveMyPostAuthDestination } from "@/lib/post-auth-destination.server";
 import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +36,7 @@ function ResetPasswordPage() {
   const { tenant: tenantFromSearch } = Route.useSearch();
   const tenantSlug = tenantFromSearch ?? null;
   const authSearch = buildAuthNavigateSearch({ tenantSlug });
+  const resolveDestinationFn = useServerFn(resolveMyPostAuthDestination);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -93,7 +96,14 @@ function ResetPasswordPage() {
       clearPasswordRecoveryPending();
       window.history.replaceState({}, "", tenantSlug ? `/auth?tenant=${encodeURIComponent(tenantSlug)}` : "/auth");
       toast.success("Password updated");
-      window.location.href = buildHomePathAfterAuth(null, tenantSlug);
+      try {
+        const dest = await resolveDestinationFn({
+          data: { tenantSlug: tenantSlug ?? undefined },
+        });
+        window.location.href = dest.to;
+      } catch {
+        window.location.href = buildHomePathAfterAuth(null, tenantSlug);
+      }
     } catch (err) {
       setStatus({
         type: "error",

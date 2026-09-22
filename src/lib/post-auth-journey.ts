@@ -88,11 +88,13 @@ export function buildAuthPath(opts?: {
   fromBroker?: boolean;
   start?: PostAuthStart;
   tenantSlug?: string;
+  platformIntent?: boolean;
 }) {
   const params = new URLSearchParams();
   if (opts?.fromBroker) params.set("from", "broker");
   if (opts?.join) params.set("join", "1");
   if (opts?.start) params.set("start", opts.start);
+  if (opts?.platformIntent) params.set("intent", "platform");
   if (opts?.tenantSlug) {
     const slug = normalisePublicTenantSlug(opts.tenantSlug);
     if (slug) params.set("tenant", slug);
@@ -123,6 +125,8 @@ export type AuthSearch = {
   fromBroker?: boolean;
   start?: PostAuthStart;
   tenant?: string;
+  /** Navigation intent only. Never grants platform authority. */
+  intent?: "platform";
 };
 
 export function buildAuthNavigateSearch(opts: {
@@ -131,6 +135,7 @@ export function buildAuthNavigateSearch(opts: {
   fromBroker?: boolean;
   start?: PostAuthStart | null;
   recovery?: boolean;
+  platformIntent?: boolean;
 }): AuthSearch {
   const search: AuthSearch = {};
   const tenant = normalisePublicTenantSlug(opts.tenantSlug);
@@ -139,6 +144,7 @@ export function buildAuthNavigateSearch(opts: {
   if (opts.fromBroker) search.fromBroker = true;
   if (opts.start) search.start = opts.start;
   if (opts.recovery) search.recovery = true;
+  if (opts.platformIntent) search.intent = "platform";
   return search;
 }
 

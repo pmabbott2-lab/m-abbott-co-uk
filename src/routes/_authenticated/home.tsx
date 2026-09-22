@@ -7,6 +7,8 @@ import { claimReferral, listMyReferralActivity, ensureMyReferralLink, sendMyRefe
 import { getRafCode, clearRafCookie, rafLinkForCode, rafShareMessage } from "@/lib/referral";
 import { useTenantUi } from "@/lib/tenant-ui";
 import { clearPostAuthStart, resolvePostAuthStart } from "@/lib/post-auth-journey";
+import { resolveAuthenticatedHomeRedirect } from "@/lib/post-auth-destination";
+import { getMyPlatformAuthority } from "@/lib/platform-authority.server";
 import { StaffDashboardLoader } from "@/components/staff/StaffDashboard";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -562,6 +564,21 @@ export function Home() {
   const qc = useQueryClient();
   const tenantSlug = useTenantUi()?.slug;
   const roleFn = useServerFn(getMyRole);
+  const platformFn = useServerFn(getMyPlatformAuthority);
+  const platformQ = useQuery({
+    queryKey: ["platform-authority-home", tenantSlug ?? null],
+    queryFn: () => platformFn(),
+    enabled: !tenantSlug,
+  });
+
+  useEffect(() => {
+    if (tenantSlug || platformQ.isLoading || !platformQ.data) return;
+    const dest = resolveAuthenticatedHomeRedirect({
+      canAccessPlatform: platformQ.data.canAccessPlatform,
+      tenantSlug,
+    });
+    if (dest) window.location.replace(dest);
+  }, [tenantSlug, platformQ.isLoading, platformQ.data]);
   const sessionsFn = useServerFn(listMySessions);
   const casesFn = useServerFn(listMyCases);
   const createFn = useServerFn(createSession);
@@ -676,6 +693,10 @@ export function Home() {
       }
     }
   }, [roleQ.isLoading, isAdvisor, sessionsQ.isLoading, sessionsQ.data, navigate]);
+
+  if (!tenantSlug && (platformQ.isLoading || platformQ.data?.canAccessPlatform)) {
+    return <AppShell title="Home"><div className="py-16 text-center text-muted-foreground">Loading…</div></AppShell>;
+  }
 
   if (roleQ.isLoading) {
     return <AppShell title="Home"><div className="py-16 text-center text-muted-foreground">Loading…</div></AppShell>;

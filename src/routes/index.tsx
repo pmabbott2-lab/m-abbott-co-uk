@@ -71,7 +71,7 @@ function PlatformRoot() {
               Open workspace
             </Button>
           ) : (
-            <a href="/auth">
+            <a href="/auth?intent=platform">
               <Button variant="ghost">Platform sign in</Button>
             </a>
           )}

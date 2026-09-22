@@ -35,6 +35,8 @@ import {
   type AuthSearch,
 } from "@/lib/post-auth-journey";
 import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
+import { isPlatformLoginIntent } from "@/lib/post-auth-destination";
+import { resolveMyPostAuthDestination } from "@/lib/post-auth-destination.server";
 
 function hasTestLoginBypass(session: Session): boolean {
   const meta = session.user.app_metadata as { test_email_bypass?: boolean } | undefined;
@@ -78,12 +80,14 @@ export const Route = createFileRoute("/auth")({
       start !== undefined;
     const tenantRaw = typeof search.tenant === "string" ? search.tenant : "";
     const tenant = normalisePublicTenantSlug(tenantRaw) ?? undefined;
+    const intent = isPlatformLoginIntent(search.intent) ? "platform" : undefined;
     return {
       recovery: search.recovery === "1" || search.recovery === 1 || search.recovery === true,
       join,
       fromBroker,
       start,
       tenant,
+      intent,
     };
   },
   head: () => ({
@@ -104,7 +108,7 @@ function AuthPage() {
   // mismatches that a window-location check would cause.
   const matches = useMatches();
   const isChildRoute = matches.some((m) => m.routeId === "/auth/reset");
-  const { recovery, fromBroker, tenant: tenantFromSearch } = Route.useSearch();
+  const { recovery, fromBroker, tenant: tenantFromSearch, intent } = Route.useSearch();
   const urlIntent = readAuthEntryFromLocation();
   const journeyStart = urlIntent.start;
   const effectiveJoin = urlIntent.join;
@@ -142,12 +146,25 @@ function AuthPage() {
 
   const sendLoginSmsFn = useServerFn(sendLoginSmsCode);
   const verifyLoginSmsFn = useServerFn(verifyLoginSmsCodeFn);
+  const resolveDestinationFn = useServerFn(resolveMyPostAuthDestination);
   const signInInFlight = useRef(false);
+  const platformIntent = intent === "platform";
 
-  const goHomeAfterAuth = (routeStart?: typeof journeyStart) => {
+  const goHomeAfterAuth = async (routeStart?: typeof journeyStart) => {
     const pendingStart =
       mode === "signin" ? null : resolvePostAuthStart(routeStart ?? journeyStart);
-    window.location.assign(buildHomePathAfterAuth(pendingStart, tenantSlug));
+    try {
+      const dest = await resolveDestinationFn({
+        data: {
+          tenantSlug: tenantSlug ?? undefined,
+          start: pendingStart ?? undefined,
+          platformIntent,
+        },
+      });
+      window.location.assign(dest.to);
+    } catch {
+      window.location.assign(buildHomePathAfterAuth(pendingStart, tenantSlug));
+    }
   };
 
   const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
@@ -174,7 +191,7 @@ function AuthPage() {
       ) {
         return;
       }
-      goHomeAfterAuth();
+      await goHomeAfterAuth();
     } catch (err) {
       console.error("[auth] session resume failed:", err);
       await supabase.auth.signOut({ scope: "local" });
@@ -323,7 +340,18 @@ function AuthPage() {
       }
       // Full reload so /_authenticated beforeLoad always sees a stored session.
       const pendingStart = mode === "signin" ? null : resolvePostAuthStart(journeyStart);
-      window.location.assign(buildHomePathAfterAuth(pendingStart, tenantSlug));
+      try {
+        const dest = await resolveDestinationFn({
+          data: {
+            tenantSlug: tenantSlug ?? undefined,
+            start: pendingStart ?? undefined,
+            platformIntent,
+          },
+        });
+        window.location.assign(dest.to);
+      } catch {
+        window.location.assign(buildHomePathAfterAuth(pendingStart, tenantSlug));
+      }
     } finally {
       // Keep in-flight true through navigation; unload clears it.
     }

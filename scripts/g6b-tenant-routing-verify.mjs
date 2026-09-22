@@ -392,7 +392,11 @@ ok("platform_book_remaps", bookLegacy.includes("/$tenantSlug/book/$introducerSlu
 ok("platform_book_auth_tenant", bookLegacy.includes("buildAuthNavigateSearch"));
 
 const resetSrc = readFileSync(resolve(root, "src/routes/auth/reset.tsx"), "utf8");
-ok("reset_success_tenant_workspace", resetSrc.includes("buildHomePathAfterAuth(null, tenantSlug)"));
+ok(
+  "reset_success_tenant_workspace",
+  resetSrc.includes("resolveMyPostAuthDestination") ||
+    resetSrc.includes("buildHomePathAfterAuth(null, tenantSlug)"),
+);
 const resetApi = readFileSync(resolve(root, "src/routes/api/auth/request-password-reset.ts"), "utf8");
 ok("reset_api_passes_tenant", resetApi.includes("body.tenant"));
 
