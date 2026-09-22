@@ -740,7 +740,7 @@ export function Home() {
     );
   }
 
-  if (isAdvisor || isMainAdmin) {
+  if (isAdvisor || isMainAdmin || roleQ.data?.shell === "platform_access") {
     return <StaffDashboardLoader />;
   }
 

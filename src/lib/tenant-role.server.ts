@@ -70,16 +70,37 @@ export async function loadTenantRoleForTenantId(
     return deniedTenantRoleView({ tenantSlug: tenantSlug ?? tenant.slug, tenantId: tenant.id });
   }
   const membershipRoles = await listTenantMembershipRoles(userId, tenant.id);
-  const generalPermissions = membershipRoles.includes("general")
-    ? await loadGeneralPermissions(userId, tenant.id)
-    : null;
-  return resolveTenantRoleView({
-    membershipRoles,
-    tenantSlug: tenantSlug ?? tenant.slug,
+  if (membershipRoles.length > 0) {
+    const generalPermissions = membershipRoles.includes("general")
+      ? await loadGeneralPermissions(userId, tenant.id)
+      : null;
+    return resolveTenantRoleView({
+      membershipRoles,
+      tenantSlug: tenantSlug ?? tenant.slug,
+      tenantId: tenant.id,
+      member: true,
+      generalPermissions,
+    });
+  }
+
+  const { validatePlatformTenantAccessSession } = await import(
+    "@/lib/platform-tenant-entry.server"
+  );
+  const platform = await validatePlatformTenantAccessSession({
+    userId,
     tenantId: tenant.id,
-    member: membershipRoles.length > 0,
-    generalPermissions,
   });
+  if (platform) {
+    const { platformAccessTenantRoleView } = await import("@/lib/tenant-role");
+    return platformAccessTenantRoleView({
+      tenantSlug: tenantSlug ?? tenant.slug,
+      tenantId: tenant.id,
+      accessLevel: platform.accessLevel,
+      basisLabel: platform.basisLabel,
+    });
+  }
+
+  return deniedTenantRoleView({ tenantSlug: tenantSlug ?? tenant.slug, tenantId: tenant.id });
 }
 
 /** Map a tenant role view to legacy app_role strings for existing gates. */

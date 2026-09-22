@@ -90,9 +90,16 @@ export function PlatformShell({ children }: { children: ReactNode }) {
   const environmentLabel = platformEnvironmentLabel();
 
   const signOut = () => {
-    void supabase.auth.signOut({ scope: "local" }).finally(() => {
+    void (async () => {
+      try {
+        const { endPlatformTenantEntry } = await import("@/lib/platform-tenant-entry.functions");
+        await endPlatformTenantEntry();
+      } catch {
+        /* best effort */
+      }
+      await supabase.auth.signOut({ scope: "local" });
       void navigate({ to: "/auth", replace: true });
-    });
+    })();
   };
 
   return (

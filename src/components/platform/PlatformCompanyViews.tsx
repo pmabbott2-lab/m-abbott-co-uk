@@ -1,10 +1,20 @@
-import { Link } from "@tanstack/react-router";
+import { useState } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useMutation } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  TENANT_ACCESS_AVAILABLE,
-  TENANT_ACCESS_FUTURE_LABEL,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  EXTERNAL_ENTRY_REQUIRES_GRANT_COPY,
   TENANT_MEMBER_ROLE_LABELS,
   TENANT_MEMBER_ROLES,
   tenantTypePresentation,
@@ -12,6 +22,9 @@ import {
   type PlatformCompanySummary,
   type PlatformDashboardOverview,
 } from "@/lib/platform-dashboard";
+import { startPlatformTenantEntry } from "@/lib/platform-tenant-entry.functions";
+import { usePlatformAuthority } from "@/lib/platform-ui";
+import { toast } from "sonner";
 
 export function PlatformStatCards({ overview }: { overview: PlatformDashboardOverview }) {
   const cards = [
@@ -114,12 +127,81 @@ export function PlatformCompanyTable({
   );
 }
 
-export function FutureTenantAccessControl() {
-  if (TENANT_ACCESS_AVAILABLE) return null;
+function EnterCompanyControl({ company }: { company: PlatformCompanyDetail }) {
+  const authority = usePlatformAuthority();
+  const navigate = useNavigate();
+  const startFn = useServerFn(startPlatformTenantEntry);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const enter = useMutation({
+    mutationFn: () =>
+      startFn({ data: { companyCode: company.companyCode, confirmed: true } }),
+    onSuccess: (res) => {
+      setConfirmOpen(false);
+      void navigate({
+        to: "/$tenantSlug/workspace",
+        params: { tenantSlug: res.tenantSlug },
+      });
+    },
+    onError: (e: unknown) => {
+      toast.error(e instanceof Error ? e.message : "Could not enter company.");
+    },
+  });
+
+  if (company.status !== "active") {
+    return (
+      <p className="text-sm text-muted-foreground">
+        This company is not active. Platform entry is unavailable.
+      </p>
+    );
+  }
+
+  if (company.tenantType === "EXTERNAL") {
+    return (
+      <div className="space-y-2">
+        <Button disabled variant="outline" type="button">
+          Enter company
+        </Button>
+        <p className="text-xs text-muted-foreground">{EXTERNAL_ENTRY_REQUIRES_GRANT_COPY}</p>
+      </div>
+    );
+  }
+
+  // GROUP: Super Owner may enter; Super Admin entry requires grants (server enforces).
+  if (!authority.canAccessPlatform) return null;
+
   return (
-    <Button disabled variant="outline" type="button">
-      {TENANT_ACCESS_FUTURE_LABEL}
-    </Button>
+    <div className="space-y-2">
+      <Button type="button" onClick={() => setConfirmOpen(true)}>
+        Enter company
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        Explicit audited platform entry. Does not create a tenant membership.
+      </p>
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enter {company.companyName}?</DialogTitle>
+            <DialogDescription>
+              You are entering this company&apos;s operational environment using platform-level
+              authority. This access will be recorded in the platform audit log and will expire
+              automatically.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={enter.isPending}
+              onClick={() => enter.mutate()}
+            >
+              {enter.isPending ? "Entering…" : "Enter company"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 
@@ -187,11 +269,7 @@ export function PlatformCompanyDetailCard({ company }: { company: PlatformCompan
       </Card>
 
       <div className="space-y-2">
-        <FutureTenantAccessControl />
-        <p className="text-xs text-muted-foreground">
-          This screen is platform metadata only. It does not open the tenant application and does
-          not grant operational access.
-        </p>
+        <EnterCompanyControl company={company} />
       </div>
     </div>
   );

@@ -1,15 +1,18 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { checkTenantMembershipFn } from "@/lib/tenant-presentation.server";
 import { resolveTenantAuthenticatedEntry } from "@/lib/tenant-access";
 import { useRequiredTenantUi } from "@/lib/tenant-ui";
 import { TenantPublicShell } from "@/components/tenant/TenantPublicShell";
+import { PlatformAccessBanner } from "@/components/platform/PlatformAccessBanner";
 import { Button } from "@/components/ui/button";
+import { getMyPlatformTenantAccess } from "@/lib/platform-tenant-entry.functions";
 
 /**
- * Session + server membership gate for tenant-authenticated pages.
- * Slug identifies which firm was requested; membership is the grant.
+ * Session + server membership OR platform-entry gate for tenant-authenticated pages.
+ * Slug identifies which firm was requested; membership or valid platform session is the grant.
  */
 export function TenantAuthenticatedGate({
   children,
@@ -20,7 +23,9 @@ export function TenantAuthenticatedGate({
 }) {
   const tenant = useRequiredTenantUi();
   const navigate = useNavigate();
+  const platformAccessFn = useServerFn(getMyPlatformTenantAccess);
   const [state, setState] = useState<"checking" | "denied" | "ok">("checking");
+  const [platformAccess, setPlatformAccess] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -38,17 +43,27 @@ export function TenantAuthenticatedGate({
         const result = await checkTenantMembershipFn({
           data: { slug: tenant.slug, userId },
         });
-        const next = resolveTenantAuthenticatedEntry({ userId, member: result.member });
+        let hasPlatform = false;
+        if (!result.member) {
+          const access = await platformAccessFn({ data: { tenantSlug: tenant.slug } });
+          hasPlatform = Boolean(access);
+        }
+        const next = resolveTenantAuthenticatedEntry({
+          userId,
+          member: result.member,
+          platformAccess: hasPlatform,
+        });
         if (next === "denied") {
           setState("denied");
           return;
         }
+        setPlatformAccess(hasPlatform && !result.member);
         setState("ok");
       } catch {
         setState("denied");
       }
     })();
-  }, [tenant, navigate]);
+  }, [tenant, navigate, platformAccessFn]);
 
   if (state === "denied") {
     return (
@@ -57,12 +72,15 @@ export function TenantAuthenticatedGate({
           <h1 className="text-2xl font-semibold">Access denied</h1>
           <p className="text-sm text-muted-foreground">
             Your signed-in account is not a member of{" "}
-            <strong>{tenant.tradingName || tenant.companyName}</strong>. Tenant routes identify
-            which firm you requested — they do not override membership or database security.
+            <strong>{tenant.tradingName || tenant.companyName}</strong>
+            {" "}and has no active platform access session for this company.
           </p>
           <div className="flex flex-wrap justify-center gap-2">
             <Button asChild variant="outline">
               <Link to="/">Mortgage Hub home</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/platform">Platform</Link>
             </Button>
             <Button
               variant="ghost"
@@ -85,11 +103,16 @@ export function TenantAuthenticatedGate({
 
   if (state !== "ok") {
     return (
-      <TenantPublicShell tenant={tenant}>
-        <p className="text-center text-sm text-muted-foreground">{checkingLabel}</p>
-      </TenantPublicShell>
+      <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
+        {checkingLabel}
+      </div>
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {platformAccess ? <PlatformAccessBanner tenantSlug={tenant.slug} /> : null}
+      {children}
+    </>
+  );
 }

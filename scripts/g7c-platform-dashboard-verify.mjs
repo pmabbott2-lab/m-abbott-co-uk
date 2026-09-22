@@ -167,8 +167,11 @@ ok("external_caption_platform_managed", external.caption === "Platform managed")
 ok("external_not_operational", !external.hint.toLowerCase().includes("operational access"));
 ok("group_external_distinct", group.caption !== external.caption);
 
-ok("tenant_access_not_enabled", TENANT_ACCESS_AVAILABLE === false);
-ok("tenant_access_future_label", TENANT_ACCESS_FUTURE_LABEL.includes("Audited access not yet enabled"));
+ok("tenant_access_g7d_enabled_flag", TENANT_ACCESS_AVAILABLE === true);
+ok(
+  "tenant_access_future_label_retained_for_docs",
+  TENANT_ACCESS_FUTURE_LABEL.includes("Audited access not yet enabled"),
+);
 
 const dashServer = read("src/lib/platform-dashboard.server.ts");
 ok("dashboard_requires_auth", dashServer.includes("requireSupabaseAuth"));
@@ -253,7 +256,11 @@ for (const file of g7cFiles) {
     !forbiddenFn.test(src) && !src.includes("View As Tenant") && !src.includes("Impersonate"),
   );
 }
-ok("enter_tenant_not_implemented", TENANT_ACCESS_AVAILABLE === false);
+ok(
+  "enter_uses_audited_platform_session",
+  TENANT_ACCESS_AVAILABLE === true &&
+    read("src/components/platform/PlatformCompanyViews.tsx").includes("startPlatformTenantEntry"),
+);
 
 const shell = read("src/components/platform/PlatformShell.tsx");
 ok("shell_platform_title", shell.includes("Platform Administration") && shell.includes("Mortgage Hub"));
@@ -277,8 +284,10 @@ ok(
   companyViews.includes("TenantTypeBadge") && read("src/lib/platform-dashboard.ts").includes("Platform managed"),
 );
 ok(
-  "no_working_enter_control",
-  companyViews.includes("disabled") && companyViews.includes("TENANT_ACCESS_FUTURE_LABEL"),
+  "enter_company_confirmation_control",
+  companyViews.includes("Enter company") &&
+    companyViews.includes("startPlatformTenantEntry") &&
+    companyViews.includes("confirmed: true"),
 );
 
 ok("empty_dashboard_closed", emptyDashboard("none").totalCompanies === 0);

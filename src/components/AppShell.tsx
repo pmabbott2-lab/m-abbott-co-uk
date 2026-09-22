@@ -26,6 +26,12 @@ export function AppShell({
   const companyWebsite = tenant?.websiteUrl?.trim() || null;
   const companyLabel = tenant?.tradingName || tenant?.companyName || null;
   const signOut = async () => {
+    try {
+      const { endPlatformTenantEntry } = await import("@/lib/platform-tenant-entry.functions");
+      await endPlatformTenantEntry();
+    } catch {
+      /* best effort */
+    }
     await supabase.auth.signOut();
     try {
       sessionStorage.removeItem("mh:ui-tenant-slug");

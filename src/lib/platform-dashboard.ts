@@ -123,7 +123,9 @@ export type PlatformAuditListItem = {
 };
 
 export const TENANT_ACCESS_FUTURE_LABEL = "Tenant access — Audited access not yet enabled";
-export const TENANT_ACCESS_AVAILABLE = false;
+export const TENANT_ACCESS_AVAILABLE = true;
+export const EXTERNAL_ENTRY_REQUIRES_GRANT_COPY =
+  "Operational access requires an authorised support or emergency grant.";
 
 export const ADMINS_PLACEHOLDER_COPY =
   "Platform administrator management is not yet enabled. Super Admin grants will be available in a later phase.";
@@ -267,6 +269,9 @@ export const PLATFORM_AUDIT_EVENT_LABELS: Record<string, string> = {
   SUPER_ADMIN_TENANT_GRANTED: "Company grant recorded",
   SUPER_ADMIN_TENANT_REVOKED: "Company grant removed",
   TENANT_CREATED: "Company created",
+  PLATFORM_TENANT_ENTRY_STARTED: "Tenant entry started",
+  PLATFORM_TENANT_ENTRY_ENDED: "Tenant entry ended",
+  PLATFORM_TENANT_ENTRY_DENIED: "Tenant entry denied",
 };
 
 const AUDIT_SAFE_META_KEYS = new Set([
@@ -277,6 +282,9 @@ const AUDIT_SAFE_META_KEYS = new Set([
   "tenant_type",
   "status",
   "role",
+  "authorityBasis",
+  "accessLevel",
+  "reason",
 ]);
 
 export function presentPlatformAuditEvent(input: {

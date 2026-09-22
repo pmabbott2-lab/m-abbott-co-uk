@@ -1287,6 +1287,9 @@ export const getMyRole = createServerFn({ method: "GET" })
       tenantId: view.tenantId,
       member: view.member,
       shell: view.shell,
+      accessContext: view.accessContext,
+      platformAccessLevel: view.platformAccessLevel,
+      platformAccessBasisLabel: view.platformAccessBasisLabel,
     };
   });
 
@@ -1619,16 +1622,24 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "POST" })
     const view = await resolveActingTenantRole(context.userId, data.tenantSlug ?? null);
     const adminAccess = view.adminAccess;
     const viewAsMode = Boolean(data.viewAsAdvisorId);
+    const platformAccess = view.accessContext === "platform_access";
 
     const roles = await getRolesForUser(context.userId, view.tenantId);
     if (viewAsMode) {
       if (!adminAccess.isOwner && !adminAccess.isSupervisor) throw new Error("Forbidden");
-    } else if (!roles.includes("advisor") && !adminAccess.isAdmin) {
+    } else if (
+      !platformAccess &&
+      !roles.includes("advisor") &&
+      !adminAccess.isAdmin
+    ) {
+      throw new Error("Forbidden");
+    } else if (platformAccess && !view.isMainAdmin) {
       throw new Error("Forbidden");
     }
 
     const effectiveUserId = viewAsMode ? data.viewAsAdvisorId! : context.userId;
-    const isMainAdmin = !viewAsMode && roles.includes("admin") && adminAccess.isAdmin;
+    const isMainAdmin =
+      (!viewAsMode && roles.includes("admin") && adminAccess.isAdmin) || platformAccess;
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
@@ -3247,11 +3258,13 @@ export const listNotes = createServerFn({ method: "POST" })
 // ============================================================================
 
 // Throws unless the caller holds the main-admin role. Mirrors the admin gate
-// used by listAdvisors / allocateSession.
+// used by listAdvisors / allocateSession. Platform read_only entry cannot mutate.
 async function requireAdmin(userId: string): Promise<void> {
   const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+  const { platformAccessMayMutate } = await import("@/lib/tenant-role");
   const view = await resolveActingTenantRole(userId);
   if (!view.isMainAdmin) throw new Error("Forbidden");
+  if (!platformAccessMayMutate(view)) throw new Error("Forbidden");
 }
 
 // Stamp deleted_at on an advisor profile, swallowing the error if the column

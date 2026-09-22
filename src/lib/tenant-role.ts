@@ -38,13 +38,19 @@ export type TenantShell =
   | "adviser"
   | "introducer"
   | "customer"
+  | "platform_access"
   | "denied";
+
+export type TenantAccessContext = "membership" | "platform_access" | "none";
 
 export type TenantRoleView = {
   membershipRoles: TenantMemberRole[];
   tenantSlug: string | null;
   tenantId: string | null;
   member: boolean;
+  accessContext: TenantAccessContext;
+  platformAccessLevel: "read_only" | "operational_admin" | "emergency" | null;
+  platformAccessBasisLabel: string | null;
   isOwner: boolean;
   isSupervisor: boolean;
   isGeneralAdmin: boolean;
@@ -131,6 +137,9 @@ export function deniedTenantRoleView(input?: {
     tenantSlug: input?.tenantSlug ?? null,
     tenantId: input?.tenantId ?? null,
     member: false,
+    accessContext: "none",
+    platformAccessLevel: null,
+    platformAccessBasisLabel: null,
     isOwner: false,
     isSupervisor: false,
     isGeneralAdmin: false,
@@ -141,6 +150,45 @@ export function deniedTenantRoleView(input?: {
     adminAccess: emptyAdmin(),
     shell: "denied",
   };
+}
+
+/** Platform entry presentation — never maps to Owner/Adviser/Customer shells. */
+export function platformAccessTenantRoleView(input: {
+  tenantSlug?: string | null;
+  tenantId?: string | null;
+  accessLevel: "read_only" | "operational_admin" | "emergency";
+  basisLabel: string;
+}): TenantRoleView {
+  const canWrite =
+    input.accessLevel === "operational_admin" || input.accessLevel === "emergency";
+  return {
+    membershipRoles: [],
+    tenantSlug: input.tenantSlug ?? null,
+    tenantId: input.tenantId ?? null,
+    member: false,
+    accessContext: "platform_access",
+    platformAccessLevel: input.accessLevel,
+    platformAccessBasisLabel: input.basisLabel,
+    isOwner: false,
+    isSupervisor: false,
+    isGeneralAdmin: false,
+    // operational entry uses admin-capable dashboard without claiming Owner
+    isMainAdmin: true,
+    isAdvisor: false,
+    isIntroducer: false,
+    adminLevel: canWrite ? "owner" : null,
+    adminAccess: canWrite ? ownerAdmin() : emptyAdmin(),
+    shell: "platform_access",
+  };
+}
+
+/** Platform read_only sessions must not mutate tenant operational data. */
+export function platformAccessMayMutate(view: TenantRoleView): boolean {
+  if (view.accessContext !== "platform_access") return true;
+  return (
+    view.platformAccessLevel === "operational_admin" ||
+    view.platformAccessLevel === "emergency"
+  );
 }
 
 /**
@@ -199,6 +247,9 @@ export function resolveTenantRoleView(input: {
     tenantSlug: input.tenantSlug ?? null,
     tenantId: input.tenantId ?? null,
     member: true,
+    accessContext: "membership",
+    platformAccessLevel: null,
+    platformAccessBasisLabel: null,
     isOwner,
     isSupervisor: isOwner || isSupervisorMember,
     isGeneralAdmin,
@@ -226,4 +277,8 @@ export function canIntroduceAsTenantMember(view: TenantRoleView): boolean {
 
 export function isTenantStaffMember(view: TenantRoleView): boolean {
   return view.member && (view.isMainAdmin || view.isAdvisor);
+}
+
+export function isPlatformAccessContext(view: TenantRoleView): boolean {
+  return view.accessContext === "platform_access" && view.shell === "platform_access";
 }
