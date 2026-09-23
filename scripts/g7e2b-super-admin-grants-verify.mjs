@@ -303,6 +303,21 @@ ok(
   "assert_staff_platform_data_access",
   sessions.includes("platformDataAccess") && sessions.includes("platformAccessMayRead"),
 );
+ok(
+  "get_session_platform_may_read",
+  sessions.includes("export const getSession") &&
+    sessions.includes("platformAccessMayRead") &&
+    sessions.includes("loadTenantRoleForTenantId"),
+);
+ok(
+  "get_session_no_synthetic_only_gate",
+  !sessions.includes('const isMainAdmin = roles.includes("admin");\n      const isAdvisor = roles.includes("advisor");\n      if (!isMainAdmin) {\n        if (!isAdvisor) throw new Error("Forbidden");'),
+);
+
+const sessionUi = read("src/routes/_authenticated/sessions.$sessionId.tsx");
+ok("session_ui_error_state", sessionUi.includes("q.isError") && sessionUi.includes("You do not have access"));
+ok("session_ui_loading_only_is_loading", sessionUi.includes("if (q.isLoading)") && !sessionUi.includes("if (q.isLoading || !q.data)"));
+ok("session_ui_platform_read_only", sessionUi.includes("isPlatformReadOnly") && sessionUi.includes("platformReadOnly"));
 
 const navTs = read("src/lib/staff-branch-nav.ts");
 ok("nav_platform_read_only_flag", navTs.includes("platformReadOnly"));

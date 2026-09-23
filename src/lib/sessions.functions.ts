@@ -1026,38 +1026,47 @@ export const getSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { data: session, error } = await context.supabase
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    const { loadTenantRoleForTenantId } = await import("@/lib/tenant-role.server");
+    const { platformAccessMayRead, tenantViewMayReadOperational } = await import(
+      "@/lib/tenant-role"
+    );
+
+    // Load by id via service role, then assert actor authority + tenant match.
+    // Do not return data without the gates below (customer hub pattern).
+    const { data: session, error } = await supabaseAdmin
       .from("interview_sessions")
       .select("*")
       .eq("id", data.sessionId)
-      .single();
+      .maybeSingle();
     if (error) throw new Error(error.message);
+    if (!session) throw new Error("Session not found");
 
     const deletedAt = (session as { deleted_at?: string | null }).deleted_at;
-    if (deletedAt && session.customer_id !== context.userId) {
-      const email = (context.claims as { email?: string }).email;
-      const { resolveAdminAccess } = await import("@/lib/admin.functions");
-      const access = await resolveAdminAccess(context.userId, email);
-      if (!access.isOwner && !access.isSupervisor) {
-        throw new Error("This fact-find has been deleted.");
-      }
-    }
-    if (deletedAt && session.customer_id === context.userId) {
-      throw new Error("This fact-find has been removed.");
-    }
+    const isCustomerOwner = session.customer_id === context.userId;
+    const sessionTenantId = (session as { tenant_id?: string | null }).tenant_id ?? null;
 
-    // Allocation gate (app-layer): the owning customer and the main admin can
-    // always view. A regular advisor may only view a fact-find allocated to them
-    // (session_advisors) or one where they hold the appointment.
-    if (session && session.customer_id !== context.userId) {
-      const roles = await getRolesForUser(context.userId);
-      const isMainAdmin = roles.includes("admin");
-      const isAdvisor = roles.includes("advisor");
-      if (!isMainAdmin) {
+    let staffMayRead = false;
+    let isMainAdmin = false;
+    let isAdvisor = false;
+
+    if (!isCustomerOwner) {
+      if (!sessionTenantId) throw new Error("Forbidden");
+      const view = await loadTenantRoleForTenantId(context.userId, sessionTenantId);
+      // Tenant mismatch / no acting authority for this tenant → deny (covers 002 with no grant).
+      if (view.tenantId !== sessionTenantId) throw new Error("Forbidden");
+      if (!tenantViewMayReadOperational(view) && !platformAccessMayRead(view)) {
+        throw new Error("Forbidden");
+      }
+      staffMayRead = true;
+      isMainAdmin = view.isMainAdmin || platformAccessMayRead(view);
+      isAdvisor = view.isAdvisor;
+
+      if (!isMainAdmin && !platformAccessMayRead(view)) {
+        // Regular advisor: allocation or appointment only.
         if (!isAdvisor) throw new Error("Forbidden");
-        const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
         let allowed = false;
         const { data: alloc, error: allocErr } = await supabaseAdmin
           .from("session_advisors")
@@ -1081,12 +1090,28 @@ export const getSession = createServerFn({ method: "POST" })
       }
     }
 
-    const { data: messages } = await context.supabase
+    if (deletedAt && !isCustomerOwner) {
+      // Soft-deleted: owner/supervisor membership or platform read may still inspect.
+      if (!staffMayRead) throw new Error("This fact-find has been deleted.");
+      if (!sessionTenantId) throw new Error("This fact-find has been deleted.");
+      const view = await loadTenantRoleForTenantId(context.userId, sessionTenantId);
+      const maySeeDeleted =
+        platformAccessMayRead(view) ||
+        view.isMainAdmin ||
+        view.adminAccess.isOwner ||
+        view.adminAccess.isSupervisor;
+      if (!maySeeDeleted) throw new Error("This fact-find has been deleted.");
+    }
+    if (deletedAt && isCustomerOwner) {
+      throw new Error("This fact-find has been removed.");
+    }
+
+    const { data: messages } = await supabaseAdmin
       .from("interview_messages")
       .select("*")
       .eq("session_id", data.sessionId)
       .order("created_at", { ascending: true });
-    const { data: answers } = await context.supabase
+    const { data: answers } = await supabaseAdmin
       .from("interview_answers")
       .select("*")
       .eq("session_id", data.sessionId);
@@ -1099,14 +1124,13 @@ export const getSession = createServerFn({ method: "POST" })
       date_of_birth?: string | null;
     } | null = null;
     if (session?.customer_id) {
-      const { data: profile, error: profileError } = await context.supabase
+      const { data: profile, error: profileError } = await supabaseAdmin
         .from("profiles")
         .select("id, full_name, email, phone, address")
         .eq("id", session.customer_id)
         .maybeSingle();
       if (profileError) {
-        // The `phone` / `address` columns may not exist yet — fall back.
-        const { data: basic } = await context.supabase
+        const { data: basic } = await supabaseAdmin
           .from("profiles")
           .select("id, full_name, email, phone")
           .eq("id", session.customer_id)

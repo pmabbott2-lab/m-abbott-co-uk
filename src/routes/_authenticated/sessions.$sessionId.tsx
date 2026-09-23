@@ -69,6 +69,7 @@ import { PhoneCallDetailDialog } from "@/components/PhoneCallDetailDialog";
 import { CaseDetailsCard } from "@/components/CaseDetailsCard";
 import { PayoutStatusBadge, commissionPipelineTotals } from "@/components/PayoutStatusBadge";
 import { useTenantUi } from "@/lib/tenant-ui";
+import { isPlatformReadOnly } from "@/lib/tenant-role";
 
 export const Route = createFileRoute("/_authenticated/sessions/$sessionId")({
   component: SessionDetail,
@@ -88,17 +89,25 @@ export function SessionDetail() {
     queryKey: ["my-role", tenantSlug ?? null],
     queryFn: () => roleFn({ data: { tenantSlug } }),
   });
+  const platformReadOnly = isPlatformReadOnly({
+    accessContext: roleQ.data?.accessContext ?? "none",
+    platformAccessLevel: roleQ.data?.platformAccessLevel ?? null,
+  });
   const bookingFn = useServerFn(getSessionBooking);
   const bookingQ = useQuery({
     queryKey: ["session-booking", sessionId],
     queryFn: () => bookingFn({ data: { sessionId } }),
-    enabled: Boolean(q.data) && (roleQ.data?.isAdvisor ?? false),
+    enabled: Boolean(q.data) && (roleQ.data?.isAdvisor ?? false) && !platformReadOnly,
   });
   const apptFn = useServerFn(getAppointmentForSession);
   const customerApptQ = useQuery({
     queryKey: ["session-appointment", sessionId],
     queryFn: () => apptFn({ data: { sessionId } }),
-    enabled: Boolean(q.data) && !(roleQ.data?.isAdvisor ?? false),
+    enabled:
+      Boolean(q.data) &&
+      !(roleQ.data?.isAdvisor ?? false) &&
+      !platformReadOnly &&
+      !(roleQ.data?.isMainAdmin ?? false),
   });
 
   const submit = useMutation({
@@ -110,15 +119,53 @@ export function SessionDetail() {
     },
   });
 
-  if (q.isLoading || !q.data) {
-    return <AppShell title="Session"><div className="py-16 text-center text-muted-foreground">Loading…</div></AppShell>;
+  if (q.isLoading) {
+    return (
+      <AppShell title="Session">
+        <div className="py-16 text-center text-muted-foreground">Loading…</div>
+      </AppShell>
+    );
+  }
+
+  if (q.isError) {
+    const raw = q.error instanceof Error ? q.error.message : "";
+    const forbidden = /forbidden/i.test(raw);
+    const missing = /not found|removed|deleted/i.test(raw);
+    return (
+      <AppShell title="Session" backTo="/home" backLabel="Dashboard">
+        <div className="py-16 text-center space-y-3">
+          <p className="text-muted-foreground">
+            {forbidden
+              ? "You do not have access to this case."
+              : missing
+                ? "This case is unavailable."
+                : "Could not load this case."}
+          </p>
+          <Link to="/home">
+            <Button variant="outline">Back to dashboard</Button>
+          </Link>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (!q.data) {
+    return (
+      <AppShell title="Session" backTo="/home" backLabel="Dashboard">
+        <div className="py-16 text-center text-muted-foreground">This case is unavailable.</div>
+      </AppShell>
+    );
   }
 
   const { session, answers, messages, customer } = q.data;
-  const isAdvisor = roleQ.data?.isAdvisor ?? false;
-  const adminAccess = roleQ.data?.adminAccess ?? null;
-  const isOwner = roleQ.data?.isOwner ?? false;
-  const showFinance = canView(adminAccess, "finance_customer");
+  const isAdvisor = (roleQ.data?.isAdvisor ?? false) && !platformReadOnly;
+  const isStaffViewer =
+    platformReadOnly ||
+    (roleQ.data?.isAdvisor ?? false) ||
+    (roleQ.data?.isMainAdmin ?? false);
+  const adminAccess = platformReadOnly ? null : (roleQ.data?.adminAccess ?? null);
+  const isOwner = (roleQ.data?.isOwner ?? false) && !platformReadOnly;
+  const showFinance = !platformReadOnly && canView(adminAccess, "finance_customer");
   const answerMap = new Map(answers.map((a) => [`${a.section}:${a.field_key}`, a]));
   const keyFacts = mergeKeyFacts(answers);
   const summary = (session as { summary?: string | null }).summary ?? null;
@@ -136,6 +183,10 @@ export function SessionDetail() {
   };
 
   const onEdit = async (section: string, fieldKey: string, fieldLabel: string, value: string) => {
+    if (platformReadOnly) {
+      toast.error("Read only — changes are not allowed");
+      return;
+    }
     try {
       await updateFn({ data: { sessionId, section, fieldKey, fieldLabel, value } });
       qc.invalidateQueries({ queryKey: ["session", sessionId] });
@@ -146,14 +197,20 @@ export function SessionDetail() {
 
   return (
     <AppShell
-      title={isAdvisor ? "Customer fact-find" : "Your fact-find"}
-      backTo={isAdvisor && customerId ? "/customers/$customerId" : isAdvisor ? "/home" : "/cases"}
-      backParams={isAdvisor && customerId ? { customerId } : undefined}
-      backLabel={isAdvisor ? "Customer" : "Your cases"}
+      title={isStaffViewer ? "Customer fact-find" : "Your fact-find"}
+      backTo={
+        isStaffViewer && customerId
+          ? "/customers/$customerId"
+          : isStaffViewer
+            ? "/home"
+            : "/cases"
+      }
+      backParams={isStaffViewer && customerId ? { customerId } : undefined}
+      backLabel={isStaffViewer ? "Customer" : "Your cases"}
     >
       <div className="max-w-3xl mx-auto space-y-6">
 
-        {!isAdvisor && customerApptQ.data && session.status !== "submitted" && (
+        {!isStaffViewer && customerApptQ.data && session.status !== "submitted" && (
           <div className="rounded-2xl border bg-card p-5 space-y-3">
             <h3 className="font-semibold">Your upcoming appointment</h3>
             <p className="text-sm text-muted-foreground">
@@ -186,7 +243,7 @@ export function SessionDetail() {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 className="text-2xl font-semibold">
-              {isAdvisor
+              {isStaffViewer
                 ? isCase
                   ? "Case"
                   : "Fact-find review"
@@ -200,8 +257,9 @@ export function SessionDetail() {
               )}
               Started {safeFormat(session.started_at, "PPP")} ·{" "}
               <span className="font-medium">{session.status === "submitted" ? "Submitted" : "In progress"}</span>
+              {platformReadOnly ? " · Read only" : ""}
             </p>
-            {isAdvisor && customerId && (
+            {isStaffViewer && customerId && (
               <Link
                 to="/customers/$customerId"
                 params={{ customerId }}
@@ -211,25 +269,27 @@ export function SessionDetail() {
               </Link>
             )}
           </div>
-          {!isAdvisor && session.status !== "submitted" && (
+          {!isStaffViewer && session.status !== "submitted" && (
             <Button onClick={() => submit.mutate()} disabled={submit.isPending}>
               {submit.isPending ? "Submitting…" : "Submit to advisor"}
             </Button>
           )}
         </div>
 
-        <Tabs defaultValue={isAdvisor ? (isCase ? "crm" : "factfind") : "factfind"} className="w-full">
+        <Tabs defaultValue={isStaffViewer ? (isCase ? "crm" : "factfind") : "factfind"} className="w-full">
           <TabsList variant="hubSub" className="w-full justify-center">
-            {isAdvisor && isCase ? (
+            {isStaffViewer && isCase ? (
               <>
                 <TabsTrigger value="crm">CRM</TabsTrigger>
                 <TabsTrigger value="notes">Notes &amp; history</TabsTrigger>
                 <TabsTrigger value="factfind">Fact find</TabsTrigger>
-                <TabsTrigger value="journey">Customer journey</TabsTrigger>
+                {!platformReadOnly && (
+                  <TabsTrigger value="journey">Customer journey</TabsTrigger>
+                )}
                 <TabsTrigger value="case-details">Case details</TabsTrigger>
                 {showFinance && <TabsTrigger value="finance">Finance</TabsTrigger>}
               </>
-            ) : isAdvisor ? (
+            ) : isStaffViewer ? (
               <TabsTrigger value="factfind">Fact find</TabsTrigger>
             ) : (
               <>
@@ -239,10 +299,12 @@ export function SessionDetail() {
             )}
           </TabsList>
 
-          {isAdvisor && isCase && (
+          {isStaffViewer && isCase && (
             <TabsContent value="crm" className="space-y-6 mt-4">
-              <CrmContactCard sessionId={sessionId} customer={customer} clickToCall />
-              {customerId && (canAmendIntroducer(adminAccess) || canRefreshIntroducerCommission(adminAccess)) && (
+              <CrmContactCard sessionId={sessionId} customer={customer} clickToCall={!platformReadOnly} />
+              {customerId &&
+                !platformReadOnly &&
+                (canAmendIntroducer(adminAccess) || canRefreshIntroducerCommission(adminAccess)) && (
                 <IntroducerContactBox
                   customerId={customerId}
                   sessionId={sessionId}
@@ -258,40 +320,54 @@ export function SessionDetail() {
               <CaseRefEditor
                 sessionId={sessionId}
                 caseRef={caseRef}
-                canEdit={isOwner || canAmend(adminAccess, "customers")}
+                canEdit={!platformReadOnly && (isOwner || canAmend(adminAccess, "customers"))}
               />
-              <AppointmentCallbackCard
-                sessionId={sessionId}
-                customerId={customerId ?? ""}
-                customer={customer}
-                onBookingChanged={invalidateSession}
-              />
-              <ContactTrackingCard sessionId={sessionId} />
+              {!platformReadOnly && (
+                <AppointmentCallbackCard
+                  sessionId={sessionId}
+                  customerId={customerId ?? ""}
+                  customer={customer}
+                  onBookingChanged={invalidateSession}
+                />
+              )}
+              {!platformReadOnly && <ContactTrackingCard sessionId={sessionId} />}
             </TabsContent>
           )}
 
-          {isAdvisor && isCase && (
+          {isStaffViewer && isCase && (
             <TabsContent value="notes" className="space-y-6 mt-4">
-              <AdvisorNoteInput sessionId={sessionId} />
-              <ContactHistoryCard sessionId={sessionId} caseRef={caseRef} isOwner={isOwner} />
+              {!platformReadOnly && <AdvisorNoteInput sessionId={sessionId} />}
+              {!platformReadOnly && (
+                <ContactHistoryCard sessionId={sessionId} caseRef={caseRef} isOwner={isOwner} />
+              )}
+              {platformReadOnly && (
+                <p className="text-sm text-muted-foreground rounded-2xl border bg-card p-5">
+                  Notes and contact history are not available in read-only platform access.
+                </p>
+              )}
             </TabsContent>
           )}
 
-          {(isCase || !isAdvisor) && (
+          {!platformReadOnly && (isCase || !isStaffViewer) && (
             <TabsContent value="journey" className="space-y-6 mt-4">
               <CustomerJourneyTab
                 sessionId={sessionId}
-                isAdvisor={isAdvisor || isOwner || Boolean(roleQ.data?.isMainAdmin)}
-                canReverse={canAmend(adminAccess, "journey")}
+                isAdvisor={
+                  !platformReadOnly &&
+                  (isAdvisor || isOwner || Boolean(roleQ.data?.isMainAdmin))
+                }
+                canReverse={!platformReadOnly && canAmend(adminAccess, "journey")}
               />
             </TabsContent>
           )}
 
-          {isAdvisor && isCase && (
+          {isStaffViewer && isCase && (
             <TabsContent value="case-details" className="space-y-6 mt-4">
               <CaseDetailsCard
                 sessionId={sessionId}
-                canEdit={isAdvisor || canAmend(adminAccess, "customers")}
+                canEdit={
+                  !platformReadOnly && (isAdvisor || canAmend(adminAccess, "customers"))
+                }
               />
             </TabsContent>
           )}
@@ -300,13 +376,13 @@ export function SessionDetail() {
             <TabsContent value="finance" className="space-y-6 mt-4">
               <CustomerFinanceCard
                 sessionId={sessionId}
-                canAmendFees={canAmend(adminAccess, "finance_customer")}
+                canAmendFees={!platformReadOnly && canAmend(adminAccess, "finance_customer")}
               />
             </TabsContent>
           )}
 
           <TabsContent value="factfind" className="space-y-6 mt-4">
-            {isAdvisor && !isCase && customerId && (
+            {isStaffViewer && !isCase && customerId && !platformReadOnly && (
               <PreCaseOpenCaseActions
                 customerId={customerId}
                 sessionId={sessionId}
@@ -317,7 +393,7 @@ export function SessionDetail() {
                 onChanged={invalidateSession}
               />
             )}
-            {isAdvisor && !isCase && (
+            {isStaffViewer && !isCase && !platformReadOnly && (
               <div className="rounded-xl border border-amber-200/80 bg-amber-50/80 dark:bg-amber-950/20 p-4 text-sm text-muted-foreground">
                 Journey, CRM, finance and a case reference unlock once you book an appointment (or
                 create a case from an existing appointment above).
@@ -329,7 +405,7 @@ export function SessionDetail() {
                 <TabsTrigger value="keyfacts">Key figures</TabsTrigger>
                 <TabsTrigger value="illustration">Illustration</TabsTrigger>
                 <TabsTrigger value="answers">Answers</TabsTrigger>
-                {isAdvisor && messages.length > 0 && (
+                {isStaffViewer && messages.length > 0 && (
                   <TabsTrigger value="transcript">Transcript</TabsTrigger>
                 )}
               </TabsList>
@@ -339,7 +415,7 @@ export function SessionDetail() {
                   <div className="rounded-2xl border bg-card p-5">
                     <h3 className="font-semibold mb-2">Fact-find summary</h3>
                     <p className="text-xs text-muted-foreground mb-3">
-                      {isAdvisor
+                      {isStaffViewer
                         ? "AI overview of the customer's answers."
                         : "Overview of your answers — the same view your advisor sees."}
                     </p>
@@ -347,7 +423,7 @@ export function SessionDetail() {
                   </div>
                 ) : (
                   <div className="rounded-2xl border bg-card p-5 text-sm text-muted-foreground">
-                    {isAdvisor
+                    {isStaffViewer
                       ? "Summary will appear once the customer submits or enough answers are captured."
                       : "Your summary is being prepared. Check back shortly or review your answers."}
                   </div>
@@ -373,7 +449,7 @@ export function SessionDetail() {
                           <div key={qst.key} className="py-3 grid grid-cols-1 sm:grid-cols-3 gap-2 items-start">
                             <dt className="text-sm text-muted-foreground">{qst.label}</dt>
                             <dd className="sm:col-span-2">
-                              {isAdvisor || session.status === "submitted" ? (
+                              {platformReadOnly || isAdvisor || session.status === "submitted" ? (
                                 <span className="text-sm">{a?.value || <em className="text-muted-foreground">No answer</em>}</span>
                               ) : (
                                 <EditableValue
@@ -390,7 +466,7 @@ export function SessionDetail() {
                 ))}
               </TabsContent>
 
-              {isAdvisor && messages.length > 0 && (
+              {isStaffViewer && messages.length > 0 && (
                 <TabsContent value="transcript">
                   <div className="rounded-2xl border bg-card p-5">
                     <h3 className="font-semibold mb-3">Interview transcript</h3>
