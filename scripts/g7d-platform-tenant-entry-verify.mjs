@@ -21,8 +21,10 @@ import {
 import {
   deniedTenantRoleView,
   isPlatformAccessContext,
+  isPlatformReadOnly,
   isTenantStaffMember,
   platformAccessMayMutate,
+  platformAccessMayRead,
   platformAccessTenantRoleView,
   resolveTenantRoleView,
 } from "../src/lib/tenant-role.ts";
@@ -178,6 +180,8 @@ const roView = platformAccessTenantRoleView({
 ok("read_only_shell", roView.shell === "platform_access" && roView.platformAccessLevel === "read_only");
 ok("read_only_not_main_admin", !roView.isMainAdmin);
 ok("read_only_write_denied", !platformAccessMayMutate(roView));
+ok("read_only_may_read", platformAccessMayRead(roView));
+ok("read_only_is_platform_read_only", isPlatformReadOnly(roView));
 ok("ops_write_allowed", platformAccessMayMutate(platView));
 ok("ops_admin_access_not_owner", !platView.adminAccess.isOwner);
 ok("membership_write_unaffected", platformAccessMayMutate(ownerView));
@@ -242,7 +246,7 @@ ok(
 
 ok(
   "sessions_fn_platform_path",
-  read("src/lib/sessions.functions.ts").includes('accessContext === "platform_access"'),
+  read("src/lib/sessions.functions.ts").includes("platformAccessMayRead"),
 );
 
 if (failures.length) {

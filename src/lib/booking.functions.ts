@@ -3134,25 +3134,31 @@ export const listAdvisorAppointments = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const flags = await actingTenantStaffFlags(context.userId);
     const access = flags.view.adminAccess;
+    const { platformAccessMayRead } = await import("@/lib/tenant-role");
+    const platformMayRead = platformAccessMayRead(flags.view);
 
     let advisorId = context.userId;
     if (data.viewAsAdvisorId) {
       const { canView } = await import("@/lib/admin-access");
       const canViewAdvisorDiary =
+        platformMayRead ||
         access.isOwner ||
         access.isSupervisor ||
         canView(access, "advisors") ||
         canView(access, "appointments");
       if (!canViewAdvisorDiary) throw new Error("Forbidden");
       advisorId = data.viewAsAdvisorId;
-    } else if (!flags.isAdvisor && !access.isAdmin) {
+    } else if (!flags.isAdvisor && !access.isAdmin && !platformMayRead) {
       throw new Error("Forbidden");
+    } else if (platformMayRead && !data.viewAsAdvisorId) {
+      // Platform read without advisor filter needs an advisor id — require filter.
+      throw new Error("Select an advisor to view their diary");
     }
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const { data: appts, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from("appointments")
       .select("*")
       .eq("advisor_id", advisorId)
@@ -3160,6 +3166,10 @@ export const listAdvisorAppointments = createServerFn({ method: "POST" })
       .eq("status", "confirmed")
       .order("starts_at", { ascending: true })
       .limit(50);
+    if (flags.view.tenantId) {
+      query = query.eq("tenant_id", flags.view.tenantId);
+    }
+    const { data: appts, error } = await query;
     if (error) throw new Error(error.message);
     return appts ?? [];
   });
@@ -3168,16 +3178,19 @@ export const listAdvisorAppointments = createServerFn({ method: "POST" })
 export const listAllUpcomingAppointments = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const access = await resolveAdminAccess(context.userId, email);
+    const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+    const { platformAccessMayRead } = await import("@/lib/tenant-role");
     const { canView } = await import("@/lib/admin-access");
+    const view = await resolveActingTenantRole(context.userId);
+    const access = view.adminAccess;
     const canViewGrid =
+      platformAccessMayRead(view) ||
       access.isOwner ||
       access.isSupervisor ||
       canView(access, "advisors") ||
       canView(access, "appointments");
     if (!canViewGrid) throw new Error("Forbidden");
+    if (!view.tenantId) return [];
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
@@ -3185,6 +3198,7 @@ export const listAllUpcomingAppointments = createServerFn({ method: "GET" })
     const { data: appts, error } = await supabaseAdmin
       .from("appointments")
       .select("*")
+      .eq("tenant_id", view.tenantId)
       .gte("starts_at", new Date().toISOString())
       .eq("status", "confirmed")
       .order("starts_at", { ascending: true })
@@ -3735,6 +3749,8 @@ export const rescheduleAppointment = createServerFn({ method: "POST" })
       context.userId,
       (appt as { tenant_id?: string | null }).tenant_id,
     );
+    const { assertTenantViewMayMutate } = await import("@/lib/tenant-role");
+    assertTenantViewMayMutate(flags.view);
     const access = flags.view.adminAccess;
     const isAdvisor = flags.isAdvisor;
     const isStaff = flags.isStaff;

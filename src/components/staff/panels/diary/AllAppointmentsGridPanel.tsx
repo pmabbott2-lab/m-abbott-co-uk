@@ -25,7 +25,7 @@ type GridRow = {
 };
 
 /** Forward-looking appointments across all advisors — grid / table view. */
-export function AllAppointmentsGridPanel() {
+export function AllAppointmentsGridPanel({ readOnly = false }: { readOnly?: boolean }) {
   const listFn = useServerFn(listAllUpcomingAppointments);
   const [advisorFilter, setAdvisorFilter] = useState("");
   const [search, setSearch] = useState("");
@@ -147,7 +147,7 @@ export function AllAppointmentsGridPanel() {
                   <th className="p-3 font-medium">Advisor</th>
                   <th className="p-3 font-medium">Customer</th>
                   <th className="p-3 font-medium">Contact</th>
-                  <th className="p-3 font-medium w-20" />
+                  {!readOnly && <th className="p-3 font-medium w-20" />}
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -167,11 +167,13 @@ export function AllAppointmentsGridPanel() {
                       {r.customer_phone}
                       {r.customer_email ? ` · ${r.customer_email}` : ""}
                     </td>
-                    <td className="p-3">
-                      <Button size="sm" variant="outline" onClick={() => setAmendId(r.id)}>
-                        Amend
-                      </Button>
-                    </td>
+                    {!readOnly && (
+                      <td className="p-3">
+                        <Button size="sm" variant="outline" onClick={() => setAmendId(r.id)}>
+                          Amend
+                        </Button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -180,7 +182,7 @@ export function AllAppointmentsGridPanel() {
         </div>
       ))}
 
-      {amendAppt && (
+      {!readOnly && amendAppt && (
         <AppointmentAmendDialog
           appointment={{
             id: amendAppt.id,

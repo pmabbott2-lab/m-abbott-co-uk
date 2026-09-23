@@ -77,6 +77,7 @@ Fail-closed codes: `TENANT_REQUIRED`, `TENANT_NOT_FOUND`, `TENANT_DATA_ACCESS_DE
 - `network-commission.functions.ts`, diary-settings, journey-analytics, phone-lookup, inbound-voicemail
 - `auth.admin.generateLink` / password-reset (trusted server workflows; Auth users unchanged)
 - `test-accounts.functions.ts` (owner tooling)
+- **G7E-2B Data Read UX residual:** under `platform_access` + `read_only`, some session-detail mutation controls may still render visually. Server denial via `assertTenantViewMayMutate` / `forMutation` remains authoritative — **not a mutation bypass**. Centralised Customers/Diary/contact chrome is already read-only; fuller session-detail UI polish is deferred UX/security-hardening (not a large rewrite in G7E-2B).
 
 These remain **G5+ / Twilio gate** candidates where full journey exposure requires end-to-end feature enforcement.
 

@@ -31,6 +31,8 @@ export type AdvisorDiaryPanelProps = {
   allowAdvisorFilter?: boolean;
   /** Own diary only — Teams calendar connect card. */
   showTeamsLink?: boolean;
+  /** Platform Data Read — hide Amend / mutation controls. */
+  readOnly?: boolean;
   title?: string;
   description?: string;
   teamsSearch?: Record<string, unknown>;
@@ -40,6 +42,7 @@ export function AdvisorDiaryPanel({
   viewAsAdvisorId: fixedAdvisorId,
   allowAdvisorFilter = false,
   showTeamsLink = false,
+  readOnly = false,
   title = "Upcoming appointments",
   description = "Customer bookings from your portal. Use amend to reschedule a confirmed appointment. When your Teams diary is linked, new and amended appointments sync as Teams meetings.",
   teamsSearch,
@@ -209,16 +212,18 @@ export function AdvisorDiaryPanel({
                   )}
                   {appt.notes && <p className="text-sm mt-2">{appt.notes}</p>}
                 </div>
-                <Button size="sm" variant="outline" onClick={() => setAmendId(appt.id)}>
-                  Amend
-                </Button>
+                {!readOnly && (
+                  <Button size="sm" variant="outline" onClick={() => setAmendId(appt.id)}>
+                    Amend
+                  </Button>
+                )}
               </div>
             );
           })}
         </div>
       )}
 
-      {amendAppt && (
+      {!readOnly && amendAppt && (
         <AppointmentAmendDialog
           appointment={{
             id: amendAppt.id,

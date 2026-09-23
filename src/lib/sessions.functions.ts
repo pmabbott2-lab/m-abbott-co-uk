@@ -126,7 +126,7 @@ export async function assertStaffCanAccessCustomer(
   const { loadTenantRoleForTenantId, resolveActingTenantRole } = await import(
     "@/lib/tenant-role.server"
   );
-  const { assertTenantViewMayMutate } = await import("@/lib/tenant-role");
+  const { assertTenantViewMayMutate, platformAccessMayRead } = await import("@/lib/tenant-role");
   const { canAmend } = await import("@/lib/admin-access");
 
   const { data: sessions, error } = await supabaseAdmin
@@ -153,8 +153,7 @@ export async function assertStaffCanAccessCustomer(
   const access = view.adminAccess;
   const isMainAdmin = view.isMainAdmin;
   const isAdvisor = view.isAdvisor;
-  const platformDataAccess =
-    view.accessContext === "platform_access" && view.platformAccessLevel != null;
+  const platformDataAccess = platformAccessMayRead(view);
 
   if (
     !isMainAdmin &&
@@ -1634,27 +1633,27 @@ export const listAllSessionsForAdvisor = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+    const { platformAccessMayRead } = await import("@/lib/tenant-role");
     const view = await resolveActingTenantRole(context.userId, data.tenantSlug ?? null);
     const adminAccess = view.adminAccess;
     const viewAsMode = Boolean(data.viewAsAdvisorId);
-    const platformAccess = view.accessContext === "platform_access";
+    const platformMayRead = platformAccessMayRead(view);
 
     const roles = await getRolesForUser(context.userId, view.tenantId);
     if (viewAsMode) {
       if (!adminAccess.isOwner && !adminAccess.isSupervisor) throw new Error("Forbidden");
     } else if (
-      !platformAccess &&
+      !platformMayRead &&
       !roles.includes("advisor") &&
       !adminAccess.isAdmin
     ) {
       throw new Error("Forbidden");
-    } else if (platformAccess && !view.isMainAdmin) {
-      throw new Error("Forbidden");
     }
 
     const effectiveUserId = viewAsMode ? data.viewAsAdvisorId! : context.userId;
+    // Tenant-wide list for membership main-admin OR any platform entry (including read_only).
     const isMainAdmin =
-      (!viewAsMode && roles.includes("admin") && adminAccess.isAdmin) || platformAccess;
+      (!viewAsMode && roles.includes("admin") && adminAccess.isAdmin) || platformMayRead;
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
@@ -1897,8 +1896,9 @@ export const listAdvisors = createServerFn({ method: "GET" })
     const { resolveActingTenantRole, listTenantMemberUserIds } = await import(
       "@/lib/tenant-role.server"
     );
+    const { platformAccessMayRead } = await import("@/lib/tenant-role");
     const view = await resolveActingTenantRole(context.userId);
-    if (!view.isMainAdmin) throw new Error("Forbidden");
+    if (!view.isMainAdmin && !platformAccessMayRead(view)) throw new Error("Forbidden");
     if (!view.tenantId) return [] as AdvisorWithCode[];
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(

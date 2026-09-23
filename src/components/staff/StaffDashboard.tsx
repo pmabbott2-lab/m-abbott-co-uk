@@ -19,6 +19,7 @@ import { getStaffBranchVisibility } from "@/lib/staff-branch-nav";
 import { getAdvisorView } from "@/lib/advisor-view";
 import { AppShell } from "@/components/AppShell";
 import { useTenantUi } from "@/lib/tenant-ui";
+import { isPlatformReadOnly } from "@/lib/tenant-role";
 import {
   CustomersListPanel,
   type CustomerSessionRow,
@@ -36,6 +37,8 @@ type StaffDashboardProps = {
   adminLevel: string | null;
   adminAccess: AdminAccess | null;
   advisorCode: string | null;
+  accessContext?: string | null;
+  platformAccessLevel?: string | null;
 };
 
 export function StaffDashboard({
@@ -47,29 +50,40 @@ export function StaffDashboard({
   adminLevel,
   adminAccess,
   advisorCode,
+  accessContext = null,
+  platformAccessLevel = null,
 }: StaffDashboardProps) {
   const qc = useQueryClient();
   const tenantSlug = useTenantUi()?.slug;
   const allFn = useServerFn(listAllSessionsForAdvisor);
   const markOpenedFn = useServerFn(markContactOpened);
 
-  const showCommissionPayouts = canViewCommissionPayouts(adminAccess);
-  const canAmendPayouts = canAmendCommissionPayouts(adminAccess);
-  const showFinanceReport = canViewFinanceReport(adminAccess);
-  const showRelationshipTab = canViewRelationship(adminAccess);
-  const canRefreshRelationship = canAmendRelationship(adminAccess);
-  const showAdvisorViewTab = (isOwner || isSupervisor) && isMainAdmin;
-  const showIntroducerViewTab = (isOwner || isSupervisor) && isMainAdmin;
-  const dashboardTitle = isMainAdmin
-    ? "Admin dashboard"
-    : isAdvisor
-      ? "Your customers"
-      : isIntroducer
-        ? "Introducer dashboard"
-        : "Dashboard";
+  const platformReadOnly = isPlatformReadOnly({
+    accessContext: (accessContext as "membership" | "platform_access" | "none") ?? "none",
+    platformAccessLevel:
+      (platformAccessLevel as "read_only" | "operational_admin" | "emergency" | null) ?? null,
+  });
+  const canLoadOperationalReads = isAdvisor || isMainAdmin || platformReadOnly;
+
+  const showCommissionPayouts = !platformReadOnly && canViewCommissionPayouts(adminAccess);
+  const canAmendPayouts = !platformReadOnly && canAmendCommissionPayouts(adminAccess);
+  const showFinanceReport = !platformReadOnly && canViewFinanceReport(adminAccess);
+  const showRelationshipTab = !platformReadOnly && canViewRelationship(adminAccess);
+  const canRefreshRelationship = !platformReadOnly && canAmendRelationship(adminAccess);
+  const showAdvisorViewTab = !platformReadOnly && (isOwner || isSupervisor) && isMainAdmin;
+  const showIntroducerViewTab = !platformReadOnly && (isOwner || isSupervisor) && isMainAdmin;
+  const dashboardTitle = platformReadOnly
+    ? "Dashboard"
+    : isMainAdmin
+      ? "Admin dashboard"
+      : isAdvisor
+        ? "Your customers"
+        : isIntroducer
+          ? "Introducer dashboard"
+          : "Dashboard";
 
   const [allocationFilter, setAllocationFilter] = useState<CustomerAllocationFilter>(
-    isMainAdmin ? "unallocated" : "all",
+    isMainAdmin && !platformReadOnly ? "unallocated" : "all",
   );
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<"recent" | "next_contact">("recent");
@@ -82,7 +96,7 @@ export function StaffDashboard({
   const allQ = useQuery({
     queryKey: ["all-sessions", advisorViewId, advisorViewTick, tenantSlug ?? null],
     queryFn: () => allFn({ data: { viewAsAdvisorId: advisorViewId, tenantSlug } }),
-    enabled: isAdvisor || isMainAdmin,
+    enabled: canLoadOperationalReads,
   });
 
   const markCallbackOpened = useMutation({
@@ -137,7 +151,10 @@ export function StaffDashboard({
     isSupervisor,
     isIntroducer,
     adminAccess,
+    platformReadOnly,
   });
+  // Keep mutate chrome off for Data Read (do not raise isMainAdmin).
+  const listAsMainAdmin = isMainAdmin && !platformReadOnly;
 
   const customerRows: CustomerSessionRow[] = sessions.map((s) => ({
     id: s.id,
@@ -160,12 +177,17 @@ export function StaffDashboard({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div className="flex items-center gap-3 flex-wrap">
           <h2 className="text-2xl font-semibold">{dashboardTitle}</h2>
-          {adminLevel && (
+          {adminLevel && !platformReadOnly && (
             <span className="inline-flex items-center rounded-full border bg-muted px-3 py-1 text-xs font-medium">
               {ADMIN_LEVEL_LABELS[adminLevel as keyof typeof ADMIN_LEVEL_LABELS]}
             </span>
           )}
-          {advisorCode && isStaffAdvisor && (
+          {platformReadOnly && (
+            <span className="inline-flex items-center rounded-full border bg-muted px-3 py-1 text-xs font-medium">
+              Read only
+            </span>
+          )}
+          {advisorCode && isStaffAdvisor && !platformReadOnly && (
             <span className="inline-flex items-center gap-1.5 rounded-full border bg-muted px-3 py-1 text-sm">
               <KeyRound className="w-3.5 h-3.5 text-muted-foreground" />
               Your code: <span className="font-mono font-medium">{advisorCode}</span>
@@ -177,12 +199,12 @@ export function StaffDashboard({
       <StaffBranchTabs
         visibility={branchVis}
         staff={{
-          isMainAdmin,
-          isStaffAdvisor,
-          isOwner,
-          isSupervisor,
-          isIntroducer,
-          adminAccess,
+          isMainAdmin: listAsMainAdmin,
+          isStaffAdvisor: isStaffAdvisor && !platformReadOnly,
+          isOwner: isOwner && !platformReadOnly,
+          isSupervisor: isSupervisor && !platformReadOnly,
+          isIntroducer: isIntroducer && !platformReadOnly,
+          adminAccess: platformReadOnly ? null : adminAccess,
           showRelationshipTab,
           canRefreshRelationship,
           showAdvisorViewTab,
@@ -191,15 +213,16 @@ export function StaffDashboard({
           canAmendPayouts,
           showFinanceReport,
           branchVis,
+          readOnly: platformReadOnly,
           customersList: (
             <div className="space-y-4">
-              {isStaffAdvisor && (
+              {isStaffAdvisor && !platformReadOnly && (
                 <StaffCustomerBookingCard onBooked={invalidateSessions} />
               )}
               <CustomersListPanel
-              isMainAdmin={isMainAdmin}
-              isOwner={isOwner}
-              isSupervisor={isSupervisor}
+              isMainAdmin={listAsMainAdmin}
+              isOwner={isOwner && !platformReadOnly}
+              isSupervisor={isSupervisor && !platformReadOnly}
               sessions={customerRows}
               search={search}
               onSearchChange={setSearch}
@@ -278,6 +301,8 @@ export function StaffDashboardLoader() {
       adminLevel={roleQ.data?.adminLevel ?? null}
       adminAccess={roleQ.data?.adminAccess ?? null}
       advisorCode={roleQ.data?.advisorCode ?? null}
+      accessContext={roleQ.data?.accessContext ?? null}
+      platformAccessLevel={roleQ.data?.platformAccessLevel ?? null}
     />
   );
 }

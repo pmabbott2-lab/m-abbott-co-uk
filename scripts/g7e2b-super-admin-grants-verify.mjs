@@ -12,12 +12,17 @@ import {
   isGrantCurrentlyActive,
   accessLevelLabel,
 } from "../src/lib/platform-admins.ts";
-import { superAdminGrantToEntryLevel } from "../src/lib/platform-tenant-entry.ts";
 import {
   platformAccessMayMutate,
+  platformAccessMayRead,
+  isPlatformReadOnly,
+  tenantViewMayReadOperational,
   platformAccessTenantRoleView,
   assertTenantViewMayMutate,
+  resolveTenantRoleView,
 } from "../src/lib/tenant-role.ts";
+import { getStaffBranchVisibility } from "../src/lib/staff-branch-nav.ts";
+import { superAdminGrantToEntryLevel } from "../src/lib/platform-tenant-entry.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -193,28 +198,11 @@ ok(
   roleServer.includes("requireActingTenantOperationalMutation"),
 );
 
-const roleTs = read("src/lib/tenant-role.ts");
-ok("assert_tenant_view_may_mutate", roleTs.includes("assertTenantViewMayMutate"));
+const roleTsEarly = read("src/lib/tenant-role.ts");
+ok("assert_tenant_view_may_mutate", roleTsEarly.includes("assertTenantViewMayMutate"));
 ok(
   "read_only_not_main_admin_view",
-  roleTs.includes("// read_only: not main-admin for write gates"),
-);
-
-const sessions = read("src/lib/sessions.functions.ts");
-ok(
-  "contact_update_for_mutation",
-  sessions.includes("forMutation: true") && sessions.includes("updateCustomerContact"),
-);
-ok(
-  "assert_staff_platform_data_access",
-  sessions.includes("platformDataAccess") && sessions.includes("accessContext === \"platform_access\""),
-);
-
-const customersUi = read("src/routes/_authenticated/customers.$customerId.tsx");
-ok(
-  "ui_contact_edit_hidden_read_only",
-  customersUi.includes('platformAccessLevel === "read_only"') &&
-    customersUi.includes("canEditContact"),
+  roleTsEarly.includes("// read_only: not main-admin for write gates"),
 );
 
 const dualRo = platformAccessTenantRoleView({
@@ -224,6 +212,10 @@ const dualRo = platformAccessTenantRoleView({
 });
 ok("ceiling_ro_may_not_mutate", !platformAccessMayMutate(dualRo));
 ok("ceiling_ro_not_owner", !dualRo.isOwner && !dualRo.adminAccess.isOwner);
+ok("ceiling_ro_not_main_admin", !dualRo.isMainAdmin);
+ok("ceiling_ro_may_read", platformAccessMayRead(dualRo));
+ok("ceiling_ro_is_platform_read_only", isPlatformReadOnly(dualRo));
+ok("ceiling_ro_tenant_may_read_ops", tenantViewMayReadOperational(dualRo));
 let mutateDenied = false;
 try {
   assertTenantViewMayMutate(dualRo);
@@ -231,6 +223,22 @@ try {
   mutateDenied = true;
 }
 ok("ceiling_ro_assert_throws", mutateDenied);
+
+const roNav = getStaffBranchVisibility({
+  isAdvisor: dualRo.isAdvisor,
+  isMainAdmin: dualRo.isMainAdmin,
+  isOwner: dualRo.isOwner,
+  isSupervisor: dualRo.isSupervisor,
+  isIntroducer: dualRo.isIntroducer,
+  adminAccess: dualRo.adminAccess,
+  platformReadOnly: isPlatformReadOnly(dualRo),
+});
+ok("ro_nav_customers", roNav.branches.customers && roNav.customers.list && roNav.customers.contacts);
+ok("ro_nav_diary", roNav.branches.diary && roNav.diary.allAppointments && roNav.diary.myDiary);
+ok("ro_nav_no_diary_settings", !roNav.diary.diarySettings);
+ok("ro_nav_no_management", !roNav.branches.management);
+ok("ro_nav_no_finance", !roNav.branches.finance);
+ok("ro_nav_no_owner_admin", !roNav.management.adminAccess && !roNav.management.manage);
 
 const dualOps = platformAccessTenantRoleView({
   tenantId: "t001",
@@ -240,6 +248,81 @@ const dualOps = platformAccessTenantRoleView({
 ok("ceiling_ops_may_mutate", platformAccessMayMutate(dualOps));
 ok("ceiling_ops_not_owner_flag", !dualOps.isOwner && !dualOps.adminAccess.isOwner);
 ok("ceiling_ops_is_main_admin", dualOps.isMainAdmin);
+ok("ceiling_ops_may_read", platformAccessMayRead(dualOps));
+ok("ceiling_ops_not_read_only_flag", !isPlatformReadOnly(dualOps));
+
+const opsNav = getStaffBranchVisibility({
+  isAdvisor: dualOps.isAdvisor,
+  isMainAdmin: dualOps.isMainAdmin,
+  isOwner: dualOps.isOwner,
+  isSupervisor: dualOps.isSupervisor,
+  isIntroducer: dualOps.isIntroducer,
+  adminAccess: dualOps.adminAccess,
+  platformReadOnly: isPlatformReadOnly(dualOps),
+});
+ok("ops_nav_customers", opsNav.branches.customers);
+ok("ops_nav_management", opsNav.branches.management);
+ok("ops_nav_not_owner_admin_tab", !opsNav.management.adminAccess);
+
+const ownerView = resolveTenantRoleView({
+  membershipRoles: ["owner"],
+  tenantId: "t001",
+  tenantSlug: "mortgageeasy",
+});
+ok("direct_owner_is_main_admin", ownerView.isMainAdmin && ownerView.isOwner);
+ok("direct_owner_may_mutate", platformAccessMayMutate(ownerView));
+const ownerNav = getStaffBranchVisibility({
+  isAdvisor: ownerView.isAdvisor,
+  isMainAdmin: ownerView.isMainAdmin,
+  isOwner: ownerView.isOwner,
+  isSupervisor: ownerView.isSupervisor,
+  isIntroducer: ownerView.isIntroducer,
+  adminAccess: ownerView.adminAccess,
+});
+ok("direct_owner_nav_management", ownerNav.branches.management && ownerNav.management.adminAccess);
+
+const roleTs = read("src/lib/tenant-role.ts");
+ok("helper_platform_access_may_read", roleTs.includes("export function platformAccessMayRead"));
+ok("helper_is_platform_read_only", roleTs.includes("export function isPlatformReadOnly"));
+ok(
+  "helper_tenant_view_may_read",
+  roleTs.includes("export function tenantViewMayReadOperational"),
+);
+
+const sessions = read("src/lib/sessions.functions.ts");
+ok(
+  "list_sessions_uses_platform_may_read",
+  sessions.includes("platformAccessMayRead") &&
+    !sessions.includes("platformAccess && !view.isMainAdmin"),
+);
+ok(
+  "contact_update_for_mutation",
+  sessions.includes("forMutation: true") && sessions.includes("updateCustomerContact"),
+);
+ok(
+  "assert_staff_platform_data_access",
+  sessions.includes("platformDataAccess") && sessions.includes("platformAccessMayRead"),
+);
+
+const navTs = read("src/lib/staff-branch-nav.ts");
+ok("nav_platform_read_only_flag", navTs.includes("platformReadOnly"));
+ok("nav_platform_read_only_visibility", navTs.includes("platformReadOnlyVisibility"));
+
+const staffDash = read("src/components/staff/StaffDashboard.tsx");
+ok("dash_platform_read_only", staffDash.includes("platformReadOnly") && staffDash.includes("canLoadOperationalReads"));
+ok("dash_no_is_main_admin_for_ro", staffDash.includes("listAsMainAdmin = isMainAdmin && !platformReadOnly"));
+
+const booking = read("src/lib/booking.functions.ts");
+ok("diary_list_platform_may_read", booking.includes("platformAccessMayRead(view)"));
+ok("diary_list_tenant_scoped", booking.includes('.eq("tenant_id", view.tenantId)'));
+ok("reschedule_assert_mutate", booking.includes("assertTenantViewMayMutate(flags.view)"));
+
+const customersUi = read("src/routes/_authenticated/customers.$customerId.tsx");
+ok(
+  "ui_contact_edit_hidden_read_only",
+  customersUi.includes("isPlatformReadOnly") && customersUi.includes("canEditContact"),
+);
+ok("ui_book_hidden_read_only", customersUi.includes("canBookOrPromote"));
 
 if (failures.length) {
   console.error(`\nG7E-2B verify FAIL (${failures.length})`);

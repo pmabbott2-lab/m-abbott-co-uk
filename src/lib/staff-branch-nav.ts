@@ -88,6 +88,11 @@ export type StaffBranchNavContext = {
   isSupervisor: boolean;
   isIntroducer: boolean;
   adminAccess: AdminAccess | null;
+  /**
+   * Explicit G7D / platform Data Read — operational READ nav only.
+   * Must not be simulated via isMainAdmin / isOwner / isAdvisor.
+   */
+  platformReadOnly?: boolean;
 };
 
 export type StaffBranchVisibility = {
@@ -135,7 +140,60 @@ export type StaffBranchVisibility = {
   };
 };
 
+/** Operational READ surfaces for platform_access + read_only (Data Read). */
+function platformReadOnlyVisibility(): StaffBranchVisibility {
+  return {
+    branches: {
+      customers: true,
+      diary: true,
+      management: false,
+      marketing: false,
+      introducers: false,
+      finance: false,
+    },
+    customers: {
+      list: true,
+      contacts: true,
+      relationship: false,
+    },
+    management: {
+      analytics: false,
+      view: false,
+      manage: false,
+      adminAccess: false,
+      manageInvites: false,
+      manageTeamRoles: false,
+    },
+    marketing: {
+      referAFriend: false,
+      commsScripts: false,
+    },
+    diary: {
+      // Advisor-filter diary + firm grid — settings excluded (configuration).
+      myDiary: true,
+      diarySettings: false,
+      allAppointments: true,
+    },
+    view: {
+      advisor: false,
+      introducer: false,
+      customer: false,
+    },
+    finance: {
+      myCommission: false,
+      commissionStatements: false,
+      commissionMgmt: false,
+      networkStatements: false,
+      financeReport: false,
+    },
+  };
+}
+
 export function getStaffBranchVisibility(ctx: StaffBranchNavContext): StaffBranchVisibility {
+  if (ctx.platformReadOnly) {
+    return platformReadOnlyVisibility();
+  }
+
   const { isAdvisor, isMainAdmin, isOwner, isSupervisor, isIntroducer, adminAccess } = ctx;
 
   const customersList = isAdvisor || canView(adminAccess, "customers");

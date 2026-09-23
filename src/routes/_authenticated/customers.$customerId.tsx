@@ -27,6 +27,7 @@ import {
   type CustomerHubFactFind,
 } from "@/lib/sessions.functions";
 import { canAmend } from "@/lib/admin-access";
+import { isPlatformReadOnly } from "@/lib/tenant-role";
 import { referralLinkForSlug } from "@/lib/referral";
 import { useTenantUi } from "@/lib/tenant-ui";
 import {
@@ -65,20 +66,23 @@ export function CustomerHubPage() {
   });
 
   const adminAccess = roleQ.data?.adminAccess ?? null;
+  const platformReadOnly = isPlatformReadOnly({
+    accessContext: roleQ.data?.accessContext ?? "none",
+    platformAccessLevel: roleQ.data?.platformAccessLevel ?? null,
+  });
   const canDelete =
-    roleQ.data?.isOwner ||
-    roleQ.data?.isSupervisor ||
-    canAmend(adminAccess, "customers");
+    !platformReadOnly &&
+    (roleQ.data?.isOwner ||
+      roleQ.data?.isSupervisor ||
+      canAmend(adminAccess, "customers"));
 
   const canEditContact =
-    !(
-      roleQ.data?.accessContext === "platform_access" &&
-      roleQ.data?.platformAccessLevel === "read_only"
-    ) &&
+    !platformReadOnly &&
     (roleQ.data?.isAdvisor ||
       roleQ.data?.isOwner ||
       roleQ.data?.isSupervisor ||
       canAmend(adminAccess, "customers"));
+  const canBookOrPromote = !platformReadOnly;
 
   if (hubQ.isLoading || roleQ.isLoading) {
     return (
@@ -118,20 +122,24 @@ export function CustomerHubPage() {
               {displayName}
             </h2>
             <p className="text-sm text-muted-foreground mt-1">
-              Customer record — contact details and introducer. Book an appointment here to open a
-              case (including legacy customers who pre-date the case system).
+              Customer record — contact details and introducer
+              {canBookOrPromote
+                ? ". Book an appointment here to open a case (including legacy customers who pre-date the case system)."
+                : " (read only)."}
             </p>
           </div>
-          <CustomerHubBookingDialog
-            customerId={customerId}
-            customerName={displayName}
-            customerEmail={customer.email}
-            customerPhone={customer.phone}
-            factFinds={factFinds}
-            triggerVariant="default"
-            triggerLabel="Book appointment"
-            onBooked={invalidateHub}
-          />
+          {canBookOrPromote && (
+            <CustomerHubBookingDialog
+              customerId={customerId}
+              customerName={displayName}
+              customerEmail={customer.email}
+              customerPhone={customer.phone}
+              factFinds={factFinds}
+              triggerVariant="default"
+              triggerLabel="Book appointment"
+              onBooked={invalidateHub}
+            />
+          )}
         </div>
 
         <CustomerContactSection
@@ -196,6 +204,7 @@ export function CustomerHubPage() {
                 key={ff.id}
                 factFind={ff}
                 canDelete={canDelete}
+                canMutate={canBookOrPromote}
                 customerId={customerId}
                 customerName={displayName}
                 customerEmail={customer.email}
@@ -237,6 +246,7 @@ export function CustomerHubPage() {
 function FactFindRow({
   factFind,
   canDelete,
+  canMutate = true,
   customerId,
   customerName,
   customerEmail,
@@ -246,6 +256,7 @@ function FactFindRow({
 }: {
   factFind: CustomerHubFactFind;
   canDelete: boolean;
+  canMutate?: boolean;
   customerId: string;
   customerName: string;
   customerEmail?: string | null;
@@ -281,7 +292,7 @@ function FactFindRow({
       >
         <div className="font-medium">
           {factFind.status === "submitted" ? "Submitted fact-find" : "Fact-find in progress"}
-          {factFind.hasAppointment && (
+          {factFind.hasAppointment && canMutate && (
             <span className="ml-2 text-xs font-normal text-amber-600 dark:text-amber-500">
               · Appointment on file — create case
             </span>
@@ -298,28 +309,29 @@ function FactFindRow({
         )}
       </Link>
       <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
-        {factFind.hasAppointment ? (
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={promote.isPending}
-            onClick={() => promote.mutate()}
-          >
-            {promote.isPending ? "Creating…" : "Create case"}
-          </Button>
-        ) : (
-          <CustomerHubBookingDialog
-            customerId={customerId}
-            customerName={customerName}
-            customerEmail={customerEmail}
-            customerPhone={customerPhone}
-            factFinds={allFactFinds}
-            sessionId={factFind.id}
-            triggerLabel="Book"
-            triggerVariant="outline"
-            onBooked={onChanged}
-          />
-        )}
+        {canMutate &&
+          (factFind.hasAppointment ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={promote.isPending}
+              onClick={() => promote.mutate()}
+            >
+              {promote.isPending ? "Creating…" : "Create case"}
+            </Button>
+          ) : (
+            <CustomerHubBookingDialog
+              customerId={customerId}
+              customerName={customerName}
+              customerEmail={customerEmail}
+              customerPhone={customerPhone}
+              factFinds={allFactFinds}
+              sessionId={factFind.id}
+              triggerLabel="Book"
+              triggerVariant="outline"
+              onBooked={onChanged}
+            />
+          ))}
         <Link to="/sessions/$sessionId" params={{ sessionId: factFind.id }}>
           <Button variant="ghost" size="sm">
             Review <ArrowRight className="w-4 h-4 ml-1" />

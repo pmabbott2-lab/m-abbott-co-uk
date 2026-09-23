@@ -199,6 +199,35 @@ export function assertTenantViewMayMutate(view: TenantRoleView): void {
   }
 }
 
+/** Active G7D / platform entry with read_only ceiling (not Owner/Supervisor/Adviser). */
+export function isPlatformReadOnly(view: Pick<TenantRoleView, "accessContext" | "platformAccessLevel">): boolean {
+  return view.accessContext === "platform_access" && view.platformAccessLevel === "read_only";
+}
+
+/**
+ * Platform entry may read tenant operational data (any grant level including read_only).
+ * Does not imply mutate authority — use platformAccessMayMutate / assertTenantViewMayMutate.
+ */
+export function platformAccessMayRead(view: Pick<TenantRoleView, "accessContext" | "platformAccessLevel">): boolean {
+  return view.accessContext === "platform_access" && view.platformAccessLevel != null;
+}
+
+/**
+ * Acting view may read ordinary tenant operational surfaces (customers, cases, diary).
+ * Membership staff OR platform entry — never elevates write flags.
+ */
+export function tenantViewMayReadOperational(
+  view: Pick<
+    TenantRoleView,
+    "accessContext" | "platformAccessLevel" | "isMainAdmin" | "isAdvisor" | "adminAccess"
+  >,
+): boolean {
+  if (platformAccessMayRead(view)) return true;
+  if (view.isMainAdmin || view.isAdvisor) return true;
+  if (view.adminAccess.isOwner || view.adminAccess.isSupervisor) return true;
+  return false;
+}
+
 /**
  * Map active membership roles for ONE tenant into UI/server flags.
  * Extra global user_roles are intentionally not an input.

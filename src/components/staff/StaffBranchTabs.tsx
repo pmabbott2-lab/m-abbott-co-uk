@@ -71,6 +71,8 @@ export type StaffBranchContext = {
   canAmendPayouts: boolean;
   showFinanceReport: boolean;
   branchVis: StaffBranchVisibility;
+  /** Platform Data Read — hide mutation chrome in nested panels. */
+  readOnly?: boolean;
   customersList: ReactNode;
   onAdvisorViewChange: () => void;
   onIntroducerViewChange: () => void;
@@ -330,6 +332,7 @@ export function StaffBranchTabs({ visibility, staff }: StaffBranchTabsProps) {
           visibility={visibility}
           isStaffAdvisor={staff.isStaffAdvisor}
           viewAsAdvisorId={getAdvisorView()?.advisorId}
+          readOnly={Boolean(staff.readOnly)}
         />
       ),
     });

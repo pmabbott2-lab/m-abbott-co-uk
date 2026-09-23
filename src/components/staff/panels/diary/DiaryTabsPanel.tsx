@@ -16,6 +16,7 @@ type DiaryTabsPanelProps = {
   isStaffAdvisor: boolean;
   viewAsAdvisorId?: string;
   teamsSearch?: { teams?: string; reason?: string };
+  readOnly?: boolean;
 };
 
 export function DiaryTabsPanel({
@@ -23,6 +24,7 @@ export function DiaryTabsPanel({
   isStaffAdvisor,
   viewAsAdvisorId,
   teamsSearch,
+  readOnly = false,
 }: DiaryTabsPanelProps) {
   const tabs: HubSubNavTab[] = [];
 
@@ -35,12 +37,15 @@ export function DiaryTabsPanel({
         <AdvisorDiaryPanel
           viewAsAdvisorId={viewAsAdvisorId}
           allowAdvisorFilter={!isStaffAdvisor && !viewAsAdvisorId}
-          showTeamsLink={!viewAsAdvisorId}
+          showTeamsLink={!viewAsAdvisorId && !readOnly}
+          readOnly={readOnly}
           title={isStaffAdvisor ? "Your diary" : "Advisor diary"}
           description={
-            isStaffAdvisor
-              ? "Your upcoming customer appointments. Link Microsoft Teams to sync meetings when you book or amend slots."
-              : "Filter by advisor name or code to view confirmed upcoming appointments. Connect Teams on your own advisor account from Diary."
+            readOnly
+              ? "Confirmed upcoming appointments. Read-only — amendments are not available."
+              : isStaffAdvisor
+                ? "Your upcoming customer appointments. Link Microsoft Teams to sync meetings when you book or amend slots."
+                : "Filter by advisor name or code to view confirmed upcoming appointments. Connect Teams on your own advisor account from Diary."
           }
           teamsSearch={teamsSearch}
         />
@@ -48,7 +53,7 @@ export function DiaryTabsPanel({
     });
   }
 
-  if (visibility.diary.diarySettings) {
+  if (visibility.diary.diarySettings && !readOnly) {
     tabs.push({
       id: DIARY_SUB_TABS.DIARY_SETTINGS,
       label: "Diary settings",
@@ -67,7 +72,7 @@ export function DiaryTabsPanel({
       id: DIARY_SUB_TABS.ALL_APPOINTMENTS,
       label: "All appointments",
       icon: <CalendarDays className="w-4 h-4 shrink-0" />,
-      content: <AllAppointmentsGridPanel />,
+      content: <AllAppointmentsGridPanel readOnly={readOnly} />,
     });
   }
 
