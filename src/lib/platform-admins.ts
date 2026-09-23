@@ -1,8 +1,9 @@
 /**
- * G7E-2A platform administrator identities — pure helpers.
+ * G7E-2A/B platform administrator identities & Super Admin grants — pure helpers.
  * Authority: Super Owner only. Not Super Admin. Not tenant Owner.
  */
-import type { PlatformRole } from "@/lib/platform-authority";
+import type { PlatformRole, SuperAdminAccessLevel } from "@/lib/platform-authority";
+import { SUPER_ADMIN_ACCESS_LEVELS } from "@/lib/platform-authority";
 
 export type PlatformAdminRow = {
   email: string;
@@ -26,8 +27,47 @@ export type PlatformAdminsView = {
   pendingInvites: PlatformPendingAdminInvite[];
 };
 
+export type SuperAdminGrantAccessOption = "none" | SuperAdminAccessLevel;
+
+export type SuperAdminTenantGrantRow = {
+  companyCode: string;
+  companyName: string;
+  tenantType: "GROUP" | "EXTERNAL";
+  tenantStatus: string;
+  accessLevel: SuperAdminGrantAccessOption;
+  expiresAt: string | null;
+  reason: string | null;
+  isExpired: boolean;
+};
+
+export type SuperAdminTenantGrantsView = {
+  adminEmail: string;
+  adminName: string | null;
+  grants: SuperAdminTenantGrantRow[];
+};
+
 export const LAST_SUPER_OWNER_USER_MESSAGE =
   "Mortgage Hub must have at least one Super Owner.";
+
+export const ACCESS_LEVEL_DESCRIPTIONS: Record<SuperAdminAccessLevel, string> = {
+  platform_admin:
+    "Manage permitted platform-level configuration for this company. No operational customer-data access.",
+  data_read: "Read permitted operational company data. No operational changes.",
+  data_write: "Read and update permitted operational company data.",
+  full: "Platform administration plus permitted operational read/write access.",
+};
+
+export function isSuperAdminAccessLevel(value: string): value is SuperAdminAccessLevel {
+  return (SUPER_ADMIN_ACCESS_LEVELS as readonly string[]).includes(value);
+}
+
+export function accessLevelLabel(level: SuperAdminGrantAccessOption): string {
+  if (level === "none") return "None";
+  if (level === "platform_admin") return "Platform Admin";
+  if (level === "data_read") return "Data Read";
+  if (level === "data_write") return "Data Write";
+  return "Full";
+}
 
 export function isLastSuperOwnerProtectedError(message: string | null | undefined): boolean {
   if (!message) return false;
@@ -51,4 +91,30 @@ export function isPlatformInviteError(message: string | null | undefined): strin
 
 export function platformRoleLabel(role: PlatformRole): string {
   return role === "super_owner" ? "Super Owner" : "Super Admin";
+}
+
+/** Reason required for temporary, EXTERNAL, or Full grants. */
+export function grantReasonRequired(input: {
+  accessLevel: SuperAdminGrantAccessOption;
+  tenantType: "GROUP" | "EXTERNAL";
+  expiresAt: string | null;
+}): boolean {
+  if (input.accessLevel === "none") return false;
+  if (input.accessLevel === "full") return true;
+  if (input.tenantType === "EXTERNAL") return true;
+  if (input.expiresAt) return true;
+  return false;
+}
+
+export function isGrantCurrentlyActive(input: {
+  revokedAt?: string | null;
+  expiresAt?: string | null;
+  now?: Date;
+}): boolean {
+  if (input.revokedAt) return false;
+  if (!input.expiresAt) return true;
+  const expires = new Date(input.expiresAt);
+  if (Number.isNaN(expires.getTime())) return false;
+  const now = input.now ?? new Date();
+  return now.getTime() < expires.getTime();
 }

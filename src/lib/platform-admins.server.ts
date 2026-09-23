@@ -1,19 +1,25 @@
 /**
- * G7E-2A platform administrator management — server impl (server-only).
- * Super Owner only. Does not create tenant grants, memberships, or G7D sessions.
+ * G7E-2A/B platform administrator management — server impl (server-only).
+ * Super Owner only. Does not create tenant memberships or G7D sessions.
  */
 import { createHash, randomBytes } from "node:crypto";
 import { supabaseAdminUntyped as db } from "@/integrations/supabase/client.server";
 import {
+  accessLevelLabel,
+  grantReasonRequired,
+  isGrantCurrentlyActive,
   isLastSuperOwnerProtectedError,
   isPlatformInviteError,
+  isSuperAdminAccessLevel,
   LAST_SUPER_OWNER_USER_MESSAGE,
   platformRoleLabel,
   type PlatformAdminRow,
   type PlatformAdminsView,
   type PlatformPendingAdminInvite,
+  type SuperAdminGrantAccessOption,
+  type SuperAdminTenantGrantsView,
 } from "@/lib/platform-admins";
-import { isPlatformRole, type PlatformRole } from "@/lib/platform-authority";
+import { isPlatformRole, type PlatformRole, type SuperAdminAccessLevel } from "@/lib/platform-authority";
 import { requireSuperOwner } from "@/lib/platform-authority.server";
 
 export class PlatformAdminError extends Error {
@@ -615,4 +621,374 @@ export async function acceptPlatformInviteImpl(input: {
 /** Exported for verify scripts / fixtures — hash only, never log raw token. */
 export function hashPlatformInviteTokenForTests(rawToken: string): string {
   return hashInviteToken(rawToken);
+}
+
+// ---------------------------------------------------------------------------
+// G7E-2B Super Admin tenant grants
+// ---------------------------------------------------------------------------
+async function writeGrantAudit(
+  eventType: "SUPER_ADMIN_GRANT_CREATED" | "SUPER_ADMIN_GRANT_CHANGED" | "SUPER_ADMIN_GRANT_REVOKED",
+  input: {
+    actingUserId: string;
+    subjectUserId?: string | null;
+    tenantId?: string | null;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<void> {
+  try {
+    const { writePlatformAuditEvent } = await import("@/lib/platform-audit.server");
+    await writePlatformAuditEvent({
+      eventType: eventType as never,
+      actingUserId: input.actingUserId,
+      subjectUserId: input.subjectUserId,
+      tenantId: input.tenantId,
+      metadata: input.metadata,
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+async function resolveSuperAdminByEmail(email: string): Promise<{
+  userId: string;
+  email: string;
+  fullName: string | null;
+}> {
+  const normalised = email.trim().toLowerCase();
+  const userId = await findAuthUserIdByEmail(normalised);
+  if (!userId) throw new PlatformAdminError("NOT_FOUND", "Administrator not found.");
+  const { data: roleRow, error } = await db
+    .from("platform_roles")
+    .select("role")
+    .eq("user_id", userId)
+    .eq("role", "super_admin")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!roleRow) {
+    throw new PlatformAdminError("INVALID", "Target must currently be a Super Admin.");
+  }
+  const { data: profile } = await db
+    .from("profiles")
+    .select("full_name, email")
+    .eq("id", userId)
+    .maybeSingle();
+  return {
+    userId,
+    email: (profile?.email as string | undefined)?.toLowerCase() ?? normalised,
+    fullName: (profile?.full_name as string | null) ?? null,
+  };
+}
+
+async function loadTenantByCompanyCodeStrict(companyCode: string): Promise<{
+  id: string;
+  company_code: string;
+  company_name: string;
+  tenant_type: "GROUP" | "EXTERNAL";
+  status: string;
+}> {
+  const { data, error } = await db
+    .from("tenants")
+    .select("id, company_code, company_name, tenant_type, status")
+    .eq("company_code", companyCode)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new PlatformAdminError("NOT_FOUND", "Company not found.");
+  if (data.tenant_type !== "GROUP" && data.tenant_type !== "EXTERNAL") {
+    throw new PlatformAdminError("INVALID", "Unsupported company type.");
+  }
+  return data as {
+    id: string;
+    company_code: string;
+    company_name: string;
+    tenant_type: "GROUP" | "EXTERNAL";
+    status: string;
+  };
+}
+
+function sanitiseReason(reason: string | null | undefined): string | null {
+  if (reason == null) return null;
+  const trimmed = reason.trim().slice(0, 500);
+  return trimmed.length ? trimmed : null;
+}
+
+function parseExpiryIso(expiresAt: string | null | undefined): string | null {
+  if (!expiresAt) return null;
+  const d = new Date(expiresAt);
+  if (Number.isNaN(d.getTime())) {
+    throw new PlatformAdminError("INVALID", "Invalid expiry date.");
+  }
+  if (d.getTime() <= Date.now()) {
+    throw new PlatformAdminError("INVALID", "Expiry must be in the future.");
+  }
+  return d.toISOString();
+}
+
+export async function listSuperAdminTenantGrantsImpl(input: {
+  userId: string;
+  adminEmail: string;
+}): Promise<SuperAdminTenantGrantsView> {
+  await requireSuperOwner(input.userId);
+  const admin = await resolveSuperAdminByEmail(input.adminEmail);
+
+  const { data: tenants, error: tErr } = await db
+    .from("tenants")
+    .select("id, company_code, company_name, tenant_type, status")
+    .in("tenant_type", ["GROUP", "EXTERNAL"])
+    .order("company_code");
+  if (tErr) throw new Error(tErr.message);
+
+  const { data: grantRows, error: gErr } = await db
+    .from("super_admin_tenant_access")
+    .select("tenant_id, access_level, expires_at, revoked_at, reason")
+    .eq("user_id", admin.userId)
+    .is("revoked_at", null);
+  if (gErr) throw new Error(gErr.message);
+
+  const byTenant = new Map<
+    string,
+    { access_level: string; expires_at: string | null; reason: string | null }
+  >();
+  for (const g of grantRows ?? []) {
+    byTenant.set(g.tenant_id as string, {
+      access_level: g.access_level as string,
+      expires_at: (g.expires_at as string | null) ?? null,
+      reason: (g.reason as string | null) ?? null,
+    });
+  }
+
+  const grants = (tenants ?? []).map(
+    (t: {
+      id: string;
+      company_code: string;
+      company_name: string;
+      tenant_type: string;
+      status: string;
+    }) => {
+      const g = byTenant.get(t.id);
+      const active = g
+        ? isGrantCurrentlyActive({ revokedAt: null, expiresAt: g.expires_at })
+        : false;
+      const level: SuperAdminGrantAccessOption =
+        g && active && isSuperAdminAccessLevel(g.access_level)
+          ? g.access_level
+          : "none";
+      return {
+        companyCode: t.company_code,
+        companyName: t.company_name,
+        tenantType: t.tenant_type as "GROUP" | "EXTERNAL",
+        tenantStatus: t.status,
+        accessLevel: level,
+        expiresAt: g && active ? g.expires_at : null,
+        reason: g && active ? g.reason : null,
+        isExpired: Boolean(g && !active && g.expires_at),
+      };
+    },
+  );
+
+  return {
+    adminEmail: admin.email,
+    adminName: admin.fullName,
+    grants,
+  };
+}
+
+export async function upsertSuperAdminTenantGrantImpl(input: {
+  userId: string;
+  adminEmail: string;
+  companyCode: string;
+  accessLevel: string;
+  expiresAt?: string | null;
+  reason?: string | null;
+  confirmFull?: boolean;
+  confirmWrite?: boolean;
+  confirmExternal?: boolean;
+}): Promise<{ outcome: "created" | "changed" | "revoked"; accessLevel: SuperAdminGrantAccessOption }> {
+  await requireSuperOwner(input.userId);
+  const admin = await resolveSuperAdminByEmail(input.adminEmail);
+  const tenant = await loadTenantByCompanyCodeStrict(input.companyCode);
+
+  const accessRaw = input.accessLevel.trim().toLowerCase();
+  if (accessRaw === "none") {
+    return revokeSuperAdminTenantGrantImpl({
+      userId: input.userId,
+      adminEmail: admin.email,
+      companyCode: tenant.company_code,
+      confirm: true,
+    }).then(() => ({ outcome: "revoked" as const, accessLevel: "none" as const }));
+  }
+  if (!isSuperAdminAccessLevel(accessRaw)) {
+    throw new PlatformAdminError("INVALID", "Invalid access level.");
+  }
+  const accessLevel = accessRaw;
+  if (tenant.status !== "active") {
+    throw new PlatformAdminError("INVALID", "Company must be active to grant access.");
+  }
+
+  const expiresAt = parseExpiryIso(input.expiresAt ?? null);
+  const reason = sanitiseReason(input.reason);
+  if (
+    grantReasonRequired({
+      accessLevel,
+      tenantType: tenant.tenant_type,
+      expiresAt,
+    }) &&
+    !reason
+  ) {
+    throw new PlatformAdminError(
+      "INVALID",
+      "A reason is required for temporary, EXTERNAL, or Full grants.",
+    );
+  }
+  if (accessLevel === "full" && !input.confirmFull) {
+    throw new PlatformAdminError("INVALID", "Explicit confirmation is required for Full access.");
+  }
+  if (
+    (accessLevel === "data_write" || accessLevel === "full") &&
+    !input.confirmWrite &&
+    !input.confirmFull
+  ) {
+    throw new PlatformAdminError(
+      "INVALID",
+      "Explicit confirmation is required for Data Write / Full access.",
+    );
+  }
+  if (tenant.tenant_type === "EXTERNAL" && !input.confirmExternal) {
+    throw new PlatformAdminError(
+      "INVALID",
+      "Explicit confirmation is required for EXTERNAL company grants.",
+    );
+  }
+
+  const { data: rpcResult, error: rpcErr } = await db.rpc("upsert_super_admin_tenant_grant_atomic", {
+    p_acting_user_id: input.userId,
+    p_target_user_id: admin.userId,
+    p_tenant_id: tenant.id,
+    p_access_level: accessLevel,
+    p_expires_at: expiresAt,
+    p_reason: reason,
+  });
+  if (rpcErr) {
+    const msg = rpcErr.message ?? "";
+    if (msg.includes("not_super_owner")) {
+      throw new PlatformAdminError("DENIED", "Super Owner required.");
+    }
+    if (msg.includes("target_not_super_admin")) {
+      throw new PlatformAdminError("INVALID", "Target must currently be a Super Admin.");
+    }
+    if (msg.includes("tenant_not_active")) {
+      throw new PlatformAdminError("INVALID", "Company must be active to grant access.");
+    }
+    if (msg.includes("expiry_not_future")) {
+      throw new PlatformAdminError("INVALID", "Expiry must be in the future.");
+    }
+    throw new Error(msg);
+  }
+
+  const result = (rpcResult ?? {}) as {
+    outcome?: string;
+    old_access?: string | null;
+    old_expiry?: string | null;
+    new_access?: string | null;
+    new_expiry?: string | null;
+  };
+  const outcome = result.outcome === "changed" ? "changed" : "created";
+
+  if (outcome === "changed") {
+    const oldLevel = isSuperAdminAccessLevel(String(result.old_access ?? ""))
+      ? (result.old_access as SuperAdminAccessLevel)
+      : accessLevel;
+    await writeGrantAudit("SUPER_ADMIN_GRANT_CHANGED", {
+      actingUserId: input.userId,
+      subjectUserId: admin.userId,
+      tenantId: tenant.id,
+      metadata: {
+        action: "change_sa_grant",
+        companyCode: tenant.company_code,
+        tenantType: tenant.tenant_type,
+        oldAccess: accessLevelLabel(oldLevel),
+        newAccess: accessLevelLabel(accessLevel),
+        oldExpiry: result.old_expiry ?? "none",
+        newExpiry: expiresAt ?? "none",
+        reason: reason ?? "",
+        subjectEmail: admin.email,
+        subjectName: admin.fullName,
+      },
+    });
+    return { outcome: "changed", accessLevel };
+  }
+
+  await writeGrantAudit("SUPER_ADMIN_GRANT_CREATED", {
+    actingUserId: input.userId,
+    subjectUserId: admin.userId,
+    tenantId: tenant.id,
+    metadata: {
+      action: "create_sa_grant",
+      companyCode: tenant.company_code,
+      tenantType: tenant.tenant_type,
+      newAccess: accessLevelLabel(accessLevel),
+      newExpiry: expiresAt ?? "none",
+      reason: reason ?? "",
+      subjectEmail: admin.email,
+      subjectName: admin.fullName,
+    },
+  });
+  return { outcome: "created", accessLevel };
+}
+
+export async function revokeSuperAdminTenantGrantImpl(input: {
+  userId: string;
+  adminEmail: string;
+  companyCode: string;
+  confirm?: boolean;
+}): Promise<{ ok: true }> {
+  await requireSuperOwner(input.userId);
+  if (!input.confirm) {
+    throw new PlatformAdminError("INVALID", "Explicit confirmation is required to revoke.");
+  }
+  const admin = await resolveSuperAdminByEmail(input.adminEmail);
+  const tenant = await loadTenantByCompanyCodeStrict(input.companyCode);
+
+  const { data: existing, error } = await db
+    .from("super_admin_tenant_access")
+    .select("id, access_level, expires_at")
+    .eq("user_id", admin.userId)
+    .eq("tenant_id", tenant.id)
+    .is("revoked_at", null)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!existing) {
+    return { ok: true };
+  }
+
+  const nowIso = new Date().toISOString();
+  const { error: updErr } = await db
+    .from("super_admin_tenant_access")
+    .update({
+      revoked_at: nowIso,
+      revoked_by: input.userId,
+      updated_at: nowIso,
+      updated_by: input.userId,
+    })
+    .eq("id", existing.id)
+    .is("revoked_at", null);
+  if (updErr) throw new Error(updErr.message);
+
+  await writeGrantAudit("SUPER_ADMIN_GRANT_REVOKED", {
+    actingUserId: input.userId,
+    subjectUserId: admin.userId,
+    tenantId: tenant.id,
+    metadata: {
+      action: "revoke_sa_grant",
+      companyCode: tenant.company_code,
+      tenantType: tenant.tenant_type,
+      oldAccess: accessLevelLabel(
+        isSuperAdminAccessLevel(existing.access_level as string)
+          ? (existing.access_level as SuperAdminAccessLevel)
+          : "platform_admin",
+      ),
+      subjectEmail: admin.email,
+      subjectName: admin.fullName,
+    },
+  });
+  return { ok: true };
 }

@@ -39,13 +39,18 @@ type TenantRow = {
 async function loadGrantedTenantIds(userId: string): Promise<string[]> {
   const { data, error } = await db
     .from("super_admin_tenant_access")
-    .select("tenant_id, access_level")
-    .eq("user_id", userId);
+    .select("tenant_id, access_level, revoked_at, expires_at")
+    .eq("user_id", userId)
+    .is("revoked_at", null);
   if (error) throw new Error(error.message);
+  const now = Date.now();
   return (data ?? [])
-    .filter((row: { access_level?: string | null }) =>
-      superAdminGrantAllowsVisibility(row.access_level as never),
-    )
+    .filter((row: { access_level?: string | null; expires_at?: string | null }) => {
+      if (!superAdminGrantAllowsVisibility(row.access_level as never)) return false;
+      if (!row.expires_at) return true;
+      const exp = new Date(row.expires_at).getTime();
+      return !Number.isNaN(exp) && now < exp;
+    })
     .map((row: { tenant_id: string }) => row.tenant_id);
 }
 

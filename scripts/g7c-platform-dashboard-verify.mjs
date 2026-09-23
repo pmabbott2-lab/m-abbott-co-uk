@@ -232,11 +232,12 @@ ok(
   "admins_page_live",
   adminsSrc.includes("Platform Administrators") && adminsSrc.includes("Add platform administrator"),
 );
+// G7E-2B: Super Admin tenant grant UI lives on Admins (was deferred from G7C).
 ok(
-  "admins_no_grant_ui",
-  !adminsSrc.includes("super_admin_tenant_access") &&
-    !adminsSrc.includes("Grant:") &&
-    adminsSrc.includes("No grants configured"),
+  "admins_grant_ui_g7e2b",
+  adminsSrc.includes("Tenant access") &&
+    adminsSrc.includes("SuperAdminTenantAccessPanel") &&
+    !adminsSrc.includes("super_admin_tenant_access"),
 );
 const g7cFiles = [
   "src/routes/platform/route.tsx",

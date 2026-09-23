@@ -283,6 +283,9 @@ export const PLATFORM_AUDIT_EVENT_LABELS: Record<string, string> = {
   PLATFORM_ROLE_CHANGED: "Platform role changed",
   PLATFORM_ROLE_REVOKED: "Platform role revoked",
   LAST_PLATFORM_OWNER_ACTION_DENIED: "Final Super Owner action denied",
+  SUPER_ADMIN_GRANT_CREATED: "Company access granted",
+  SUPER_ADMIN_GRANT_CHANGED: "Company access changed",
+  SUPER_ADMIN_GRANT_REVOKED: "Company access revoked",
 };
 
 const AUDIT_SAFE_META_KEYS = new Set([
@@ -295,6 +298,10 @@ const AUDIT_SAFE_META_KEYS = new Set([
   "role",
   "oldRole",
   "newRole",
+  "oldAccess",
+  "newAccess",
+  "oldExpiry",
+  "newExpiry",
   "authorityBasis",
   "accessLevel",
   "reason",

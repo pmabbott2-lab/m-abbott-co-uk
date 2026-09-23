@@ -89,3 +89,47 @@ export const acceptPlatformInvite = createServerFn({ method: "POST" })
       rawToken: data.token,
     });
   });
+
+export const listSuperAdminTenantGrants = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ adminEmail: z.string().trim().email().max(254) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { listSuperAdminTenantGrantsImpl } = await import("@/lib/platform-admins.server");
+    return listSuperAdminTenantGrantsImpl({
+      userId: context.userId,
+      adminEmail: data.adminEmail,
+    });
+  });
+
+export const upsertSuperAdminTenantGrant = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        adminEmail: z.string().trim().email().max(254),
+        companyCode: z.string().trim().regex(/^[0-9]{3}$/),
+        accessLevel: z.enum(["none", "platform_admin", "data_read", "data_write", "full"]),
+        expiresAt: z.string().nullable().optional(),
+        reason: z.string().trim().max(500).nullable().optional(),
+        confirmFull: z.boolean().optional(),
+        confirmWrite: z.boolean().optional(),
+        confirmExternal: z.boolean().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { upsertSuperAdminTenantGrantImpl } = await import("@/lib/platform-admins.server");
+    return upsertSuperAdminTenantGrantImpl({
+      userId: context.userId,
+      adminEmail: data.adminEmail,
+      companyCode: data.companyCode,
+      accessLevel: data.accessLevel,
+      expiresAt: data.expiresAt,
+      reason: data.reason,
+      confirmFull: data.confirmFull,
+      confirmWrite: data.confirmWrite,
+      confirmExternal: data.confirmExternal,
+    });
+  });

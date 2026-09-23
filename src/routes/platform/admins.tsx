@@ -6,9 +6,19 @@ import {
   addPlatformAdministrator,
   cancelPlatformAdminInvite,
   listPlatformAdmins,
+  listSuperAdminTenantGrants,
   revokePlatformAdministrator,
+  upsertSuperAdminTenantGrant,
 } from "@/lib/platform-admins.functions";
-import { platformRoleLabel, type PlatformAdminRow } from "@/lib/platform-admins";
+import {
+  ACCESS_LEVEL_DESCRIPTIONS,
+  accessLevelLabel,
+  grantReasonRequired,
+  platformRoleLabel,
+  type PlatformAdminRow,
+  type SuperAdminGrantAccessOption,
+  type SuperAdminTenantGrantRow,
+} from "@/lib/platform-admins";
 import { usePlatformAuthority } from "@/lib/platform-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -372,10 +382,7 @@ function PlatformAdminsPage() {
                     <dd>{formatDate(selected.createdAt)}</dd>
                   </div>
                   {selected.platformRole === "super_admin" ? (
-                    <div>
-                      <dt className="text-xs text-muted-foreground">Tenant access</dt>
-                      <dd>No grants configured</dd>
-                    </div>
+                    <SuperAdminTenantAccessPanel adminEmail={selected.email} />
                   ) : null}
                 </dl>
                 <Button
@@ -410,6 +417,231 @@ function PlatformAdminsPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function expiryPresetToIso(
+  preset: "none" | "24h" | "7d" | "30d" | "custom",
+  customIso: string,
+): string | null {
+  const now = Date.now();
+  if (preset === "none") return null;
+  if (preset === "24h") return new Date(now + 24 * 3600_000).toISOString();
+  if (preset === "7d") return new Date(now + 7 * 24 * 3600_000).toISOString();
+  if (preset === "30d") return new Date(now + 30 * 24 * 3600_000).toISOString();
+  if (!customIso) return null;
+  return new Date(customIso).toISOString();
+}
+
+function SuperAdminTenantAccessPanel({ adminEmail }: { adminEmail: string }) {
+  const listFn = useServerFn(listSuperAdminTenantGrants);
+  const upsertFn = useServerFn(upsertSuperAdminTenantGrant);
+  const qc = useQueryClient();
+  const grantsQ = useQuery({
+    queryKey: ["sa-tenant-grants", adminEmail],
+    queryFn: () => listFn({ data: { adminEmail } }),
+  });
+
+  if (grantsQ.isLoading) {
+    return <p className="text-xs text-muted-foreground">Loading tenant access…</p>;
+  }
+  if (grantsQ.isError || !grantsQ.data) {
+    return <p className="text-xs text-destructive">Could not load tenant access.</p>;
+  }
+
+  return (
+    <div className="space-y-3 pt-2">
+      <div>
+        <dt className="text-xs text-muted-foreground">Tenant access</dt>
+        <dd className="text-xs text-muted-foreground">
+          Full does not make this user a Tenant Owner. Grants are per company only.
+        </dd>
+      </div>
+      <div className="space-y-3">
+        {grantsQ.data.grants.map((row) => (
+          <TenantGrantEditor
+            key={row.companyCode}
+            adminEmail={adminEmail}
+            row={row}
+            onSaved={() => {
+              void qc.invalidateQueries({ queryKey: ["sa-tenant-grants", adminEmail] });
+            }}
+            upsertFn={(payload) => upsertFn({ data: payload })}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TenantGrantEditor({
+  adminEmail,
+  row,
+  onSaved,
+  upsertFn,
+}: {
+  adminEmail: string;
+  row: SuperAdminTenantGrantRow;
+  onSaved: () => void;
+  upsertFn: (payload: {
+    adminEmail: string;
+    companyCode: string;
+    accessLevel: SuperAdminGrantAccessOption;
+    expiresAt?: string | null;
+    reason?: string | null;
+    confirmFull?: boolean;
+    confirmWrite?: boolean;
+    confirmExternal?: boolean;
+  }) => Promise<unknown>;
+}) {
+  const [access, setAccess] = useState<SuperAdminGrantAccessOption>(row.accessLevel);
+  const [expiryPreset, setExpiryPreset] = useState<"none" | "24h" | "7d" | "30d" | "custom">(
+    row.expiresAt ? "custom" : "none",
+  );
+  const [customExpiry, setCustomExpiry] = useState(
+    row.expiresAt ? row.expiresAt.slice(0, 16) : "",
+  );
+  const [reason, setReason] = useState(row.reason ?? "");
+  const [saving, setSaving] = useState(false);
+
+  const expiresAt =
+    access === "none" ? null : expiryPresetToIso(expiryPreset, customExpiry);
+  const needsReason = grantReasonRequired({
+    accessLevel: access,
+    tenantType: row.tenantType,
+    expiresAt,
+  });
+
+  async function save() {
+    const oldLabel = accessLevelLabel(row.accessLevel);
+    if (access === "none") {
+      if (
+        !window.confirm(
+          `Revoke ${oldLabel} access to ${row.companyName} (${row.companyCode}) for ${adminEmail}?\n\nAny active company session will lose authority on its next server validation.\n\nThis does not delete their account or tenant memberships.`,
+        )
+      ) {
+        return;
+      }
+    } else if (access === "full") {
+      if (
+        !window.confirm(
+          `Grant Full access to ${row.companyName} (${row.companyCode})?\n\nFull permits platform administration plus permitted operational read/write access for this company.\nIt does NOT make the user a Tenant Owner.`,
+        )
+      ) {
+        return;
+      }
+    } else if (access === "data_write") {
+      if (
+        !window.confirm(
+          `Grant Data Write access to ${row.companyName} (${row.companyCode})?\n\nThis permits operational changes for this company.`,
+        )
+      ) {
+        return;
+      }
+    }
+    if (row.tenantType === "EXTERNAL" && access !== "none") {
+      if (
+        !window.confirm(
+          `${row.companyName} (${row.companyCode}) is EXTERNAL.\n\nConfirm granting ${accessLevelLabel(access)} for this independently licensed company.`,
+        )
+      ) {
+        return;
+      }
+    }
+
+    setSaving(true);
+    try {
+      await upsertFn({
+        adminEmail,
+        companyCode: row.companyCode,
+        accessLevel: access,
+        expiresAt,
+        reason: reason.trim() || null,
+        confirmFull: access === "full",
+        confirmWrite: access === "data_write" || access === "full",
+        confirmExternal: row.tenantType === "EXTERNAL",
+      });
+      toast.success(`Updated access for ${row.companyCode}`);
+      onSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Save denied");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-border p-3 space-y-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium">
+            {row.companyName} ({row.companyCode})
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {row.tenantType}
+            {row.isExpired ? " · previous grant expired" : ""}
+          </p>
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Access</Label>
+        <select
+          className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+          value={access}
+          onChange={(e) => setAccess(e.target.value as SuperAdminGrantAccessOption)}
+        >
+          <option value="none">None</option>
+          <option value="platform_admin">Platform Admin</option>
+          <option value="data_read">Data Read</option>
+          <option value="data_write">Data Write</option>
+          <option value="full">Full</option>
+        </select>
+        {access !== "none" ? (
+          <p className="text-xs text-muted-foreground">{ACCESS_LEVEL_DESCRIPTIONS[access]}</p>
+        ) : null}
+      </div>
+      {access !== "none" ? (
+        <>
+          <div className="space-y-1">
+            <Label className="text-xs">Expiry</Label>
+            <select
+              className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+              value={expiryPreset}
+              onChange={(e) =>
+                setExpiryPreset(e.target.value as "none" | "24h" | "7d" | "30d" | "custom")
+              }
+            >
+              <option value="none">No expiry</option>
+              <option value="24h">24 hours</option>
+              <option value="7d">7 days</option>
+              <option value="30d">30 days</option>
+              <option value="custom">Custom date</option>
+            </select>
+            {expiryPreset === "custom" ? (
+              <Input
+                type="datetime-local"
+                value={customExpiry}
+                onChange={(e) => setCustomExpiry(e.target.value)}
+              />
+            ) : null}
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">
+              Reason{needsReason ? " (required)" : " (optional)"}
+            </Label>
+            <Input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={500}
+              placeholder={needsReason ? "Required for this grant" : "Optional"}
+            />
+          </div>
+        </>
+      ) : null}
+      <Button type="button" size="sm" disabled={saving} onClick={() => void save()}>
+        {saving ? "Saving…" : "Save"}
+      </Button>
     </div>
   );
 }

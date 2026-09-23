@@ -72,7 +72,10 @@ ok("tenant_owner_no_platform", !owner.canAccessPlatform);
 
 const server = read("src/lib/platform-admins.server.ts");
 ok("server_requires_super_owner", server.includes("requireSuperOwner"));
-ok("server_no_sa_grant_path", !server.includes("super_admin_tenant_access"));
+ok(
+  "server_g7e2b_grant_path_so_only",
+  server.includes("upsertSuperAdminTenantGrantImpl") && server.includes("requireSuperOwner"),
+);
 ok("server_no_staff_invitations", !server.includes("staff_invitations"));
 ok("server_uses_platform_invitations", server.includes("platform_invitations"));
 ok("server_hashes_token", server.includes("sha256") && server.includes("token_hash"));
@@ -98,8 +101,16 @@ ok("ui_title", adminsUi.includes("Platform Administrators"));
 ok("ui_add", adminsUi.includes("Add platform administrator"));
 ok("ui_so_section", adminsUi.includes("SUPER OWNERS"));
 ok("ui_sa_section", adminsUi.includes("SUPER ADMINS"));
-ok("ui_sa_no_grants_copy", adminsUi.includes("No grants configured"));
-ok("ui_no_grant_controls", !adminsUi.includes("data_read") && !adminsUi.includes("Grant:"));
+ok(
+  "ui_sa_tenant_access_g7e2b",
+  adminsUi.includes("Tenant access") && adminsUi.includes("SuperAdminTenantAccessPanel"),
+);
+ok(
+  "ui_grant_controls_friendly",
+  adminsUi.includes("data_read") &&
+    adminsUi.includes("Platform Admin") &&
+    !adminsUi.includes("super_admin_tenant_access"),
+);
 ok("ui_so_only_gate", adminsUi.includes("isSuperOwner"));
 ok("ui_no_token", !adminsUi.includes("rawToken") && !adminsUi.includes("token_hash"));
 ok("ui_no_password", !adminsUi.toLowerCase().includes("password"));
@@ -130,7 +141,13 @@ ok(
   }) === true,
 );
 
-ok("g7e2b_not_started_no_expires_at_grant", !mig.includes("ALTER TABLE public.super_admin_tenant_access"));
+ok(
+  "g7e2b_migration_present",
+  exists("supabase/migrations/20260923100000_gate_g7e2b_super_admin_tenant_grants.sql") &&
+    read("supabase/migrations/20260923100000_gate_g7e2b_super_admin_tenant_grants.sql").includes(
+      "expires_at",
+    ),
+);
 ok("g7d_untouched", read("src/lib/platform-tenant-entry.ts").includes("mh_platform_tenant_access"));
 
 if (failures.length) {

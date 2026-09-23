@@ -249,12 +249,18 @@ async function resolveEntryAuthority(
   if (sa === true) {
     const { data: grants, error } = await db
       .from("super_admin_tenant_access")
-      .select("id, access_level")
+      .select("id, access_level, revoked_at, expires_at")
       .eq("user_id", userId)
       .eq("tenant_id", tenant.id)
-      .limit(1);
+      .is("revoked_at", null)
+      .limit(5);
     if (error) throw new Error(error.message);
-    const grant = (grants ?? [])[0] as { id: string; access_level: string } | undefined;
+    const now = Date.now();
+    const grant = (grants ?? []).find((g: { expires_at?: string | null }) => {
+      if (!g.expires_at) return true;
+      const exp = new Date(g.expires_at).getTime();
+      return !Number.isNaN(exp) && now < exp;
+    }) as { id: string; access_level: string } | undefined;
     if (grant) {
       const level = superAdminGrantToEntryLevel(grant.access_level);
       if (level) {
