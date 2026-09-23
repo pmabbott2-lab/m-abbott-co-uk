@@ -1465,7 +1465,7 @@ export const bookCustomerAppointmentAsStaff = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    await assertStaffCanAccessCustomer(context.userId, data.customerId);
+    await assertStaffCanAccessCustomer(context.userId, data.customerId, { forMutation: true });
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
@@ -1559,7 +1559,12 @@ export const bookCaseFollowUpAppointment = createServerFn({ method: "POST" })
     const { canViewRelationship } = await import("@/lib/admin-access");
     const access = await resolveAdminAccess(context.userId, email);
     if (!canViewRelationship(access)) {
-      await assertStaffCanAccessCustomer(context.userId, data.customerId);
+      await assertStaffCanAccessCustomer(context.userId, data.customerId, { forMutation: true });
+    } else {
+      const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+      const { assertTenantViewMayMutate } = await import("@/lib/tenant-role");
+      const view = await resolveActingTenantRole(context.userId);
+      assertTenantViewMayMutate(view);
     }
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(

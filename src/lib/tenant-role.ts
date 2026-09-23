@@ -172,12 +172,13 @@ export function platformAccessTenantRoleView(input: {
     isOwner: false,
     isSupervisor: false,
     isGeneralAdmin: false,
-    // operational entry uses admin-capable dashboard without claiming Owner
-    isMainAdmin: true,
+    // operational_admin/emergency: admin-capable dashboard without claiming Owner.
+    // read_only: not main-admin for write gates; shell still platform_access for nav.
+    isMainAdmin: canWrite,
     isAdvisor: false,
     isIntroducer: false,
-    adminLevel: canWrite ? "owner" : null,
-    adminAccess: canWrite ? ownerAdmin() : emptyAdmin(),
+    adminLevel: canWrite ? "supervisor" : null,
+    adminAccess: canWrite ? supervisorAdmin() : emptyAdmin(),
     shell: "platform_access",
   };
 }
@@ -189,6 +190,13 @@ export function platformAccessMayMutate(view: TenantRoleView): boolean {
     view.platformAccessLevel === "operational_admin" ||
     view.platformAccessLevel === "emergency"
   );
+}
+
+/** Throw if an active G7D read_only (or non-write) context is the acting authority. */
+export function assertTenantViewMayMutate(view: TenantRoleView): void {
+  if (!platformAccessMayMutate(view)) {
+    throw new Error("Forbidden");
+  }
 }
 
 /**

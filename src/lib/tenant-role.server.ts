@@ -69,20 +69,9 @@ export async function loadTenantRoleForTenantId(
   if (tenant.status !== "active") {
     return deniedTenantRoleView({ tenantSlug: tenantSlug ?? tenant.slug, tenantId: tenant.id });
   }
-  const membershipRoles = await listTenantMembershipRoles(userId, tenant.id);
-  if (membershipRoles.length > 0) {
-    const generalPermissions = membershipRoles.includes("general")
-      ? await loadGeneralPermissions(userId, tenant.id)
-      : null;
-    return resolveTenantRoleView({
-      membershipRoles,
-      tenantSlug: tenantSlug ?? tenant.slug,
-      tenantId: tenant.id,
-      member: true,
-      generalPermissions,
-    });
-  }
 
+  // G7D authority ceiling: an active Enter Company session for THIS tenant
+  // overrides ordinary membership (Owner/Supervisor/etc.) for the acting context.
   const { validatePlatformTenantAccessSession } = await import(
     "@/lib/platform-tenant-entry.server"
   );
@@ -97,6 +86,20 @@ export async function loadTenantRoleForTenantId(
       tenantId: tenant.id,
       accessLevel: platform.accessLevel,
       basisLabel: platform.basisLabel,
+    });
+  }
+
+  const membershipRoles = await listTenantMembershipRoles(userId, tenant.id);
+  if (membershipRoles.length > 0) {
+    const generalPermissions = membershipRoles.includes("general")
+      ? await loadGeneralPermissions(userId, tenant.id)
+      : null;
+    return resolveTenantRoleView({
+      membershipRoles,
+      tenantSlug: tenantSlug ?? tenant.slug,
+      tenantId: tenant.id,
+      member: true,
+      generalPermissions,
     });
   }
 
@@ -232,5 +235,20 @@ export async function requireActingTenantStaff(
   if (!view.member || (!view.isMainAdmin && !view.isAdvisor)) {
     throw new Error("Forbidden");
   }
+  return view;
+}
+
+/**
+ * Resolve acting tenant authority and deny when an active G7D read_only
+ * (or other non-write platform) context is the ceiling.
+ */
+export async function requireActingTenantOperationalMutation(
+  userId: string,
+  tenantSlug?: string | null,
+  tenantId?: string | null,
+): Promise<TenantRoleView> {
+  const { assertTenantViewMayMutate } = await import("@/lib/tenant-role");
+  const view = await resolveActingTenantRole(userId, tenantSlug, tenantId);
+  assertTenantViewMayMutate(view);
   return view;
 }

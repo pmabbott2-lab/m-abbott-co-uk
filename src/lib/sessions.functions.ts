@@ -118,6 +118,7 @@ async function getRolesForUser(userId: string, tenantId?: string | null): Promis
 export async function assertStaffCanAccessCustomer(
   staffUserId: string,
   customerId: string,
+  opts?: { forMutation?: boolean },
 ): Promise<void> {
   const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
@@ -125,6 +126,7 @@ export async function assertStaffCanAccessCustomer(
   const { loadTenantRoleForTenantId, resolveActingTenantRole } = await import(
     "@/lib/tenant-role.server"
   );
+  const { assertTenantViewMayMutate } = await import("@/lib/tenant-role");
   const { canAmend } = await import("@/lib/admin-access");
 
   const { data: sessions, error } = await supabaseAdmin
@@ -151,10 +153,13 @@ export async function assertStaffCanAccessCustomer(
   const access = view.adminAccess;
   const isMainAdmin = view.isMainAdmin;
   const isAdvisor = view.isAdvisor;
+  const platformDataAccess =
+    view.accessContext === "platform_access" && view.platformAccessLevel != null;
 
   if (
     !isMainAdmin &&
     !isAdvisor &&
+    !platformDataAccess &&
     !access.isOwner &&
     !access.isSupervisor &&
     !canAmend(access, "customers")
@@ -162,8 +167,18 @@ export async function assertStaffCanAccessCustomer(
     throw new Error("Forbidden");
   }
 
+  if (opts?.forMutation) {
+    assertTenantViewMayMutate(view);
+  }
+
   const sessionIds = (sessions ?? []).map((s: { id: string }) => s.id);
-  if (sessionIds.length === 0 && !isMainAdmin && !access.isOwner && !access.isSupervisor) {
+  if (
+    sessionIds.length === 0 &&
+    !isMainAdmin &&
+    !platformDataAccess &&
+    !access.isOwner &&
+    !access.isSupervisor
+  ) {
     throw new Error("Customer not found");
   }
 
@@ -519,7 +534,7 @@ export const promoteSessionToCaseAsStaff = createServerFn({ method: "POST" })
     z.object({ sessionId: z.string().uuid(), customerId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    await assertStaffCanAccessCustomer(context.userId, data.customerId);
+    await assertStaffCanAccessCustomer(context.userId, data.customerId, { forMutation: true });
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
@@ -930,7 +945,7 @@ export const updateCustomerContact = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    await assertStaffCanAccessCustomer(context.userId, data.customerId);
+    await assertStaffCanAccessCustomer(context.userId, data.customerId, { forMutation: true });
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
@@ -3261,10 +3276,10 @@ export const listNotes = createServerFn({ method: "POST" })
 // used by listAdvisors / allocateSession. Platform read_only entry cannot mutate.
 async function requireAdmin(userId: string): Promise<void> {
   const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
-  const { platformAccessMayMutate } = await import("@/lib/tenant-role");
+  const { assertTenantViewMayMutate } = await import("@/lib/tenant-role");
   const view = await resolveActingTenantRole(userId);
   if (!view.isMainAdmin) throw new Error("Forbidden");
-  if (!platformAccessMayMutate(view)) throw new Error("Forbidden");
+  assertTenantViewMayMutate(view);
 }
 
 // Stamp deleted_at on an advisor profile, swallowing the error if the column

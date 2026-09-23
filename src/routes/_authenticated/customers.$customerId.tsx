@@ -71,10 +71,14 @@ export function CustomerHubPage() {
     canAmend(adminAccess, "customers");
 
   const canEditContact =
-    roleQ.data?.isAdvisor ||
-    roleQ.data?.isOwner ||
-    roleQ.data?.isSupervisor ||
-    canAmend(adminAccess, "customers");
+    !(
+      roleQ.data?.accessContext === "platform_access" &&
+      roleQ.data?.platformAccessLevel === "read_only"
+    ) &&
+    (roleQ.data?.isAdvisor ||
+      roleQ.data?.isOwner ||
+      roleQ.data?.isSupervisor ||
+      canAmend(adminAccess, "customers"));
 
   if (hubQ.isLoading || roleQ.isLoading) {
     return (

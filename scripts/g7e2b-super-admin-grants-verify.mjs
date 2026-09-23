@@ -13,6 +13,11 @@ import {
   accessLevelLabel,
 } from "../src/lib/platform-admins.ts";
 import { superAdminGrantToEntryLevel } from "../src/lib/platform-tenant-entry.ts";
+import {
+  platformAccessMayMutate,
+  platformAccessTenantRoleView,
+  assertTenantViewMayMutate,
+} from "../src/lib/tenant-role.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -171,6 +176,70 @@ ok("access_label_full", accessLevelLabel("full") === "Full");
 
 ok("g7e2a_invite_untouched", exists("src/routes/platform-invite.tsx"));
 ok("g7d_cookie_untouched", read("src/lib/platform-tenant-entry.ts").includes("mh_platform_tenant_access"));
+
+const roleServer = read("src/lib/tenant-role.server.ts");
+const g7dCall = roleServer.indexOf("await validatePlatformTenantAccessSession");
+const membershipCall = roleServer.indexOf("await listTenantMembershipRoles");
+ok(
+  "g7d_ceiling_before_membership",
+  g7dCall > 0 && membershipCall > 0 && g7dCall < membershipCall,
+);
+ok(
+  "g7d_ceiling_comment",
+  roleServer.includes("G7D authority ceiling") || roleServer.includes("overrides ordinary membership"),
+);
+ok(
+  "require_ops_mutation_helper",
+  roleServer.includes("requireActingTenantOperationalMutation"),
+);
+
+const roleTs = read("src/lib/tenant-role.ts");
+ok("assert_tenant_view_may_mutate", roleTs.includes("assertTenantViewMayMutate"));
+ok(
+  "read_only_not_main_admin_view",
+  roleTs.includes("// read_only: not main-admin for write gates"),
+);
+
+const sessions = read("src/lib/sessions.functions.ts");
+ok(
+  "contact_update_for_mutation",
+  sessions.includes("forMutation: true") && sessions.includes("updateCustomerContact"),
+);
+ok(
+  "assert_staff_platform_data_access",
+  sessions.includes("platformDataAccess") && sessions.includes("accessContext === \"platform_access\""),
+);
+
+const customersUi = read("src/routes/_authenticated/customers.$customerId.tsx");
+ok(
+  "ui_contact_edit_hidden_read_only",
+  customersUi.includes('platformAccessLevel === "read_only"') &&
+    customersUi.includes("canEditContact"),
+);
+
+const dualRo = platformAccessTenantRoleView({
+  tenantId: "t001",
+  accessLevel: "read_only",
+  basisLabel: "test",
+});
+ok("ceiling_ro_may_not_mutate", !platformAccessMayMutate(dualRo));
+ok("ceiling_ro_not_owner", !dualRo.isOwner && !dualRo.adminAccess.isOwner);
+let mutateDenied = false;
+try {
+  assertTenantViewMayMutate(dualRo);
+} catch {
+  mutateDenied = true;
+}
+ok("ceiling_ro_assert_throws", mutateDenied);
+
+const dualOps = platformAccessTenantRoleView({
+  tenantId: "t001",
+  accessLevel: "operational_admin",
+  basisLabel: "test",
+});
+ok("ceiling_ops_may_mutate", platformAccessMayMutate(dualOps));
+ok("ceiling_ops_not_owner_flag", !dualOps.isOwner && !dualOps.adminAccess.isOwner);
+ok("ceiling_ops_is_main_admin", dualOps.isMainAdmin);
 
 if (failures.length) {
   console.error(`\nG7E-2B verify FAIL (${failures.length})`);

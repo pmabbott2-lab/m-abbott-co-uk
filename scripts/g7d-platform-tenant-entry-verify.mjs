@@ -176,8 +176,10 @@ const roView = platformAccessTenantRoleView({
   basisLabel: "Platform administrator access",
 });
 ok("read_only_shell", roView.shell === "platform_access" && roView.platformAccessLevel === "read_only");
+ok("read_only_not_main_admin", !roView.isMainAdmin);
 ok("read_only_write_denied", !platformAccessMayMutate(roView));
 ok("ops_write_allowed", platformAccessMayMutate(platView));
+ok("ops_admin_access_not_owner", !platView.adminAccess.isOwner);
 ok("membership_write_unaffected", platformAccessMayMutate(ownerView));
 
 ok("denied_default", deniedTenantRoleView().shell === "denied");

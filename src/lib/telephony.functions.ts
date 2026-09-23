@@ -93,7 +93,9 @@ export const prepareBrowserCall = createServerFn({ method: "POST" })
       throw new Error("Open the customer case before calling — calls are recorded against the case CRM tab.");
     }
     if (session.customer_id) {
-      await assertStaffCanAccessCustomer(context.userId, session.customer_id);
+      await assertStaffCanAccessCustomer(context.userId, session.customer_id, {
+        forMutation: true,
+      });
     }
 
     const customerPhone = normaliseUkPhone(data.customerPhone);
