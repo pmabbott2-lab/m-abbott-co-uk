@@ -5,7 +5,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { PlatformAuthorityView } from "@/lib/platform-authority";
-import { deniedPlatformAuthority } from "@/lib/platform-authority";
+import { deniedPlatformAuthority, withBreakGlassSession } from "@/lib/platform-authority";
 
 export const getMyPlatformAuthority = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -13,5 +13,14 @@ export const getMyPlatformAuthority = createServerFn({ method: "GET" })
     const { resolvePlatformAuthority } = await import("@/lib/platform-authority.server");
     const userId = (context as { userId?: string } | undefined)?.userId;
     if (!userId) return deniedPlatformAuthority();
-    return resolvePlatformAuthority(userId);
+    const view = await resolvePlatformAuthority(userId);
+    if (!view.isBreakGlass || !view.isSuperOwner) return view;
+    const { ensureBreakGlassPlatformSession } = await import("@/lib/break-glass.server");
+    const session = await ensureBreakGlassPlatformSession({
+      userId,
+      isBreakGlass: true,
+      isSuperOwner: true,
+      activity: "session_check",
+    });
+    return withBreakGlassSession(view, session.active === true);
   });

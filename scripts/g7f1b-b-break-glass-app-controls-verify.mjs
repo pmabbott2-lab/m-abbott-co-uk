@@ -61,9 +61,11 @@ ok("break_glass_pure_exists", existsSync(resolve(root, "src/lib/break-glass.ts")
 ok("break_glass_server_exists", existsSync(resolve(root, "src/lib/break-glass.server.ts")));
 
 const bgServer = read("src/lib/break-glass.server.ts");
-ok("server_resolve_helper", bgServer.includes("resolveBreakGlassStatus"));
-ok("server_no_email_classify", !/email.*=.*break|break.*email/i.test(bgServer.split("resolveBreakGlassStatus")[1]?.slice(0, 800) || ""));
-ok("server_uses_rpc", bgServer.includes('is_active_break_glass'));
+const bgRegistry = read("src/lib/break-glass-registry.server.ts");
+const authFns = read("src/lib/platform-authority.functions.ts");
+ok("server_resolve_helper", bgServer.includes("resolveBreakGlassStatus") || bgRegistry.includes("resolveBreakGlassStatus"));
+ok("server_no_email_classify", !/email.*=.*break|break.*email/i.test((bgRegistry + bgServer).split("resolveBreakGlassStatus")[1]?.slice(0, 800) || ""));
+ok("server_uses_rpc", bgRegistry.includes('is_active_break_glass'));
 ok("server_cookie_session", bgServer.includes("BREAK_GLASS_PLATFORM_SESSION_COOKIE"));
 ok("server_auth_bind", bgServer.includes("BREAK_GLASS_AUTH_BIND_COOKIE"));
 ok("server_no_new_migration", !existsSync(resolve(root, "supabase/migrations/20260924130000_gate_g7f1b_b")));
@@ -258,7 +260,7 @@ ok("entry_no_bg_external_bypass", !/isBreakGlass.*EXTERNAL|EXTERNAL.*isBreakGlas
 ok("entry_bg_authority_comment", entryServer.includes("EXTERNAL still denied"));
 
 const authServer = read("src/lib/platform-authority.server.ts");
-ok("authority_session_check_no_idle_touch", authServer.includes('activity: "session_check"'));
+ok("authority_session_check_no_idle_touch", authFns.includes('activity: "session_check"') || authServer.includes('activity: "session_check"'));
 ok("functions_bridge_exists", existsSync(resolve(root, "src/lib/break-glass.functions.ts")));
 ok("authority_functions_bridge", existsSync(resolve(root, "src/lib/platform-authority.functions.ts")));
 

@@ -2,12 +2,14 @@
  * Server-side platform authority resolver.
  * Authenticated auth user + platform_roles only. Fail closed.
  * Client code must import getMyPlatformAuthority from platform-authority.functions.ts.
+ *
+ * Cookie/session enrichment lives in platform-authority.functions.ts so this
+ * module stays import-protection safe for post-auth route graphs.
  */
 import { supabaseAdminUntyped as db } from "@/integrations/supabase/client.server";
 import {
   deniedPlatformAuthority,
   resolvePlatformAuthorityFromRoles,
-  withBreakGlassSession,
   type PlatformAuthorityView,
   type PlatformRole,
 } from "@/lib/platform-authority";
@@ -36,25 +38,13 @@ export async function resolvePlatformAuthority(userId: string | null | undefined
   if (!id) return deniedPlatformAuthority();
   try {
     const roles = await loadPlatformRoles(id);
-    const { resolveBreakGlassStatus, ensureBreakGlassPlatformSession } = await import(
-      "@/lib/break-glass.server"
-    );
+    const { resolveBreakGlassStatus } = await import("@/lib/break-glass-registry.server");
     const bg = await resolveBreakGlassStatus(id);
-    const view = resolvePlatformAuthorityFromRoles({
+    return resolvePlatformAuthorityFromRoles({
       userId: id,
       roles,
       isBreakGlass: bg.isBreakGlass,
     });
-    if (!view.isBreakGlass || !view.isSuperOwner) {
-      return withBreakGlassSession(view, false);
-    }
-    const session = await ensureBreakGlassPlatformSession({
-      userId: id,
-      isBreakGlass: true,
-      isSuperOwner: true,
-      activity: "session_check",
-    });
-    return withBreakGlassSession(view, session.active === true);
   } catch {
     return deniedPlatformAuthority({ userId: id });
   }

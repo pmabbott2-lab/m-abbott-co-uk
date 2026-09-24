@@ -30,6 +30,11 @@ import {
   type BreakGlassStatus,
 } from "@/lib/break-glass";
 
+import {
+  resolveBreakGlassStatus,
+  writeBreakGlassAuditBestEffort,
+} from "@/lib/break-glass-registry.server";
+
 function cookieSecure(): boolean {
   const env = getAppEnvironment();
   return env === "staging" || env === "production";
@@ -120,59 +125,6 @@ async function readAuthIatSeconds(): Promise<string | null> {
     return String(Math.floor(payload.iat));
   } catch {
     return null;
-  }
-}
-
-/**
- * Server-side BG classification. UUID + registry only.
- * Does NOT grant Super Owner authority.
- */
-export async function resolveBreakGlassStatus(
-  userId: string | null | undefined,
-): Promise<BreakGlassStatus> {
-  const id = userId?.trim() || null;
-  if (!id) return deniedBreakGlassStatus();
-  try {
-    const { data, error } = await db.rpc("is_active_break_glass", { p_user_id: id });
-    if (error) {
-      console.error("is_active_break_glass", error.message);
-      return deniedBreakGlassStatus();
-    }
-    return { isBreakGlass: data === true };
-  } catch (err) {
-    console.error("resolveBreakGlassStatus", err);
-    return deniedBreakGlassStatus();
-  }
-}
-
-export async function writeBreakGlassAuditBestEffort(input: {
-  eventType:
-    | "BREAK_GLASS_LOGIN_SUCCEEDED"
-    | "BREAK_GLASS_PLATFORM_ACCESS"
-    | "BREAK_GLASS_TENANT_ENTRY_STARTED"
-    | "BREAK_GLASS_TENANT_ENTRY_ENDED"
-    | "BREAK_GLASS_LOGOUT"
-    | "BREAK_GLASS_IDENTITY_CREATED"
-    | "BREAK_GLASS_IDENTITY_REPLACED"
-    | "BREAK_GLASS_IDENTITY_DEACTIVATED";
-  actingUserId: string;
-  subjectUserId?: string | null;
-  tenantId?: string | null;
-  metadata?: Record<string, unknown> | null;
-}): Promise<{ written: boolean }> {
-  try {
-    const { writePlatformAuditEvent } = await import("@/lib/platform-audit.server");
-    await writePlatformAuditEvent({
-      eventType: input.eventType as never,
-      actingUserId: input.actingUserId,
-      subjectUserId: input.subjectUserId ?? null,
-      tenantId: input.tenantId ?? null,
-      metadata: input.metadata ?? null,
-    });
-    return { written: true };
-  } catch (err) {
-    console.error("break_glass_audit_failed", input.eventType, err);
-    return { written: false };
   }
 }
 
@@ -342,3 +294,12 @@ export async function auditBreakGlassLogoutBestEffort(userId: string | null | un
   }
   await clearBreakGlassPlatformSessionCookies();
 }
+
+// Registry / lifecycle (cookie-free) — re-exported for existing importers.
+export {
+  resolveBreakGlassStatus,
+  writeBreakGlassAuditBestEffort,
+  establishBreakGlassIdentityRpc,
+  establishBreakGlassIdentityImpl,
+  type EstablishBreakGlassIdentityResult,
+} from "@/lib/break-glass-registry.server";
