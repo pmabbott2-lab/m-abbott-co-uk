@@ -29,6 +29,10 @@ export type PlatformAuthorityView = {
   userId: string | null;
   isSuperOwner: boolean;
   isSuperAdmin: boolean;
+  /** Active break-glass classification (registry). Never grants authority alone. */
+  isBreakGlass: boolean;
+  /** Server BG session cookie valid (absolute + idle). False when not BG. */
+  breakGlassSessionActive: boolean;
   canAccessPlatform: boolean;
   canListPlatformTenants: boolean;
   canCreateCompany: boolean;
@@ -45,6 +49,8 @@ export function deniedPlatformAuthority(input?: {
     userId: input?.userId ?? null,
     isSuperOwner: false,
     isSuperAdmin: false,
+    isBreakGlass: false,
+    breakGlassSessionActive: false,
     canAccessPlatform: false,
     canListPlatformTenants: false,
     canCreateCompany: false,
@@ -58,6 +64,8 @@ export function deniedPlatformAuthority(input?: {
 export function resolvePlatformAuthorityFromRoles(input: {
   userId: string | null | undefined;
   roles: Iterable<string>;
+  /** Server-resolved only. Client-forged true must be ignored by callers. */
+  isBreakGlass?: boolean;
 }): PlatformAuthorityView {
   const userId = input.userId?.trim() || null;
   if (!userId) return deniedPlatformAuthority();
@@ -65,14 +73,28 @@ export function resolvePlatformAuthorityFromRoles(input: {
   const roles = [...new Set([...input.roles].filter(isPlatformRole))];
   const isSuperOwner = roles.includes("super_owner");
   const isSuperAdmin = roles.includes("super_admin");
+  // Classification alone grants nothing; only attach when also super_owner.
+  const isBreakGlass = isSuperOwner && input.isBreakGlass === true;
   return {
     userId,
     isSuperOwner,
     isSuperAdmin,
+    isBreakGlass,
+    breakGlassSessionActive: false,
     canAccessPlatform: isSuperOwner || isSuperAdmin,
     canListPlatformTenants: isSuperOwner,
     canCreateCompany: isSuperOwner,
   };
+}
+
+export function withBreakGlassSession(
+  view: PlatformAuthorityView,
+  sessionActive: boolean,
+): PlatformAuthorityView {
+  if (!view.isBreakGlass) {
+    return { ...view, breakGlassSessionActive: false };
+  }
+  return { ...view, breakGlassSessionActive: sessionActive };
 }
 
 export function superAdminGrantAllowsVisibility(

@@ -8,7 +8,7 @@ import { getRafCode, clearRafCookie, rafLinkForCode, rafShareMessage } from "@/l
 import { useTenantUi } from "@/lib/tenant-ui";
 import { clearPostAuthStart, resolvePostAuthStart } from "@/lib/post-auth-journey";
 import { resolveAuthenticatedHomeRedirect } from "@/lib/post-auth-destination";
-import { getMyPlatformAuthority } from "@/lib/platform-authority.server";
+import { getMyPlatformAuthority } from "@/lib/platform-authority.functions";
 import { StaffDashboardLoader } from "@/components/staff/StaffDashboard";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";

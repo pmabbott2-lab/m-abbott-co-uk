@@ -110,8 +110,8 @@ const mfaCfg = read("src/lib/auth-mfa-config.ts");
 ok("mfa_still_suspended", mfaCfg.includes("TEMP_SUSPEND_LOGIN_MFA = true"));
 
 ok(
-  "no_breakglass_impl",
-  !exists("src/lib/break-glass.ts") && !server.toLowerCase().includes("break-glass"),
+  "no_breakglass_impl_superseded_by_g7f1b_b",
+  exists("src/lib/break-glass.ts") && exists("src/lib/break-glass.server.ts"),
 );
 
 const g6bHelper = read("scripts/g6b-staging-apply/phase2b-auth-helper.sql");

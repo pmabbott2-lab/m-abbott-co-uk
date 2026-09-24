@@ -286,6 +286,14 @@ export const PLATFORM_AUDIT_EVENT_LABELS: Record<string, string> = {
   SUPER_ADMIN_GRANT_CREATED: "Company access granted",
   SUPER_ADMIN_GRANT_CHANGED: "Company access changed",
   SUPER_ADMIN_GRANT_REVOKED: "Company access revoked",
+  BREAK_GLASS_LOGIN_SUCCEEDED: "Break-glass login",
+  BREAK_GLASS_PLATFORM_ACCESS: "Break-glass platform access",
+  BREAK_GLASS_TENANT_ENTRY_STARTED: "Break-glass company entry started",
+  BREAK_GLASS_TENANT_ENTRY_ENDED: "Break-glass company entry ended",
+  BREAK_GLASS_LOGOUT: "Break-glass logout",
+  BREAK_GLASS_IDENTITY_CREATED: "Break-glass identity created",
+  BREAK_GLASS_IDENTITY_REPLACED: "Break-glass identity replaced",
+  BREAK_GLASS_IDENTITY_DEACTIVATED: "Break-glass identity deactivated",
 };
 
 const AUDIT_SAFE_META_KEYS = new Set([
@@ -304,6 +312,10 @@ const AUDIT_SAFE_META_KEYS = new Set([
   "newExpiry",
   "authorityBasis",
   "accessLevel",
+  "isBreakGlass",
+  "endReason",
+  "startedAt",
+  "source",
   "reason",
   "action",
   "subjectName",

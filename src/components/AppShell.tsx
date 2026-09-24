@@ -32,6 +32,12 @@ export function AppShell({
     } catch {
       /* best effort */
     }
+    try {
+      const { auditMyBreakGlassLogout } = await import("@/lib/break-glass.functions");
+      await auditMyBreakGlassLogout();
+    } catch {
+      /* never trap logout */
+    }
     await supabase.auth.signOut();
     try {
       sessionStorage.removeItem("mh:ui-tenant-slug");

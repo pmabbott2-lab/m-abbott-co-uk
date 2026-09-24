@@ -33,7 +33,11 @@ export function PlatformAccessBanner({ tenantSlug }: { tenantSlug: string }) {
     >
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2">
         <div className="text-sm">
-          <p className="font-semibold tracking-wide">PLATFORM ACCESS</p>
+          <p className="font-semibold tracking-wide">
+            {access.basisLabel.toLowerCase().includes("break-glass")
+              ? "BREAK-GLASS PLATFORM ACCESS"
+              : "PLATFORM ACCESS"}
+          </p>
           <p>
             {access.companyName} · {access.basisLabel}
             {access.accessLevel === "read_only" ? " · Read only" : null}

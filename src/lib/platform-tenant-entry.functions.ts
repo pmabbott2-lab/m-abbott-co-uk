@@ -14,6 +14,9 @@ export const startPlatformTenantEntry = createServerFn({ method: "POST" })
       .object({
         companyCode: z.string().trim().regex(/^[0-9]{3}$/),
         confirmed: z.literal(true),
+        /** Required for break-glass GROUP entry (server enforces when classified). */
+        reason: z.string().trim().min(1).max(500).optional(),
+        emergencyConfirm: z.boolean().optional(),
       })
       .parse(d),
   )
@@ -22,6 +25,8 @@ export const startPlatformTenantEntry = createServerFn({ method: "POST" })
     return startPlatformTenantEntryImpl({
       userId: context.userId,
       companyCode: data.companyCode,
+      reason: data.reason,
+      emergencyConfirm: data.emergencyConfirm === true,
     });
   });
 

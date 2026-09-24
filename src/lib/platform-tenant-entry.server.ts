@@ -24,7 +24,10 @@ export class PlatformTenantEntryError extends Error {
     | "ENTRY_DENIED"
     | "SESSION_INVALID"
     | "TENANT_INACTIVE"
-    | "CROSS_TENANT";
+    | "CROSS_TENANT"
+    | "BREAK_GLASS_CONFIRM_REQUIRED"
+    | "BREAK_GLASS_REASON_REQUIRED"
+    | "BREAK_GLASS_AUDIT_REQUIRED";
   constructor(
     code: PlatformTenantEntryError["code"],
     message = "Platform tenant entry denied.",
@@ -190,6 +193,13 @@ export async function validatePlatformTenantAccessSession(input: {
   );
   if (!basisOk) return null;
 
+  const isBreakGlassSession = (session.reason ?? "").startsWith("break_glass:");
+  if (isBreakGlassSession) {
+    const { resolveBreakGlassStatus } = await import("@/lib/break-glass.server");
+    const bg = await resolveBreakGlassStatus(input.userId);
+    if (!bg.isBreakGlass) return null;
+  }
+
   const tenant = await loadTenant({ tenantId: input.tenantId });
   if (!tenant || tenant.status !== "active") return null;
 
@@ -203,7 +213,9 @@ export async function validatePlatformTenantAccessSession(input: {
     accessLevel: session.access_level,
     startedAt: session.started_at,
     expiresAt: session.expires_at,
-    basisLabel: platformAccessBasisLabel(session.authority_basis),
+    basisLabel: platformAccessBasisLabel(session.authority_basis, {
+      breakGlass: isBreakGlassSession,
+    }),
   };
 }
 
@@ -350,6 +362,8 @@ async function writeEntryAudit(
 export async function startPlatformTenantEntryImpl(input: {
   userId: string;
   companyCode: string;
+  reason?: string;
+  emergencyConfirm?: boolean;
 }): Promise<{
   sessionId: string;
   tenantSlug: string;
@@ -370,6 +384,11 @@ export async function startPlatformTenantEntryImpl(input: {
     throw new PlatformTenantEntryError("TENANT_INACTIVE", "Company is not available for entry.");
   }
 
+  const { resolveBreakGlassStatus, ensureBreakGlassPlatformSession, writeBreakGlassAuditBestEffort } =
+    await import("@/lib/break-glass.server");
+  const bg = await resolveBreakGlassStatus(userId);
+  const { BREAK_GLASS_G7D_MAX_HOURS } = await import("@/lib/break-glass");
+
   const authority = await resolveEntryAuthority(userId, tenant);
   if (!authority) {
     await writeEntryAudit("PLATFORM_TENANT_ENTRY_DENIED", {
@@ -379,9 +398,37 @@ export async function startPlatformTenantEntryImpl(input: {
         reason: "authority_denied",
         companyCode: tenant.company_code,
         tenantType: tenant.tenant_type,
+        isBreakGlass: bg.isBreakGlass,
       },
     });
     throw new PlatformTenantEntryError("ENTRY_DENIED");
+  }
+
+  // BG GROUP entry: mandatory emergency confirm + reason. EXTERNAL still denied via resolveEntryAuthority.
+  let sessionReason = authority.reason;
+  let maxHours = undefined as number | undefined;
+  if (bg.isBreakGlass && authority.basis === "super_owner_group_access") {
+    if (!input.emergencyConfirm) {
+      throw new PlatformTenantEntryError(
+        "BREAK_GLASS_CONFIRM_REQUIRED",
+        "Confirm emergency platform access to enter this company.",
+      );
+    }
+    const reason = (input.reason ?? "").trim();
+    if (reason.length < 1) {
+      throw new PlatformTenantEntryError(
+        "BREAK_GLASS_REASON_REQUIRED",
+        "A reason is required for break-glass emergency access.",
+      );
+    }
+    sessionReason = `break_glass:${reason}`.slice(0, 500);
+    maxHours = BREAK_GLASS_G7D_MAX_HOURS;
+    await ensureBreakGlassPlatformSession({
+      userId,
+      isBreakGlass: true,
+      isSuperOwner: true,
+      activity: "g7d_entry",
+    });
   }
 
   await endOpenSessionsForUser(userId);
@@ -404,7 +451,7 @@ export async function startPlatformTenantEntryImpl(input: {
       .maybeSingle();
     grantExpires = g?.expires_at ?? null;
   }
-  const expiresAt = computePlatformAccessExpiresAt(startedAt, grantExpires);
+  const expiresAt = computePlatformAccessExpiresAt(startedAt, grantExpires, maxHours);
 
   const { data: created, error } = await db
     .from("platform_tenant_access_sessions")
@@ -414,7 +461,7 @@ export async function startPlatformTenantEntryImpl(input: {
       authority_basis: authority.basis,
       access_level: authority.accessLevel,
       grant_id: authority.grantId,
-      reason: authority.reason,
+      reason: sessionReason,
       started_at: startedAt.toISOString(),
       expires_at: expiresAt.toISOString(),
     })
@@ -432,8 +479,39 @@ export async function startPlatformTenantEntryImpl(input: {
       slug: tenant.slug,
       authorityBasis: authority.basis,
       accessLevel: authority.accessLevel,
+      isBreakGlass: bg.isBreakGlass,
     },
   });
+
+  if (bg.isBreakGlass && authority.basis === "super_owner_group_access") {
+    const bgStart = await writeBreakGlassAuditBestEffort({
+      eventType: "BREAK_GLASS_TENANT_ENTRY_STARTED",
+      actingUserId: userId,
+      tenantId: tenant.id,
+      metadata: {
+        sessionId: created.id,
+        companyCode: tenant.company_code,
+        accessLevel: authority.accessLevel,
+        authorityBasis: authority.basis,
+        reason: (input.reason ?? "").trim().slice(0, 200),
+      },
+    });
+    // Higher-risk transition: fail closed if durable BG START audit cannot be written.
+    if (!bgStart.written) {
+      await db
+        .from("platform_tenant_access_sessions")
+        .update({
+          ended_at: new Date().toISOString(),
+          revoked_at: new Date().toISOString(),
+        })
+        .eq("id", created.id);
+      await clearAccessCookie();
+      throw new PlatformTenantEntryError(
+        "BREAK_GLASS_AUDIT_REQUIRED",
+        "Emergency company entry could not be recorded. Access was not granted.",
+      );
+    }
+  }
 
   return {
     sessionId: created.id as string,
@@ -451,7 +529,7 @@ export async function endPlatformTenantEntryImpl(userId: string): Promise<{ ok: 
   if (cookieId) {
     const { data: row } = await db
       .from("platform_tenant_access_sessions")
-      .select("id, tenant_id, authority_basis, access_level")
+      .select("id, tenant_id, authority_basis, access_level, reason")
       .eq("id", cookieId)
       .eq("platform_user_id", userId)
       .maybeSingle();
@@ -470,6 +548,30 @@ export async function endPlatformTenantEntryImpl(userId: string): Promise<{ ok: 
           accessLevel: row.access_level,
         },
       });
+      if ((row.reason ?? "").startsWith("break_glass:")) {
+        const { writeBreakGlassAuditBestEffort, ensureBreakGlassPlatformSession, resolveBreakGlassStatus } =
+          await import("@/lib/break-glass.server");
+        await writeBreakGlassAuditBestEffort({
+          eventType: "BREAK_GLASS_TENANT_ENTRY_ENDED",
+          actingUserId: userId,
+          tenantId: row.tenant_id,
+          metadata: {
+            sessionId: row.id,
+            endReason: "manual_exit",
+            authorityBasis: row.authority_basis,
+            accessLevel: row.access_level,
+          },
+        });
+        const bg = await resolveBreakGlassStatus(userId);
+        if (bg.isBreakGlass) {
+          await ensureBreakGlassPlatformSession({
+            userId,
+            isBreakGlass: true,
+            isSuperOwner: true,
+            activity: "g7d_exit",
+          });
+        }
+      }
     }
   }
   await endOpenSessionsForUser(userId);

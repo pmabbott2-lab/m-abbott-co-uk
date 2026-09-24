@@ -140,11 +140,23 @@ function EnterCompanyControl({ company }: { company: PlatformCompanyDetail }) {
   const navigate = useNavigate();
   const startFn = useServerFn(startPlatformTenantEntry);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [emergencyConfirm, setEmergencyConfirm] = useState(false);
+  const isBreakGlass = authority.isBreakGlass === true;
   const enter = useMutation({
     mutationFn: () =>
-      startFn({ data: { companyCode: company.companyCode, confirmed: true } }),
+      startFn({
+        data: {
+          companyCode: company.companyCode,
+          confirmed: true,
+          reason: isBreakGlass ? reason.trim() : undefined,
+          emergencyConfirm: isBreakGlass ? emergencyConfirm : undefined,
+        },
+      }),
     onSuccess: (res) => {
       setConfirmOpen(false);
+      setReason("");
+      setEmergencyConfirm(false);
       void navigate({
         to: "/$tenantSlug/workspace",
         params: { tenantSlug: res.tenantSlug },
@@ -177,6 +189,10 @@ function EnterCompanyControl({ company }: { company: PlatformCompanyDetail }) {
   // GROUP: Super Owner may enter; Super Admin entry requires grants (server enforces).
   if (!authority.canAccessPlatform) return null;
 
+  const canSubmit =
+    !enter.isPending &&
+    (!isBreakGlass || (emergencyConfirm && reason.trim().length > 0));
+
   return (
     <div className="space-y-2">
       <Button type="button" onClick={() => setConfirmOpen(true)}>
@@ -184,27 +200,58 @@ function EnterCompanyControl({ company }: { company: PlatformCompanyDetail }) {
       </Button>
       <p className="text-xs text-muted-foreground">
         Explicit audited platform entry. Does not create a tenant membership.
+        {isBreakGlass ? " Break-glass entry requires a reason and confirmation." : ""}
       </p>
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <Dialog
+        open={confirmOpen}
+        onOpenChange={(open) => {
+          setConfirmOpen(open);
+          if (!open) {
+            setReason("");
+            setEmergencyConfirm(false);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Enter {company.companyName}?</DialogTitle>
+            <DialogTitle>
+              {isBreakGlass ? "Emergency platform access" : `Enter ${company.companyName}?`}
+            </DialogTitle>
             <DialogDescription>
-              You are entering this company&apos;s operational environment using platform-level
-              authority. This access will be recorded in the platform audit log and will expire
-              automatically.
+              {isBreakGlass
+                ? `You are using break-glass emergency access to enter ${company.companyName}. This is recorded in the platform audit log and expires after 60 minutes.`
+                : "You are entering this company's operational environment using platform-level authority. This access will be recorded in the platform audit log and will expire automatically."}
             </DialogDescription>
           </DialogHeader>
+          {isBreakGlass ? (
+            <div className="space-y-3 py-2">
+              <label className="block space-y-1 text-sm">
+                <span className="font-medium">Reason for access</span>
+                <textarea
+                  className="min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  maxLength={500}
+                  required
+                />
+              </label>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={emergencyConfirm}
+                  onChange={(e) => setEmergencyConfirm(e.target.checked)}
+                />
+                <span>Confirm emergency access</span>
+              </label>
+            </div>
+          ) : null}
           <DialogFooter className="gap-2 sm:gap-0">
             <Button type="button" variant="outline" onClick={() => setConfirmOpen(false)}>
               Cancel
             </Button>
-            <Button
-              type="button"
-              disabled={enter.isPending}
-              onClick={() => enter.mutate()}
-            >
-              {enter.isPending ? "Entering…" : "Enter company"}
+            <Button type="button" disabled={!canSubmit} onClick={() => enter.mutate()}>
+              {enter.isPending ? "Entering…" : isBreakGlass ? "Confirm emergency access" : "Enter company"}
             </Button>
           </DialogFooter>
         </DialogContent>

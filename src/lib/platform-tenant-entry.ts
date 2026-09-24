@@ -46,7 +46,13 @@ export function isPlatformTenantAccessLevel(value: string): value is PlatformTen
   return (PLATFORM_TENANT_ACCESS_LEVELS as readonly string[]).includes(value);
 }
 
-export function platformAccessBasisLabel(basis: PlatformTenantAccessBasis): string {
+export function platformAccessBasisLabel(
+  basis: PlatformTenantAccessBasis,
+  opts?: { breakGlass?: boolean },
+): string {
+  if (opts?.breakGlass && basis === "super_owner_group_access") {
+    return "Break-glass emergency access";
+  }
   if (basis === "super_owner_group_access") return "Super Owner access";
   if (basis === "super_admin_grant") return "Platform administrator access";
   if (basis === "support_grant") return "Support access";
@@ -66,8 +72,10 @@ export function platformAccessAllowsRead(level: PlatformTenantAccessLevel): bool
 export function computePlatformAccessExpiresAt(
   startedAt: Date,
   grantExpiresAt?: string | null,
+  maxHours: number = PLATFORM_TENANT_ACCESS_MAX_HOURS,
 ): Date {
-  const absolute = new Date(startedAt.getTime() + PLATFORM_TENANT_ACCESS_MAX_HOURS * 60 * 60 * 1000);
+  const hours = Number.isFinite(maxHours) && maxHours > 0 ? maxHours : PLATFORM_TENANT_ACCESS_MAX_HOURS;
+  const absolute = new Date(startedAt.getTime() + hours * 60 * 60 * 1000);
   if (!grantExpiresAt) return absolute;
   const grant = new Date(grantExpiresAt);
   if (Number.isNaN(grant.getTime())) return absolute;
