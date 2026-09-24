@@ -209,6 +209,7 @@ export async function addPlatformAdministratorImpl(input: {
       "Explicit confirmation is required to grant Super Owner.",
     );
   }
+  // Future dual-control (separate gate): insert after confirmSuperOwner, before grant/invite.
 
   const existingUserId = await findAuthUserIdByEmail(email);
   const displayName = `${firstName} ${lastName}`.trim();
