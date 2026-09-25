@@ -195,9 +195,14 @@ export async function validatePlatformTenantAccessSession(input: {
 
   const isBreakGlassSession = (session.reason ?? "").startsWith("break_glass:");
   if (isBreakGlassSession) {
-    const { resolveBreakGlassStatus } = await import("@/lib/break-glass.server");
+    const { resolveBreakGlassStatus, isBreakGlassPlatformSessionActive } = await import(
+      "@/lib/break-glass.server"
+    );
     const bg = await resolveBreakGlassStatus(input.userId);
     if (!bg.isBreakGlass) return null;
+    // BG G7D must not outlive authoritative BG platform session (validation, not cleanup).
+    const platformActive = await isBreakGlassPlatformSessionActive(input.userId);
+    if (!platformActive) return null;
   }
 
   const tenant = await loadTenant({ tenantId: input.tenantId });
@@ -423,12 +428,18 @@ export async function startPlatformTenantEntryImpl(input: {
     }
     sessionReason = `break_glass:${reason}`.slice(0, 500);
     maxHours = BREAK_GLASS_G7D_MAX_HOURS;
-    await ensureBreakGlassPlatformSession({
+    const bgSession = await ensureBreakGlassPlatformSession({
       userId,
       isBreakGlass: true,
       isSuperOwner: true,
       activity: "g7d_entry",
     });
+    if (!bgSession.active) {
+      throw new PlatformTenantEntryError(
+        "BREAK_GLASS_SESSION_REQUIRED",
+        "Break-glass platform session is not active. Re-authenticate to continue emergency access.",
+      );
+    }
   }
 
   await endOpenSessionsForUser(userId);

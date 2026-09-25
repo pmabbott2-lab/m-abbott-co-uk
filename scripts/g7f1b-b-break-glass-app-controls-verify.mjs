@@ -69,8 +69,17 @@ ok("server_uses_rpc", bgRegistry.includes('is_active_break_glass'));
 ok("server_cookie_session", bgServer.includes("BREAK_GLASS_PLATFORM_SESSION_COOKIE"));
 ok("server_auth_bind", bgServer.includes("BREAK_GLASS_AUTH_BIND_COOKIE"));
 ok("server_no_new_migration", !existsSync(resolve(root, "supabase/migrations/20260924130000_gate_g7f1b_b")));
-ok("login_audit", bgServer.includes("BREAK_GLASS_LOGIN_SUCCEEDED"));
-ok("platform_access_audit", bgServer.includes("BREAK_GLASS_PLATFORM_ACCESS"));
+// G7F-1B-D1: LOGIN/PLATFORM_ACCESS dedup moved into ensure RPC (server-authoritative).
+const d1MigPath = "supabase/migrations/20260925091946_gate_g7f1b_d1_break_glass_server_sessions.sql";
+const d1Mig = existsSync(resolve(root, d1MigPath)) ? read(d1MigPath) : "";
+ok(
+  "login_audit",
+  bgServer.includes("BREAK_GLASS_LOGIN_SUCCEEDED") || d1Mig.includes("BREAK_GLASS_LOGIN_SUCCEEDED"),
+);
+ok(
+  "platform_access_audit",
+  bgServer.includes("BREAK_GLASS_PLATFORM_ACCESS") || d1Mig.includes("BREAK_GLASS_PLATFORM_ACCESS"),
+);
 ok("logout_audit", bgServer.includes("BREAK_GLASS_LOGOUT"));
 ok("logout_never_blocks", bgServer.includes("auditBreakGlassLogoutBestEffort"));
 ok("no_hardcoded_signing_secret", !bgServer.includes("mh-break-glass-dev-only") && bgServer.includes("break_glass_session_secret_unavailable"));
@@ -265,7 +274,13 @@ ok("functions_bridge_exists", existsSync(resolve(root, "src/lib/break-glass.func
 ok("authority_functions_bridge", existsSync(resolve(root, "src/lib/platform-authority.functions.ts")));
 
 ok("idle_uses_should_touch_helper", bgServer.includes("shouldTouchBreakGlassIdle"));
-ok("login_audit_fail_continues", bgServer.includes("do not block recovery") || bgServer.includes("Audit failure behaviour"));
+ok(
+  "login_audit_fail_continues",
+  bgServer.includes("do not block recovery") ||
+    bgServer.includes("Audit failure behaviour") ||
+    bgServer.includes("audits are written inside the ensure RPC") ||
+    d1Mig.includes("break_glass_platform_session"),
+);
 ok("logout_audit_fail_clears", bgServer.includes("never block Auth logout") || bgServer.includes("Logout audit must never block"));
 ok("auth_bind_blocks_same_iat", bgServer.includes("auth_bind_blocked"));
 
