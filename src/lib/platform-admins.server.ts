@@ -487,6 +487,23 @@ export async function revokePlatformAdministratorImpl(input: {
   if (!roles?.length) throw new PlatformAdminError("NOT_FOUND", "No platform role found.");
 
   for (const roleRow of roles as { id: string; role: PlatformRole }[]) {
+    if (roleRow.role === "super_admin") {
+      // G7F-2A: atomic DB cascade — soft-revoke grants + end SA G7D + delete role.
+      const { error: rpcErr } = await db.rpc("revoke_super_admin_role_cascade", {
+        p_actor_user_id: input.userId,
+        p_target_user_id: targetUserId,
+        p_reason: "platform_admin_revoke",
+      });
+      if (rpcErr) {
+        if (rpcErr.message?.includes("not_super_owner")) {
+          throw new PlatformAdminError("DENIED", "Super Owner required.");
+        }
+        throw new Error(rpcErr.message);
+      }
+      // Audit with counts is written atomically inside revoke_super_admin_role_cascade.
+      continue;
+    }
+
     if (roleRow.role === "super_owner") {
       const { count, error: cErr } = await db
         .from("platform_roles")
@@ -540,8 +557,6 @@ export async function revokePlatformAdministratorImpl(input: {
     });
   }
 
-  // G7E-2A: do not invent grant soft-revoke. Leftover grant rows (if any) are
-  // inert because helpers require is_super_admin(user) first.
   return { ok: true };
 }
 
@@ -887,10 +902,13 @@ export async function upsertSuperAdminTenantGrantImpl(input: {
 
   const result = (rpcResult ?? {}) as {
     outcome?: string;
+    grant_id?: string | null;
     old_access?: string | null;
     old_expiry?: string | null;
     new_access?: string | null;
     new_expiry?: string | null;
+    level_changed?: boolean;
+    g7d_ended_count?: number;
   };
   const outcome = result.outcome === "changed" ? "changed" : "created";
 
@@ -906,10 +924,16 @@ export async function upsertSuperAdminTenantGrantImpl(input: {
         action: "change_sa_grant",
         companyCode: tenant.company_code,
         tenantType: tenant.tenant_type,
+        grant_id: result.grant_id ?? null,
         oldAccess: accessLevelLabel(oldLevel),
         newAccess: accessLevelLabel(accessLevel),
+        old_access_level: result.old_access ?? null,
+        new_access_level: accessLevel,
         oldExpiry: result.old_expiry ?? "none",
         newExpiry: expiresAt ?? "none",
+        level_changed: result.level_changed === true,
+        g7d_ended: (result.g7d_ended_count ?? 0) > 0,
+        g7d_ended_count: result.g7d_ended_count ?? 0,
         reason: reason ?? "",
         subjectEmail: admin.email,
         subjectName: admin.fullName,
@@ -926,6 +950,7 @@ export async function upsertSuperAdminTenantGrantImpl(input: {
       action: "create_sa_grant",
       companyCode: tenant.company_code,
       tenantType: tenant.tenant_type,
+      grant_id: result.grant_id ?? null,
       newAccess: accessLevelLabel(accessLevel),
       newExpiry: expiresAt ?? "none",
       reason: reason ?? "",
@@ -961,35 +986,23 @@ export async function revokeSuperAdminTenantGrantImpl(input: {
     return { ok: true };
   }
 
-  const nowIso = new Date().toISOString();
-  const { error: updErr } = await db
-    .from("super_admin_tenant_access")
-    .update({
-      revoked_at: nowIso,
-      revoked_by: input.userId,
-      updated_at: nowIso,
-      updated_by: input.userId,
-    })
-    .eq("id", existing.id)
-    .is("revoked_at", null);
-  if (updErr) throw new Error(updErr.message);
-
-  await writeGrantAudit("SUPER_ADMIN_GRANT_REVOKED", {
-    actingUserId: input.userId,
-    subjectUserId: admin.userId,
-    tenantId: tenant.id,
-    metadata: {
-      action: "revoke_sa_grant",
-      companyCode: tenant.company_code,
-      tenantType: tenant.tenant_type,
-      oldAccess: accessLevelLabel(
-        isSuperAdminAccessLevel(existing.access_level as string)
-          ? (existing.access_level as SuperAdminAccessLevel)
-          : "platform_admin",
-      ),
-      subjectEmail: admin.email,
-      subjectName: admin.fullName,
-    },
+  // G7F-2A: atomic soft-revoke + end G7D bound to this grant_id.
+  const { error: rpcErr } = await db.rpc("revoke_super_admin_tenant_grant_cascade", {
+    p_actor_user_id: input.userId,
+    p_grant_id: existing.id,
+    p_reason: "sa_grant_revoke",
   });
+  if (rpcErr) {
+    const msg = rpcErr.message ?? "";
+    if (msg.includes("not_super_owner")) {
+      throw new PlatformAdminError("DENIED", "Super Owner required.");
+    }
+    if (msg.includes("grant_not_found")) {
+      return { ok: true };
+    }
+    throw new Error(msg);
+  }
+
+  // Authoritative SUPER_ADMIN_GRANT_REVOKED (with g7d_ended_count) written inside RPC.
   return { ok: true };
 }
