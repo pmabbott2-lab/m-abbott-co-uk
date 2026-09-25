@@ -2448,20 +2448,58 @@ export const listCustomersForAdmin = createServerFn({ method: "GET" })
       );
   });
 
+/**
+ * Trusted session → customer + tenant resolution for staff note access.
+ * Never trusts client-supplied tenant_id.
+ */
+export async function resolveInterviewSessionForStaffNoteAccess(sessionId: string): Promise<{
+  sessionId: string;
+  customerId: string;
+  tenantId: string;
+}> {
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+    "@/integrations/supabase/client.server"
+  );
+  const { data, error } = await supabaseAdmin
+    .from("interview_sessions")
+    .select("id, customer_id, tenant_id")
+    .eq("id", sessionId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const customerId = data?.customer_id?.trim() || "";
+  const tenantId = data?.tenant_id?.trim() || "";
+  if (!data?.id || !customerId || !tenantId) {
+    throw new Error("Forbidden");
+  }
+  return { sessionId: data.id, customerId, tenantId };
+}
+
 export const addAdvisorNote = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z.object({ sessionId: z.string().uuid(), note: z.string().min(1) }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
-      .from("advisor_notes")
-      .insert({ session_id: data.sessionId, advisor_id: context.userId, note: data.note });
+    // G7F-1B-D1-7A: authorize via G7D/membership helpers, then service-role write.
+    // Do not use context.supabase INSERT (advisor_notes RLS requires tenant_memberships).
+    const sess = await resolveInterviewSessionForStaffNoteAccess(data.sessionId);
+    await assertStaffCanAccessCustomer(context.userId, sess.customerId, { forMutation: true });
+
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    const { error } = await supabaseAdmin.from("advisor_notes").insert({
+      session_id: sess.sessionId,
+      tenant_id: sess.tenantId,
+      advisor_id: context.userId,
+      note: data.note,
+    });
     if (error) throw new Error(error.message);
     // Mirror the note into the contact timeline so the History tab shows
     // notes alongside contact events. Best-effort (pre-migration safe).
-    await appendContactLog(data.sessionId, context.userId, "note", data.note);
-    await clearSessionAttention(data.sessionId, context.userId, "note_added");
+    await appendContactLog(sess.sessionId, context.userId, "note", data.note);
+    await clearSessionAttention(sess.sessionId, context.userId, "note_added");
     return { ok: true };
   });
 
@@ -3283,10 +3321,18 @@ export const listNotes = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { data: notes, error } = await context.supabase
+    // G7F-1B-D1-7A: authorize then service-role SELECT scoped to session + tenant.
+    const sess = await resolveInterviewSessionForStaffNoteAccess(data.sessionId);
+    await assertStaffCanAccessCustomer(context.userId, sess.customerId);
+
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    const { data: notes, error } = await supabaseAdmin
       .from("advisor_notes")
       .select("*")
-      .eq("session_id", data.sessionId)
+      .eq("session_id", sess.sessionId)
+      .eq("tenant_id", sess.tenantId)
       .order("created_at", { ascending: true });
     if (error) throw new Error(error.message);
     return notes ?? [];
