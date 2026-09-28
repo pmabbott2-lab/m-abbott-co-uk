@@ -22,5 +22,7 @@ export const getMyPlatformAuthority = createServerFn({ method: "GET" })
       isSuperOwner: true,
       activity: "session_check",
     });
-    return withBreakGlassSession(view, session.active === true);
+    return withBreakGlassSession(view, session.active === true, {
+      mfaRequired: session.expiredReason === "mfa_required",
+    });
   });

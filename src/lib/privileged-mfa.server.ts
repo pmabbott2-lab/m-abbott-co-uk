@@ -16,8 +16,10 @@ import {
   evaluatePlatformAal2,
   isVerifiedAuthContext,
   parsePrivilegedMfaMode,
+  PRIVILEGED_MFA_ERROR_MESSAGES,
   privilegedMfaShouldDeny,
   type AuthAssuranceContext,
+  type PrivilegedMfaErrorCode,
   type PrivilegedMfaAction,
   type PrivilegedMfaEvaluation,
   type PrivilegedMfaMode,
@@ -26,14 +28,10 @@ import {
 import { getRequestAuthAssurance } from "@/lib/request-auth-context.server";
 
 export class PrivilegedMfaRequiredError extends Error {
-  readonly code: "PRIVILEGED_AAL_REQUIRED" | "PRIVILEGED_REAUTH_REQUIRED";
+  readonly code: PrivilegedMfaErrorCode;
   readonly reason: string | null;
-  constructor(code: PrivilegedMfaRequiredError["code"], reason: string | null) {
-    super(
-      code === "PRIVILEGED_REAUTH_REQUIRED"
-        ? "Re-verify with your authenticator app to continue."
-        : "Authenticator verification is required for platform administration.",
-    );
+  constructor(code: PrivilegedMfaErrorCode, reason: string | null) {
+    super(PRIVILEGED_MFA_ERROR_MESSAGES[code]);
     this.name = "PrivilegedMfaRequiredError";
     this.code = code;
     this.reason = reason;

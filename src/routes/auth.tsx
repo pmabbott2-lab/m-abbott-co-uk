@@ -18,6 +18,13 @@ import {
 import { setReferralCookie } from "@/lib/referral";
 import { getAuthCallbackUrl, getPasswordResetUrl, isLocalDev } from "@/lib/app-url";
 import { isLoginMfaSuspended } from "@/lib/auth-mfa-config";
+import {
+  completeTotpChallenge,
+  completeTotpEnrolment,
+  startTotpEnrolment,
+  totpQrImageSrc,
+  type PrivilegedMfaApi,
+} from "@/lib/privileged-mfa-flow";
 import { fetchUserRoles, requiresAuthenticatorMfa, requiresSmsLoginVerification } from "@/lib/auth-roles";
 import {
   buildHomePathAfterAuth,
@@ -51,6 +58,8 @@ import avatarImg from "@/assets/susan.png";
 import { CustomerAppointmentSignup } from "@/components/CustomerAppointmentSignup";
 
 type AuthMode = "signin" | "signup" | "forgot" | "phone" | "mfa-challenge" | "mfa-enroll" | "mfa-setup-required" | "sms-login-challenge";
+
+const mfaApi = supabase.auth.mfa as unknown as PrivilegedMfaApi;
 
 function isSupabaseMfaDisabledMessage(msg: string): boolean {
   return /mfa|totp|factor|not enabled|disabled|unavailable/i.test(msg);
@@ -492,35 +501,20 @@ function AuthPage() {
   };
 
   const maybePromptMfaEnrollment = async (): Promise<boolean> => {
-    const { data: factors, error: listErr } = await supabase.auth.mfa.listFactors();
-    if (listErr) {
-      console.error("mfa listFactors", listErr);
-      if (isSupabaseMfaDisabledMessage(listErr.message ?? "")) {
+    const started = await startTotpEnrolment(mfaApi, { friendlyName: "Authenticator app" });
+    if (started.kind === "already_configured") return false;
+    if (started.kind === "error") {
+      if (isSupabaseMfaDisabledMessage(started.message)) {
         showStaffMfaSetupRequired();
         return true;
       }
-      return false;
-    }
-    const hasVerified = (factors?.totp ?? []).some((f) => f.status === "verified");
-    if (hasVerified) return false;
-
-    const { data: enroll, error: enrollErr } = await supabase.auth.mfa.enroll({
-      factorType: "totp",
-      friendlyName: "Authenticator app",
-    });
-    if (enrollErr) {
-      const msg = enrollErr.message ?? "";
-      if (isSupabaseMfaDisabledMessage(msg)) {
-        showStaffMfaSetupRequired();
-        return true;
-      }
-      showStatus("error", msg || "Could not start authenticator setup.");
+      showStatus("error", started.message);
       return false;
     }
 
-    setMfaEnrollFactorId(enroll.id);
-    setMfaQrSvg(enroll.totp.qr_code);
-    setMfaSecret(enroll.totp.secret);
+    setMfaEnrollFactorId(started.factorId);
+    setMfaQrSvg(totpQrImageSrc(started.qrCode));
+    setMfaSecret(started.secret);
     setMfaTotpCode("");
     setMfaBlocking(true);
     setMode("mfa-enroll");
@@ -531,18 +525,18 @@ function AuthPage() {
     e.preventDefault();
     if (!mfaFactorId || !mfaChallengeId) return;
     const code = mfaTotpCode.trim();
-    if (!/^\d{6}$/.test(code)) {
-      showStatus("error", "Enter the 6-digit code from your authenticator app.");
-      return;
-    }
+    setMfaTotpCode("");
     setLoading(true);
     try {
-      const { error } = await supabase.auth.mfa.verify({
+      const result = await completeTotpChallenge(mfaApi, {
+        code,
         factorId: mfaFactorId,
         challengeId: mfaChallengeId,
-        code,
       });
-      if (error) throw error;
+      if (result.status !== "verified_aal2") {
+        showStatus("error", result.message);
+        return;
+      }
       const { data: sessionData } = await supabase.auth.getSession();
       await finishSignIn(sessionData.session);
     } catch (err) {
@@ -556,22 +550,16 @@ function AuthPage() {
     e.preventDefault();
     if (!mfaEnrollFactorId) return;
     const code = mfaTotpCode.trim();
-    if (!/^\d{6}$/.test(code)) {
-      showStatus("error", "Enter the 6-digit code from your authenticator app.");
-      return;
-    }
+    setMfaTotpCode("");
     setLoading(true);
     try {
-      const { data: challenge, error: chErr } = await supabase.auth.mfa.challenge({
-        factorId: mfaEnrollFactorId,
-      });
-      if (chErr) throw chErr;
-      const { error } = await supabase.auth.mfa.verify({
-        factorId: mfaEnrollFactorId,
-        challengeId: challenge.id,
-        code,
-      });
-      if (error) throw error;
+      const result = await completeTotpEnrolment(mfaApi, { factorId: mfaEnrollFactorId, code });
+      if (result.status !== "verified_aal2") {
+        showStatus("error", result.message);
+        return;
+      }
+      setMfaSecret(null);
+      setMfaQrSvg(null);
       toast.success("Authenticator app linked");
       const { data: sessionData } = await supabase.auth.getSession();
       await finishSignIn(sessionData.session);
@@ -1109,9 +1097,10 @@ function AuthPage() {
           {mode === "mfa-enroll" && (
             <form onSubmit={verifyMfaEnrollment} className="space-y-4">
               {mfaQrSvg && (
-                <div
-                  className="mx-auto w-48 h-48 rounded-lg border bg-white p-2 [&_svg]:w-full [&_svg]:h-full"
-                  dangerouslySetInnerHTML={{ __html: mfaQrSvg }}
+                <img
+                  src={mfaQrSvg}
+                  alt="Authenticator setup QR code"
+                  className="mx-auto w-48 h-48 rounded-lg border bg-white p-2"
                 />
               )}
               {mfaSecret && (

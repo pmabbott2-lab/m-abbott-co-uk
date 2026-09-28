@@ -296,3 +296,24 @@ export function platformPrivilegedMfaRequired(input: {
 export function privilegedMfaShouldDeny(mode: PrivilegedMfaMode, evaluation: PrivilegedMfaEvaluation): boolean {
   return mode === "enforce" && !evaluation.satisfied;
 }
+
+export type PrivilegedMfaErrorCode = "PRIVILEGED_AAL_REQUIRED" | "PRIVILEGED_REAUTH_REQUIRED";
+
+/**
+ * Server function errors reach the browser as message-only Errors (TanStack Start
+ * ShallowErrorPlugin), so the client classifies privileged MFA denials by exact message.
+ */
+export const PRIVILEGED_MFA_ERROR_MESSAGES: Readonly<Record<PrivilegedMfaErrorCode, string>> = {
+  PRIVILEGED_REAUTH_REQUIRED: "Re-verify with your authenticator app to continue.",
+  PRIVILEGED_AAL_REQUIRED: "Authenticator verification is required for platform administration.",
+};
+
+export function classifyPrivilegedMfaError(err: unknown): PrivilegedMfaErrorCode | null {
+  if (!err || typeof err !== "object") return null;
+  const code = (err as { code?: unknown }).code;
+  if (code === "PRIVILEGED_REAUTH_REQUIRED" || code === "PRIVILEGED_AAL_REQUIRED") return code;
+  const message = (err as { message?: unknown }).message;
+  if (message === PRIVILEGED_MFA_ERROR_MESSAGES.PRIVILEGED_REAUTH_REQUIRED) return "PRIVILEGED_REAUTH_REQUIRED";
+  if (message === PRIVILEGED_MFA_ERROR_MESSAGES.PRIVILEGED_AAL_REQUIRED) return "PRIVILEGED_AAL_REQUIRED";
+  return null;
+}

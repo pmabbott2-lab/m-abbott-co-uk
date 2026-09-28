@@ -7,6 +7,7 @@ import {
   resolvePlatformInvite,
 } from "@/lib/platform-admins.functions";
 import { platformRoleLabel } from "@/lib/platform-admins";
+import { PrivilegedStepUpProvider, useStepUpServerFn } from "@/components/platform/PrivilegedStepUp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,14 +31,22 @@ export const Route = createFileRoute("/platform-invite")({
       { name: "description", content: "Accept your Mortgage Hub platform administrator invitation." },
     ],
   }),
-  component: PlatformInvitePage,
+  component: PlatformInviteRoute,
 });
+
+function PlatformInviteRoute() {
+  return (
+    <PrivilegedStepUpProvider>
+      <PlatformInvitePage />
+    </PrivilegedStepUpProvider>
+  );
+}
 
 function PlatformInvitePage() {
   const navigate = useNavigate();
   const { token } = Route.useSearch();
   const resolveFn = useServerFn(resolvePlatformInvite);
-  const acceptFn = useServerFn(acceptPlatformInvite);
+  const acceptFn = useStepUpServerFn(useServerFn(acceptPlatformInvite));
 
   const [loading, setLoading] = useState(true);
   const [invite, setInvite] = useState<Resolved | null>(null);

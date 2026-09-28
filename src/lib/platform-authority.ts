@@ -33,6 +33,8 @@ export type PlatformAuthorityView = {
   isBreakGlass: boolean;
   /** Server BG session cookie valid (absolute + idle). False when not BG. */
   breakGlassSessionActive: boolean;
+  /** BG session refused only because privileged MFA (enforce mode) is unsatisfied. */
+  breakGlassMfaRequired?: boolean;
   canAccessPlatform: boolean;
   canListPlatformTenants: boolean;
   canCreateCompany: boolean;
@@ -90,11 +92,16 @@ export function resolvePlatformAuthorityFromRoles(input: {
 export function withBreakGlassSession(
   view: PlatformAuthorityView,
   sessionActive: boolean,
+  opts?: { mfaRequired?: boolean },
 ): PlatformAuthorityView {
+  const { breakGlassMfaRequired: _stale, ...base } = view;
   if (!view.isBreakGlass) {
-    return { ...view, breakGlassSessionActive: false };
+    return { ...base, breakGlassSessionActive: false };
   }
-  return { ...view, breakGlassSessionActive: sessionActive };
+  if (sessionActive || opts?.mfaRequired !== true) {
+    return { ...base, breakGlassSessionActive: sessionActive };
+  }
+  return { ...base, breakGlassSessionActive: false, breakGlassMfaRequired: true };
 }
 
 export function superAdminGrantAllowsVisibility(

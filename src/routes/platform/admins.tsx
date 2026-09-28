@@ -20,6 +20,7 @@ import {
   type SuperAdminTenantGrantRow,
 } from "@/lib/platform-admins";
 import { usePlatformAuthority } from "@/lib/platform-ui";
+import { useStepUpServerFn } from "@/components/platform/PrivilegedStepUp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -72,9 +73,9 @@ function PlatformAdminsPage() {
   const authority = usePlatformAuthority();
   const isSuperOwner = Boolean(authority?.isSuperOwner);
   const listFn = useServerFn(listPlatformAdmins);
-  const addFn = useServerFn(addPlatformAdministrator);
+  const addFn = useStepUpServerFn(useServerFn(addPlatformAdministrator));
   const cancelFn = useServerFn(cancelPlatformAdminInvite);
-  const revokeFn = useServerFn(revokePlatformAdministrator);
+  const revokeFn = useStepUpServerFn(useServerFn(revokePlatformAdministrator));
   const qc = useQueryClient();
 
   const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
@@ -436,7 +437,7 @@ function expiryPresetToIso(
 
 function SuperAdminTenantAccessPanel({ adminEmail }: { adminEmail: string }) {
   const listFn = useServerFn(listSuperAdminTenantGrants);
-  const upsertFn = useServerFn(upsertSuperAdminTenantGrant);
+  const upsertFn = useStepUpServerFn(useServerFn(upsertSuperAdminTenantGrant));
   const qc = useQueryClient();
   const grantsQ = useQuery({
     queryKey: ["sa-tenant-grants", adminEmail],

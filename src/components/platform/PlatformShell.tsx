@@ -8,6 +8,10 @@ import { auditMyBreakGlassLogout, touchBreakGlassPlatformSession } from "@/lib/b
 import { getMyPlatformAuthority } from "@/lib/platform-authority.functions";
 import { isPlatformNavActive, PLATFORM_NAV_ITEMS } from "@/lib/platform-dashboard";
 import { PlatformAuthorityProvider, usePlatformAuthority } from "@/lib/platform-ui";
+import { PRIVILEGED_MFA_SETUP_PATH } from "@/lib/privileged-mfa-flow";
+import { getMyPrivilegedMfaStatus } from "@/lib/privileged-mfa-status.functions";
+import { PrivilegedMfaPanel } from "@/components/platform/PrivilegedMfaPanel";
+import { PrivilegedStepUpProvider } from "@/components/platform/PrivilegedStepUp";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -58,6 +62,53 @@ function BreakGlassSessionExpired() {
 }
 
 /**
+ * Enforce mode only: the BG platform session is not opened until a fresh authenticator
+ * check. Offers the same TOTP check (no SMS / email / bypass) instead of signing out.
+ */
+function BreakGlassMfaRequired({ onVerified }: { onVerified: () => Promise<unknown> }) {
+  const navigate = useNavigate();
+  const logoutAuditFn = useServerFn(auditMyBreakGlassLogout);
+  const [phase, setPhase] = useState<"verify" | "opening" | "failed">("verify");
+
+  const signOut = () => {
+    void (async () => {
+      try {
+        await logoutAuditFn();
+      } catch {
+        /* logout must proceed */
+      }
+      await supabase.auth.signOut({ scope: "local" });
+      void navigate({ to: "/auth", replace: true });
+    })();
+  };
+
+  return (
+    <div className="mx-auto flex min-h-screen max-w-lg flex-col justify-center space-y-4 px-4">
+      <h1 className="text-2xl font-semibold">Break-glass verification required</h1>
+      {phase === "failed" ? (
+        <p className="text-sm text-destructive">
+          The break-glass session could not be opened for this sign-in. Sign out and sign in again.
+        </p>
+      ) : phase === "opening" ? (
+        <p className="text-sm text-muted-foreground">Opening break-glass session…</p>
+      ) : (
+        <PrivilegedMfaPanel
+          purpose="step-up"
+          stepUpReason="PRIVILEGED_REAUTH_REQUIRED"
+          onSatisfied={() => {
+            setPhase("opening");
+            void onVerified().finally(() => setPhase("failed"));
+          }}
+        />
+      )}
+      <Button type="button" variant="outline" onClick={signOut} className="w-fit">
+        Sign out
+      </Button>
+    </div>
+  );
+}
+
+/**
  * Session + platform_roles gate. Does not use tenant membership.
  * Independent of the tenant authenticated membership gate.
  */
@@ -102,6 +153,9 @@ export function PlatformAuthenticatedGate({ children }: { children: ReactNode })
   }
 
   if (authorityQ.data.isBreakGlass && !authorityQ.data.breakGlassSessionActive) {
+    if (authorityQ.data.breakGlassMfaRequired === true) {
+      return <BreakGlassMfaRequired onVerified={() => authorityQ.refetch()} />;
+    }
     return <BreakGlassSessionExpired />;
   }
 
@@ -134,6 +188,32 @@ function BreakGlassPlatformBanner() {
       </div>
     </div>
   );
+}
+
+/**
+ * Sends a privileged user to /platform/security only when the server reports enforce mode
+ * and the verified session is not aal2. Disabled / audit modes never redirect or block.
+ */
+function PrivilegedMfaEnforcementRedirect({ pathname }: { pathname: string }) {
+  const navigate = useNavigate();
+  const statusFn = useServerFn(getMyPrivilegedMfaStatus);
+  const statusQ = useQuery({
+    queryKey: ["privileged-mfa-status"],
+    queryFn: () => statusFn(),
+    refetchInterval: 60_000,
+  });
+  const blocked = statusQ.data?.continuationBlocked === true;
+
+  useEffect(() => {
+    if (!blocked || pathname === PRIVILEGED_MFA_SETUP_PATH) return;
+    void navigate({
+      to: PRIVILEGED_MFA_SETUP_PATH,
+      search: { redirect: pathname },
+      replace: true,
+    });
+  }, [blocked, pathname, navigate]);
+
+  return null;
 }
 
 export function PlatformShell({ children }: { children: ReactNode }) {
@@ -194,9 +274,14 @@ export function PlatformShell({ children }: { children: ReactNode }) {
                 </p>
               ) : null}
             </div>
-            <Button variant="outline" size="sm" type="button" onClick={signOut} className="w-fit">
-              Sign out
-            </Button>
+            <div className="flex gap-2">
+              <Button asChild variant="ghost" size="sm" className="w-fit">
+                <Link to={PRIVILEGED_MFA_SETUP_PATH}>Security</Link>
+              </Button>
+              <Button variant="outline" size="sm" type="button" onClick={signOut} className="w-fit">
+                Sign out
+              </Button>
+            </div>
           </div>
           <nav className="flex flex-wrap gap-2" aria-label="Platform">
             {PLATFORM_NAV_ITEMS.map((item) => {
@@ -219,7 +304,10 @@ export function PlatformShell({ children }: { children: ReactNode }) {
           </nav>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">{children}</main>
+      <PrivilegedMfaEnforcementRedirect pathname={pathname} />
+      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+        <PrivilegedStepUpProvider>{children}</PrivilegedStepUpProvider>
+      </main>
     </div>
   );
 }

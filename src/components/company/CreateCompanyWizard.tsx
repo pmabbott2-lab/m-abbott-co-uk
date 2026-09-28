@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useStepUpServerFn } from "@/components/platform/PrivilegedStepUp";
 import {
   canAccessPlatformCompanies,
   listPlatformCompanies,
@@ -41,7 +42,7 @@ const STEPS = [
 export function CreateCompanyWizard({ cancelTo = "/home" }: { cancelTo?: "/home" | "/platform" }) {
   const accessFn = useServerFn(canAccessPlatformCompanies);
   const listFn = useServerFn(listPlatformCompanies);
-  const provisionFn = useServerFn(provisionCompany);
+  const provisionFn = useStepUpServerFn(useServerFn(provisionCompany));
 
   const accessQ = useQuery({
     queryKey: ["platform-companies-access"],

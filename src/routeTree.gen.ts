@@ -20,6 +20,7 @@ import { Route as PlatformIndexRouteImport } from './routes/platform/index'
 import { Route as TenantSlugIndexRouteImport } from './routes/$tenantSlug/index'
 import { Route as RafCodeRouteImport } from './routes/raf.$code'
 import { Route as PlatformTenantsRouteImport } from './routes/platform/tenants'
+import { Route as PlatformSecurityRouteImport } from './routes/platform/security'
 import { Route as PlatformCompaniesRouteImport } from './routes/platform/companies'
 import { Route as PlatformAuditRouteImport } from './routes/platform/audit'
 import { Route as PlatformAdminsRouteImport } from './routes/platform/admins'
@@ -126,6 +127,11 @@ const RafCodeRoute = RafCodeRouteImport.update({
 const PlatformTenantsRoute = PlatformTenantsRouteImport.update({
   id: '/tenants',
   path: '/tenants',
+  getParentRoute: () => PlatformRouteRoute,
+} as any)
+const PlatformSecurityRoute = PlatformSecurityRouteImport.update({
+  id: '/security',
+  path: '/security',
   getParentRoute: () => PlatformRouteRoute,
 } as any)
 const PlatformCompaniesRoute = PlatformCompaniesRouteImport.update({
@@ -444,6 +450,7 @@ export interface FileRoutesByFullPath {
   '/platform/admins': typeof PlatformAdminsRoute
   '/platform/audit': typeof PlatformAuditRoute
   '/platform/companies': typeof PlatformCompaniesRouteWithChildren
+  '/platform/security': typeof PlatformSecurityRoute
   '/platform/tenants': typeof PlatformTenantsRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug/': typeof TenantSlugIndexRoute
@@ -506,6 +513,7 @@ export interface FileRoutesByTo {
   '/go/$slug': typeof GoSlugRoute
   '/platform/admins': typeof PlatformAdminsRoute
   '/platform/audit': typeof PlatformAuditRoute
+  '/platform/security': typeof PlatformSecurityRoute
   '/platform/tenants': typeof PlatformTenantsRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug': typeof TenantSlugIndexRoute
@@ -573,6 +581,7 @@ export interface FileRoutesById {
   '/platform/admins': typeof PlatformAdminsRoute
   '/platform/audit': typeof PlatformAuditRoute
   '/platform/companies': typeof PlatformCompaniesRouteWithChildren
+  '/platform/security': typeof PlatformSecurityRoute
   '/platform/tenants': typeof PlatformTenantsRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug/': typeof TenantSlugIndexRoute
@@ -640,6 +649,7 @@ export interface FileRouteTypes {
     | '/platform/admins'
     | '/platform/audit'
     | '/platform/companies'
+    | '/platform/security'
     | '/platform/tenants'
     | '/raf/$code'
     | '/$tenantSlug/'
@@ -702,6 +712,7 @@ export interface FileRouteTypes {
     | '/go/$slug'
     | '/platform/admins'
     | '/platform/audit'
+    | '/platform/security'
     | '/platform/tenants'
     | '/raf/$code'
     | '/$tenantSlug'
@@ -768,6 +779,7 @@ export interface FileRouteTypes {
     | '/platform/admins'
     | '/platform/audit'
     | '/platform/companies'
+    | '/platform/security'
     | '/platform/tenants'
     | '/raf/$code'
     | '/$tenantSlug/'
@@ -911,6 +923,13 @@ declare module '@tanstack/react-router' {
       path: '/tenants'
       fullPath: '/platform/tenants'
       preLoaderRoute: typeof PlatformTenantsRouteImport
+      parentRoute: typeof PlatformRouteRoute
+    }
+    '/platform/security': {
+      id: '/platform/security'
+      path: '/security'
+      fullPath: '/platform/security'
+      preLoaderRoute: typeof PlatformSecurityRouteImport
       parentRoute: typeof PlatformRouteRoute
     }
     '/platform/companies': {
@@ -1379,6 +1398,7 @@ interface PlatformRouteRouteChildren {
   PlatformAdminsRoute: typeof PlatformAdminsRoute
   PlatformAuditRoute: typeof PlatformAuditRoute
   PlatformCompaniesRoute: typeof PlatformCompaniesRouteWithChildren
+  PlatformSecurityRoute: typeof PlatformSecurityRoute
   PlatformTenantsRoute: typeof PlatformTenantsRoute
   PlatformIndexRoute: typeof PlatformIndexRoute
 }
@@ -1387,6 +1407,7 @@ const PlatformRouteRouteChildren: PlatformRouteRouteChildren = {
   PlatformAdminsRoute: PlatformAdminsRoute,
   PlatformAuditRoute: PlatformAuditRoute,
   PlatformCompaniesRoute: PlatformCompaniesRouteWithChildren,
+  PlatformSecurityRoute: PlatformSecurityRoute,
   PlatformTenantsRoute: PlatformTenantsRoute,
   PlatformIndexRoute: PlatformIndexRoute,
 }

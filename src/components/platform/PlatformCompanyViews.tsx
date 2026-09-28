@@ -32,6 +32,7 @@ import {
 } from "@/lib/platform-tenant-owners.functions";
 import { startPlatformTenantEntry } from "@/lib/platform-tenant-entry.functions";
 import { usePlatformAuthority } from "@/lib/platform-ui";
+import { useStepUpServerFn } from "@/components/platform/PrivilegedStepUp";
 import { toast } from "sonner";
 
 export function PlatformStatCards({ overview }: { overview: PlatformDashboardOverview }) {
@@ -138,7 +139,7 @@ export function PlatformCompanyTable({
 function EnterCompanyControl({ company }: { company: PlatformCompanyDetail }) {
   const authority = usePlatformAuthority();
   const navigate = useNavigate();
-  const startFn = useServerFn(startPlatformTenantEntry);
+  const startFn = useStepUpServerFn(useServerFn(startPlatformTenantEntry));
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [emergencyConfirm, setEmergencyConfirm] = useState(false);
@@ -342,8 +343,8 @@ function CompanyOwnersPanel({
   const authority = usePlatformAuthority();
   const queryClient = useQueryClient();
   const listFn = useServerFn(listPlatformCompanyOwners);
-  const addFn = useServerFn(addPlatformTenantOwner);
-  const removeFn = useServerFn(removePlatformTenantOwner);
+  const addFn = useStepUpServerFn(useServerFn(addPlatformTenantOwner));
+  const removeFn = useStepUpServerFn(useServerFn(removePlatformTenantOwner));
   const cancelFn = useServerFn(cancelPlatformOwnerInvite);
   const [addOpen, setAddOpen] = useState(false);
   const [firstName, setFirstName] = useState("");
