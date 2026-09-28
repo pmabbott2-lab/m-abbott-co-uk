@@ -3,8 +3,10 @@ import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import type { PrivilegedMfaErrorCode } from "@/lib/privileged-mfa";
 import {
+  canOfferPrivilegedReverify,
   completeTotpChallenge,
   completeTotpEnrolment,
+  describeServerMfaFreshness,
   loadTotpFactors,
   startTotpEnrolment,
   totpQrImageSrc,
@@ -54,8 +56,9 @@ export function PrivilegedMfaPanel({ purpose, stepUpReason, onSatisfied, onCance
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [verifiedNow, setVerifiedNow] = useState(false);
+  const [reverifying, setReverifying] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<PrivilegedMfaStatus | null> => {
     setLoadError(null);
     const [loaded, serverStatus] = await Promise.all([
       loadTotpFactors(api),
@@ -63,10 +66,11 @@ export function PrivilegedMfaPanel({ purpose, stepUpReason, onSatisfied, onCance
     ]);
     if (!loaded.ok) {
       setLoadError(loaded.message);
-      return;
+      return null;
     }
     setFactors({ verified: loaded.verified, unverified: loaded.unverified });
     setStatus(serverStatus);
+    return serverStatus;
   }, [api, statusFn]);
 
   useEffect(() => {
@@ -114,11 +118,18 @@ export function PrivilegedMfaPanel({ purpose, stepUpReason, onSatisfied, onCance
 
   const onResult = async (result: CompleteFlowResult, kind: "enrolled" | "verified") => {
     if (result.status === "verified_aal2") {
+      const wasReverify = reverifying;
       setPending(null);
       setVerifiedNow(true);
+      setReverifying(false);
       report(kind, result.factorId);
-      await refresh();
-      onSatisfied?.();
+      const latest = await refresh();
+      if (wasReverify && latest?.recentMfaAgeSec == null) {
+        setMessage(
+          "Your code was accepted, but the server still reports your previous authenticator check. A fresh check has not been recorded.",
+        );
+      }
+      if (!wasReverify) onSatisfied?.();
       return;
     }
     if (result.stage === "verify") report("challenge_failed");
@@ -162,8 +173,18 @@ export function PrivilegedMfaPanel({ purpose, stepUpReason, onSatisfied, onCance
 
   const configured = factors.verified.length > 0;
   const sessionAal2 = status?.claimsVerified === true && status.aal === "aal2";
-  const manageSatisfied = purpose === "manage" && configured && !pending && (sessionAal2 || verifiedNow);
+  const reverifyOffered = canOfferPrivilegedReverify({
+    purpose,
+    privilegedMfaRequired: status?.privilegedMfaRequired === true,
+    verifiedFactorCount: factors.verified.length,
+    status,
+    enrolmentPending: Boolean(pending),
+  });
+  const reverifyActive = reverifying && reverifyOffered;
+  const manageSatisfied =
+    purpose === "manage" && configured && !pending && !reverifyActive && (sessionAal2 || verifiedNow);
   const showCodeForm = Boolean(pending) || (configured && !manageSatisfied);
+  const freshnessLabel = purpose === "manage" ? describeServerMfaFreshness(status) : null;
 
   return (
     <div className="space-y-4 text-sm">
@@ -223,10 +244,33 @@ export function PrivilegedMfaPanel({ purpose, stepUpReason, onSatisfied, onCance
             ))}
           </ul>
           <p className="text-muted-foreground">
-            {manageSatisfied
+            {manageSatisfied || reverifyActive
               ? "This session is verified with your authenticator app."
               : "This session has not been verified with your authenticator app yet."}
           </p>
+          {freshnessLabel ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-muted-foreground">{freshnessLabel}</p>
+              <Button type="button" variant="ghost" size="sm" onClick={() => void refresh()} disabled={busy}>
+                Refresh
+              </Button>
+            </div>
+          ) : null}
+          {reverifyOffered && !reverifyActive ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setMessage(null);
+                setCode("");
+                setReverifying(true);
+              }}
+              disabled={busy}
+            >
+              Verify again now
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
@@ -249,6 +293,18 @@ export function PrivilegedMfaPanel({ purpose, stepUpReason, onSatisfied, onCance
             </Button>
             {onCancel ? (
               <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+                Cancel
+              </Button>
+            ) : reverifyActive ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setCode("");
+                  setReverifying(false);
+                }}
+                disabled={busy}
+              >
                 Cancel
               </Button>
             ) : null}

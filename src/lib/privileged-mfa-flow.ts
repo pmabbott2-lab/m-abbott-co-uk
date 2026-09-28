@@ -14,7 +14,11 @@
  * so at most one pending factor exists. Verified factors are never removed here, and
  * setup is refused (already_configured) while any verified TOTP factor exists.
  */
-import { classifyPrivilegedMfaError, type PrivilegedMfaErrorCode } from "@/lib/privileged-mfa";
+import {
+  classifyPrivilegedMfaError,
+  PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC,
+  type PrivilegedMfaErrorCode,
+} from "@/lib/privileged-mfa";
 
 export const PRIVILEGED_TOTP_FRIENDLY_NAME = "Mortgage Hub platform";
 export const TOTP_CODE_PATTERN = /^\d{6}$/;
@@ -95,6 +99,45 @@ export function safePlatformRedirect(raw: unknown): string | null {
   if (value.includes("//") || value.includes("..")) return null;
   if (value === PRIVILEGED_MFA_SETUP_PATH || value.startsWith(`${PRIVILEGED_MFA_SETUP_PATH}/`)) return null;
   return value;
+}
+
+export type ServerMfaFreshness = {
+  claimsVerified: boolean;
+  aal: string | null;
+  recentMfaAgeSec: number | null;
+};
+
+/**
+ * Label derived only from the server status (getClaims-verified TOTP AMR age). Browser-side
+ * verify() results never feed this, so the display cannot claim freshness the server has not seen.
+ */
+export function describeServerMfaFreshness(status: ServerMfaFreshness | null | undefined): string | null {
+  if (!status || status.claimsVerified !== true || status.aal !== "aal2") return null;
+  const age = status.recentMfaAgeSec;
+  if (typeof age !== "number" || !Number.isFinite(age) || age < 0) {
+    return `Last authenticator check: more than ${Math.round(PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.platformAuthorityChange / 60)} minutes ago`;
+  }
+  if (age < 60) return `Last authenticator check: ${age} second${age === 1 ? "" : "s"} ago`;
+  const minutes = Math.floor(age / 60);
+  return `Last authenticator check: ${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+}
+
+/** "Verify again now": privileged, verified TOTP factor, server-verified aal2 session, manage page only. */
+export function canOfferPrivilegedReverify(input: {
+  purpose: "manage" | "step-up";
+  privilegedMfaRequired: boolean;
+  verifiedFactorCount: number;
+  status: Pick<ServerMfaFreshness, "claimsVerified" | "aal"> | null | undefined;
+  enrolmentPending: boolean;
+}): boolean {
+  return (
+    input.purpose === "manage" &&
+    input.privilegedMfaRequired === true &&
+    input.verifiedFactorCount > 0 &&
+    input.status?.claimsVerified === true &&
+    input.status.aal === "aal2" &&
+    !input.enrolmentPending
+  );
 }
 
 export type PrivilegedMfaStep = "not_required" | "setup" | "challenge" | "satisfied";

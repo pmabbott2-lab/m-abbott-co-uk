@@ -479,8 +479,9 @@ ok("TEST_24_audit_mode_non_blocking", auditStatus.mode === "audit" && !auditStat
   );
 }
 {
-  const authDiff = git("diff -U0 HEAD -- src/lib/platform-authority.ts").split("\n").filter((l) => /^[+-][^+-]/.test(l));
-  const entryDiff = git("diff --stat HEAD -- src/lib/platform-tenant-entry.server.ts src/lib/platform-tenant-entry.functions.ts");
+  const PRE_B1 = "7e773365e54537bb7dbfdb297e7a8cc2f37f1943";
+  const authDiff = git(`diff -U0 ${PRE_B1} -- src/lib/platform-authority.ts`).split("\n").filter((l) => /^[+-][^+-]/.test(l));
+  const entryDiff = git(`diff --stat ${PRE_B1} -- src/lib/platform-tenant-entry.server.ts src/lib/platform-tenant-entry.functions.ts`);
   ok(
     "TEST_28_group_external_boundary_unchanged",
     entryDiff.trim() === "" && authDiff.length > 0 && authDiff.every((l) => !/GROUP|EXTERNAL|TenantType|canAdminister|canAccessTenantData|superAdminGrant|supportScope/.test(l)),
@@ -629,6 +630,160 @@ ok(
   ok(
     "SDK_client_aal_decodes_local_jwt_not_authoritative",
     /_getAuthenticatorAssuranceLevel\(jwt\)[\s\S]{0,400}decodeJWT\(jwt\)/.test(client),
+  );
+}
+
+// ---- G7F-3B2 "Verify again now" (re-verification without a business mutation) ----
+{
+  const aal2Status = { claimsVerified: true, aal: "aal2" };
+  const offer = (over = {}) =>
+    flow.canOfferPrivilegedReverify({
+      purpose: "manage",
+      privilegedMfaRequired: true,
+      verifiedFactorCount: 1,
+      status: aal2Status,
+      enrolmentPending: false,
+      ...over,
+    });
+  const renderBlock = panelSrc.slice(panelSrc.indexOf("const reverifyOffered"), panelSrc.indexOf("{showCodeForm ? ("));
+  const openBtn = panelSrc.slice(panelSrc.lastIndexOf("<Button", panelSrc.indexOf("Verify again now")), panelSrc.indexOf("Verify again now"));
+  const submit = panelSrc.slice(panelSrc.indexOf("const submitCode"), panelSrc.indexOf("if (loadError)"));
+  const onResultSrc = panelSrc.slice(panelSrc.indexOf("const onResult"), panelSrc.indexOf("const submitCode"));
+
+  ok(
+    "REVERIFY_TEST_1_configured_aal2_privileged_sees_control",
+    offer() && /\{reverifyOffered && !reverifyActive \? \(/.test(panelSrc) && /Verify again now/.test(panelSrc) &&
+      /privilegedMfaRequired: status\?\.privilegedMfaRequired === true/.test(renderBlock) &&
+      /verifiedFactorCount: factors\.verified\.length/.test(renderBlock),
+  );
+  ok(
+    "REVERIFY_TEST_2_zero_factor_no_reverify",
+    !offer({ verifiedFactorCount: 0 }) && !offer({ privilegedMfaRequired: false }) && !offer({ purpose: "step-up" }) &&
+      !offer({ status: { claimsVerified: true, aal: "aal1" } }) && !offer({ status: null }) && !offer({ enrolmentPending: true }),
+  );
+  {
+    const { api } = mockMfa({ factors: [U(FACTOR_U1)], aal: "aal2" });
+    const loaded = await flow.loadTotpFactors(api);
+    ok("REVERIFY_TEST_3_unverified_only_no_reverify", loaded.ok && !offer({ verifiedFactorCount: loaded.verified.length }));
+  }
+  const rv = mockMfa({ factors: [V()], aal: "aal2" });
+  const rvResult = await flow.completeTotpChallenge(rv.api, { code: SYNTH_CODE, serverConfirm: serverAal2 });
+  ok(
+    "REVERIFY_TEST_4_reverify_does_not_enrol",
+    rvResult.status === "verified_aal2" && !rv.state.calls.some((c) => c.startsWith("enroll")) &&
+      !/startTotpEnrolment|beginSetup|enroll\(/.test(openBtn) &&
+      /\} else \{\s*await onResult\(await completeTotpChallenge\(api, \{ code: entered, serverConfirm \}\), "verified"\);/.test(submit),
+  );
+  ok(
+    "REVERIFY_TEST_5_challenges_existing_verified_factor",
+    rv.state.calls.includes(`challenge:${FACTOR_V}`) && rv.state.calls.includes(`verify:${FACTOR_V}`) &&
+      rvResult.factorId === FACTOR_V && rv.state.factors.length === 1 && rv.state.factors[0].status === "verified",
+  );
+  ok(
+    "REVERIFY_TEST_6_code_not_persisted",
+    !JSON.stringify(rvResult).includes(SYNTH_CODE) && /setCode\(""\);\s*setReverifying\(true\);/.test(panelSrc) &&
+      /setCode\(""\);\s*setReverifying\(false\);/.test(panelSrc) && /const entered = code;\s*setCode\(""\);/.test(submit) &&
+      !/localStorage|sessionStorage|console\./.test(panelSrc),
+  );
+  {
+    const { api } = mockMfa({ factors: [V()], aal: "aal2" });
+    const clientOnly = await flow.completeTotpChallenge(api, { code: SYNTH_CODE, serverConfirm: serverAal1 });
+    const noClaims = await flow.completeTotpChallenge(mockMfa({ factors: [V()], aal: "aal2" }).api, {
+      code: SYNTH_CODE,
+      serverConfirm: async () => ({ claimsVerified: false, aal: "aal2" }),
+    });
+    ok(
+      "REVERIFY_TEST_7_server_aal2_confirmation_required",
+      clientOnly.status === "failed" && clientOnly.stage === "aal2" && noClaims.status === "failed" && noClaims.stage === "aal2",
+    );
+  }
+  resetNet({ so: true });
+  const freshStatus = await status(verified({ amr: [{ method: "password", timestamp: NOW - 3600 }, { method: "totp", timestamp: NOW - 42 }] }));
+  const staleStatus = await status(verified({ amr: [{ method: "password", timestamp: NOW - 3600 }, { method: "totp", timestamp: NOW - 900 }] }));
+  ok(
+    "REVERIFY_TEST_8_freshness_from_server_status",
+    freshStatus.recentMfaAgeSec >= 42 && freshStatus.recentMfaAgeSec < 55 &&
+      flow.describeServerMfaFreshness(freshStatus) === `Last authenticator check: ${freshStatus.recentMfaAgeSec} seconds ago` &&
+      flow.describeServerMfaFreshness({ claimsVerified: true, aal: "aal2", recentMfaAgeSec: 42 }) === "Last authenticator check: 42 seconds ago" &&
+      staleStatus.recentMfaAgeSec === null && flow.describeServerMfaFreshness(staleStatus) === "Last authenticator check: more than 5 minutes ago" &&
+      flow.describeServerMfaFreshness({ claimsVerified: true, aal: "aal2", recentMfaAgeSec: 125 }) === "Last authenticator check: 2 minutes ago" &&
+      /describeServerMfaFreshness\(status\)/.test(panelSrc),
+  );
+  {
+    const forged = await status({ claimsVerified: true, userId: UID, aal: "aal2", sessionId: SID, amr: [{ method: "totp", timestamp: NOW }] });
+    const unverifiedCtx = await status(pure.unverifiedAuthContext(UID));
+    ok(
+      "REVERIFY_TEST_9_client_cannot_manufacture_freshness",
+      forged.recentMfaAgeSec === null && flow.describeServerMfaFreshness(forged) === null &&
+        unverifiedCtx.recentMfaAgeSec === null && flow.describeServerMfaFreshness(unverifiedCtx) === null &&
+        flow.describeServerMfaFreshness({ claimsVerified: true, aal: "aal1", recentMfaAgeSec: 5 }) === null &&
+        (panelSrc.match(/setStatus\(/g) || []).length === 1 && /setStatus\(serverStatus\)/.test(panelSrc) &&
+        !/recentMfaAgeSec/.test(onResultSrc.replace("latest?.recentMfaAgeSec == null", "")) &&
+        /wasReverify && latest\?\.recentMfaAgeSec == null/.test(onResultSrc) && /A fresh check has not been recorded\./.test(onResultSrc),
+    );
+  }
+  {
+    resetNet({ so: true, adminFactors: [{ id: FACTOR_V, factor_type: "totp", status: "verified", updated_at: new Date(Date.now() - 3600_000).toISOString() }] });
+    const freshLogin = await account.recordPrivilegedMfaEventImpl({
+      userId: UID,
+      event: "verified",
+      auth: verified({ amr: [{ method: "password", timestamp: NOW - 3600 }, { method: "totp", timestamp: NOW - 5 }] }),
+    });
+    const w1 = auditWrites();
+    resetNet({ so: true, adminFactors: [{ id: FACTOR_V, factor_type: "totp", status: "verified", updated_at: new Date(Date.now() - 3600_000).toISOString() }] });
+    const staleLogin = await account.recordPrivilegedMfaEventImpl({
+      userId: UID,
+      event: "verified",
+      auth: verified({ amr: [{ method: "password", timestamp: NOW - 3600 }, { method: "totp", timestamp: NOW - 900 }] }),
+    });
+    const w2 = auditWrites();
+    ok(
+      "REVERIFY_TEST_10_verified_login_existing_path",
+      /report\(kind, result\.factorId\)/.test(onResultSrc) && /recordFn = useServerFn\(recordMyPrivilegedMfaEvent\)/.test(panelSrc) &&
+        freshLogin.recorded && w1.length === 1 && w1[0].event_type === "MFA_VERIFIED_LOGIN" && w1[0].metadata.authoritative === true &&
+        !staleLogin.recorded && staleLogin.reason === "fresh_mfa_missing" && w2.length === 0,
+    );
+  }
+  const panelImports = (read("src/components/platform/PrivilegedMfaPanel.tsx").match(/from "[^"]+"/g) || []).join(" ");
+  ok(
+    "REVERIFY_TEST_11_no_business_mutation",
+    !/platform-admins|platform-tenant-owners|company-provisioning|platform-tenant-entry|break-glass|platform-authority\.functions/.test(panelImports) &&
+      !/useStepUpServerFn|runWithPrivilegedStepUp/.test(panelSrc),
+  );
+  ok(
+    "REVERIFY_TEST_12_no_authority_changes",
+    net.calls.every((c) => c.method === "GET" || c.path === "/rest/v1/security_audit_events" || c.path.startsWith("/rest/v1/rpc/is_")) &&
+      !/platform_roles|tenant_memberships|super_admin_tenant_access/.test(panelSrc + flowSrc),
+  );
+  ok(
+    "REVERIFY_TEST_13_no_factor_removal",
+    !rv.state.calls.some((c) => c.startsWith("unenroll")) && !/unenroll|deleteFactor/.test(panelSrc) &&
+      !/unenroll/.test(flowSrc.slice(flowSrc.indexOf("export async function completeTotpChallenge"), flowSrc.indexOf("export type RequestStepUp"))),
+  );
+  {
+    resetNet({ so: true });
+    const smsAal1 = await status(verified({ aal: "aal1", amr: [{ method: "password", timestamp: NOW - 60 }, { method: "sms", timestamp: NOW - 5 }] }));
+    const smsAal2 = await status(verified({ amr: [{ method: "password", timestamp: NOW - 60 }, { method: "sms", timestamp: NOW - 5 }] }));
+    ok(
+      "REVERIFY_TEST_14_sms_cannot_satisfy_reverify",
+      !offer({ status: smsAal1 }) && flow.describeServerMfaFreshness(smsAal1) === null &&
+        smsAal2.recentMfaAgeSec === null && flow.describeServerMfaFreshness(smsAal2) === "Last authenticator check: more than 5 minutes ago" &&
+        !/isLoginSmsVerified|sendLoginSmsCode|factorType:\s*"phone"/.test(panelSrc + flowSrc),
+    );
+  }
+  ok(
+    "REVERIFY_TEST_15_bg_fallback_unchanged",
+    git("diff --stat HEAD -- src/components/platform/PlatformShell.tsx src/components/platform/PrivilegedStepUp.tsx src/lib/break-glass.server.ts src/lib/break-glass.functions.ts").trim() === "" &&
+      /There is no SMS, email or bypass/.test(panelSrc),
+  );
+  ok(
+    "REVERIFY_TEST_16_disabled_enforcement_unchanged",
+    git("diff --stat HEAD -- .github src/lib/auth-mfa-config.ts src/lib/privileged-mfa.server.ts src/lib/privileged-mfa.ts src/lib/privileged-mfa-account.server.ts src/lib/privileged-mfa-status.functions.ts supabase").trim() === "" &&
+      (await status(verified({ aal: "aal1" }))).continuationBlocked === false && !/PRIVILEGED_MFA_MODE/.test(panelSrc + flowSrc),
+  );
+  ok(
+    "REVERIFY_TEST_17_group_external_boundary_unchanged",
+    git("diff --stat HEAD -- src/lib/platform-authority.ts src/lib/platform-tenant-entry.server.ts src/lib/platform-tenant-entry.functions.ts").trim() === "",
   );
 }
 
