@@ -12,6 +12,11 @@ import { supabaseAdminUntyped as db } from "@/integrations/supabase/client.serve
 import { getAppEnvironment } from "@/lib/app-environment.server";
 import { decodeJwtPayload } from "@/lib/auth-jwt-fallback.server";
 import {
+  isVerifiedAuthContext,
+  PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC,
+  PRIVILEGED_MFA_ACTIONS,
+} from "@/lib/privileged-mfa";
+import {
   BREAK_GLASS_AUDIT_MARKER_COOKIE,
   BREAK_GLASS_AUTH_BIND_COOKIE,
   BREAK_GLASS_EXPIRED_COOKIE,
@@ -112,11 +117,21 @@ async function readBgCookie(name: string): Promise<string | null> {
   }
 }
 
-/** Read Auth JWT claims used for BG server-session binding (session_id primary). */
+/**
+ * Auth claims used for BG server-session binding (session_id primary; iat stored only).
+ * Verified request claims are preferred; the raw bearer decode is never used in enforce mode.
+ */
 async function readAuthBinding(): Promise<{
   authSessionId: string | null;
   authIat: number | null;
 }> {
+  const { getRequestAuthAssurance } = await import("@/lib/request-auth-context.server");
+  const assurance = getRequestAuthAssurance();
+  if (isVerifiedAuthContext(assurance)) {
+    return { authSessionId: assurance.sessionId, authIat: assurance.issuedAt };
+  }
+  const { getPrivilegedMfaMode } = await import("@/lib/privileged-mfa.server");
+  if (getPrivilegedMfaMode() === "enforce") return { authSessionId: null, authIat: null };
   try {
     const { getRequest } = await import("@tanstack/react-start/server");
     const request = getRequest();
@@ -189,9 +204,12 @@ export async function ensureBreakGlassPlatformSession(input: {
     | "same_auth_session_locked"
     | "no_active_session"
     | "secret_unavailable"
+    | "mfa_required"
     | "invalid";
   startedAt?: string;
   absoluteExpiresAt?: string;
+  /** Auth session bound to the open BG platform session (for G7D fresh-auth binding). */
+  authSessionId?: string | null;
 }> {
   if (!input.isBreakGlass || !input.isSuperOwner) {
     await clearBreakGlassPlatformSessionCookies();
@@ -211,12 +229,29 @@ export async function ensureBreakGlassPlatformSession(input: {
 
   const binding = await readAuthBinding();
   const activity = input.activity ?? "session_check";
+
+  // Fresh TOTP gates creation only (enforce mode); an open session continues on AAL2 + same session.
+  const mfa = await import("@/lib/privileged-mfa.server");
+  const mfaMode = mfa.getPrivilegedMfaMode();
+  const createCheck = {
+    action: PRIVILEGED_MFA_ACTIONS.breakGlassSessionCreate,
+    userId: input.userId,
+  };
+  const createEvaluation =
+    mfaMode === "disabled"
+      ? null
+      : mfa.evaluateFreshPrivilegedAuthForRequest(undefined, {
+          maxAgeSec: PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.breakGlassSession,
+          userId: input.userId,
+        });
+  const allowCreate = mfaMode !== "enforce" || createEvaluation?.satisfied === true;
+
   const { data, error } = await db.rpc("ensure_break_glass_platform_session", {
     p_user_id: input.userId,
     p_auth_session_id: binding.authSessionId,
     p_auth_iat: binding.authIat,
     p_activity: activity,
-    p_allow_create: true,
+    p_allow_create: allowCreate,
   });
   if (error) {
     console.error("ensure_break_glass_platform_session", error.message);
@@ -224,6 +259,21 @@ export async function ensureBreakGlassPlatformSession(input: {
   }
 
   const row = (data ?? {}) as Record<string, unknown>;
+  if (row.active !== true && !allowCreate && row.reason === "no_active_session" && createEvaluation) {
+    await mfa.recordPrivilegedMfaEvaluation("fresh", createCheck, createEvaluation);
+    return { active: false, expiredReason: "mfa_required" };
+  }
+  if (row.active === true && row.outcome === "created" && createEvaluation) {
+    await mfa.recordPrivilegedMfaEvaluation("fresh", createCheck, createEvaluation);
+  }
+  if (row.active === true && mfaMode !== "disabled") {
+    const boundOk = await mfa.checkBoundAuthSession(undefined, {
+      action: PRIVILEGED_MFA_ACTIONS.breakGlassSessionUse,
+      userId: input.userId,
+      storedAuthSessionId: typeof row.auth_session_id === "string" ? row.auth_session_id : null,
+    });
+    if (!boundOk) return { active: false, expiredReason: "mfa_required" };
+  }
   if (row.active !== true) {
     const reason = String(row.reason ?? "invalid");
     // Advisory UI cookie when locked/expired.
@@ -270,6 +320,7 @@ export async function ensureBreakGlassPlatformSession(input: {
     active: true,
     startedAt,
     absoluteExpiresAt,
+    authSessionId: typeof row.auth_session_id === "string" ? row.auth_session_id : null,
   };
 }
 

@@ -60,8 +60,19 @@ ok("rpc_rechecks_actor_so", mig.includes("is_super_owner(p_acting_user_id)"));
 const sqlHarness = "scripts/g7f1b-c1a-atomic-lifecycle-verify.sql";
 ok("sql_harness_exists", existsSync(resolve(root, sqlHarness)));
 const harness = read(sqlHarness);
-ok("sql_cleans_to_so2", harness.includes("count_super_owners() = 2"));
-ok("sql_no_bg1_email", harness.includes("staging-g7f1b-break-glass@example.test") && harness.includes("NOT EXISTS"));
+ok(
+  "sql_final_state_post_c2",
+  harness.includes("count_super_owners() = 3") &&
+    harness.includes("count_normal_super_owners() = 2") &&
+    harness.includes("public.is_active_break_glass(v_bg1)"),
+);
+ok(
+  "sql_bg1_parked_and_restored_exactly",
+  harness.includes("staging-g7f1b-break-glass@example.test") &&
+    harness.includes("INSERT INTO public.platform_roles SELECT v_bg1_role.*;") &&
+    harness.includes("WHERE id = v_bg1_identity.id") &&
+    harness.includes("= v_bg1_identity.id"),
+);
 
 if (failures.length) {
   console.error(`\nG7F-1B-C1A static verify FAILED: ${failures.join(", ")}`);

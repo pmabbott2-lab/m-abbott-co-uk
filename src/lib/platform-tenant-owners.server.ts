@@ -11,6 +11,8 @@ import {
   type PlatformTenantOwnerRow,
 } from "@/lib/platform-tenant-owners";
 import { requireSuperOwner } from "@/lib/platform-authority.server";
+import { PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC, PRIVILEGED_MFA_ACTIONS } from "@/lib/privileged-mfa";
+import { requireFreshPrivilegedAuth } from "@/lib/privileged-mfa.server";
 
 export class PlatformTenantOwnerError extends Error {
   readonly code:
@@ -196,6 +198,12 @@ export async function addPlatformTenantOwnerImpl(input: {
   | { outcome: "needs_confirmation"; email: string; existingRoles: string[] }
 > {
   await requireSuperOwner(input.userId);
+  await requireFreshPrivilegedAuth(undefined, {
+    action: PRIVILEGED_MFA_ACTIONS.tenantOwnerAdd,
+    userId: input.userId,
+    target: input.companyCode,
+    maxAgeSec: PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.platformAuthorityChange,
+  });
   const tenant = await loadTenantByCompanyCode(input.companyCode);
   if (!tenant) throw new PlatformTenantOwnerError("NOT_FOUND", "Company not found.");
 
@@ -336,6 +344,12 @@ export async function removePlatformTenantOwnerImpl(input: {
   ownerEmail: string;
 }): Promise<{ ok: true }> {
   await requireSuperOwner(input.userId);
+  await requireFreshPrivilegedAuth(undefined, {
+    action: PRIVILEGED_MFA_ACTIONS.tenantOwnerRemove,
+    userId: input.userId,
+    target: input.companyCode,
+    maxAgeSec: PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.platformAuthorityChange,
+  });
   const tenant = await loadTenantByCompanyCode(input.companyCode);
   if (!tenant) throw new PlatformTenantOwnerError("NOT_FOUND", "Company not found.");
 

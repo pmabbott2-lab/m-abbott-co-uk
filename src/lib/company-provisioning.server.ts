@@ -10,6 +10,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdminUntyped as db } from "@/integrations/supabase/client.server";
 import { isReservedTenantSlug } from "@/lib/tenant-presentation";
 import { withForcedTenantId } from "@/lib/tenant-assert.server";
+import { PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC, PRIVILEGED_MFA_ACTIONS } from "@/lib/privileged-mfa";
 
 export class PlatformAuthorityError extends Error {
   readonly code = "PLATFORM_AUTHORITY_REQUIRED" as const;
@@ -97,6 +98,11 @@ export async function requirePlatformProvisioningAuthority(userId: string): Prom
   if (!(await isSuperOwner(userId))) {
     throw new PlatformAuthorityError();
   }
+  const { requirePlatformAal2 } = await import("@/lib/privileged-mfa.server");
+  await requirePlatformAal2(undefined, {
+    action: PRIVILEGED_MFA_ACTIONS.provisioningAccess,
+    userId,
+  });
 }
 
 async function allocateCompanyCode(): Promise<string> {
@@ -263,6 +269,13 @@ export const provisionCompany = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => provisionInputSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requirePlatformProvisioningAuthority(context.userId);
+    const { requireFreshPrivilegedAuth } = await import("@/lib/privileged-mfa.server");
+    await requireFreshPrivilegedAuth(context.authAssurance, {
+      action: PRIVILEGED_MFA_ACTIONS.companyProvision,
+      userId: context.userId,
+      target: data.slug,
+      maxAgeSec: PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.platformAuthorityChange,
+    });
     const result = await provisionTenantInternal(data, { createdBy: context.userId });
     try {
       const { writePlatformAuditEvent } = await import("@/lib/platform-audit.server");

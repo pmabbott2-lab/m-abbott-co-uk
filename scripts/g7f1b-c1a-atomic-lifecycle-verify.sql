@@ -1,7 +1,9 @@
 /**
  * G7F-1B-C1A disposable SQL verification for establish_break_glass_identity.
- * Does NOT create BG1. Cleans to SO=2 / NORMAL=2 / ACTIVE_BG=0.
- * Apply via staging MCP execute_sql (service_role / postgres).
+ * Post-C2: BG1 (staging-g7f1b-break-glass@example.test) intentionally exists as the active BG.
+ * BG1's classification + super_owner row are parked for the functional cases and restored
+ * exactly (same identity row, same role row). Final state: SO=3 / NORMAL=2 / ACTIVE_BG=1 (BG1).
+ * Apply via staging MCP execute_sql (service_role / postgres); prefer running rollback-only.
  */
 CREATE SCHEMA IF NOT EXISTS g6b_private;
 CREATE TABLE IF NOT EXISTS g6b_private.g7f1bc1a_test_results (
@@ -18,12 +20,28 @@ DECLARE
   v_res jsonb; v_ok boolean; v_detail text;
   v_cnt int; v_audit_created int; v_audit_replaced int;
   v_missing uuid := '00000000-0000-4000-8000-000000000099';
+  v_bg1 uuid;
+  v_bg1_identity public.platform_break_glass_identities%ROWTYPE;
+  v_bg1_role public.platform_roles%ROWTYPE;
 BEGIN
   SELECT u.id INTO v_so1 FROM auth.users u WHERE lower(u.email) = 'pmabbott2@aol.com';
   SELECT u.id INTO v_so2 FROM auth.users u WHERE lower(u.email) = 'staging-g7f1a-super-owner@example.test';
   IF v_so1 IS NULL OR v_so2 IS NULL THEN
     RAISE EXCEPTION 'G7F1B-C1A STOP: standing SO fixtures missing';
   END IF;
+  SELECT u.id INTO v_bg1 FROM auth.users u WHERE lower(u.email) = 'staging-g7f1b-break-glass@example.test';
+  SELECT * INTO v_bg1_identity FROM public.platform_break_glass_identities WHERE user_id = v_bg1 AND active;
+  SELECT * INTO v_bg1_role FROM public.platform_roles WHERE user_id = v_bg1 AND role = 'super_owner';
+  IF v_bg1 IS NULL OR v_bg1_identity.id IS NULL OR v_bg1_role.id IS NULL
+     OR (SELECT COUNT(*) FROM public.platform_break_glass_identities WHERE active) <> 1 THEN
+    RAISE EXCEPTION 'G7F1B-C1A STOP: post-C2 BG1 state not as expected';
+  END IF;
+
+  -- Park BG1 so the functional cases run against the no-active-BG precondition.
+  UPDATE public.platform_break_glass_identities
+  SET active = false, deactivated_at = now()
+  WHERE id = v_bg1_identity.id;
+  DELETE FROM public.platform_roles WHERE id = v_bg1_role.id;
 
   -- Cleanup prior leftovers
   DELETE FROM public.platform_break_glass_identities
@@ -203,17 +221,36 @@ BEGIN
   DELETE FROM auth.users WHERE email LIKE 'staging-g7f1bc1a-%@example.test';
   DELETE FROM g6b_private.staging_credentials WHERE email LIKE 'staging-g7f1bc1a-%@example.test';
 
-  v_ok := public.count_super_owners() = 2
+  -- Restore BG1 exactly: role row first (identity trigger requires super_owner), then classification.
+  INSERT INTO public.platform_roles SELECT v_bg1_role.*;
+  UPDATE public.platform_break_glass_identities
+  SET active = v_bg1_identity.active,
+      deactivated_at = v_bg1_identity.deactivated_at,
+      deactivated_by = v_bg1_identity.deactivated_by,
+      replaced_at = v_bg1_identity.replaced_at,
+      replaced_by = v_bg1_identity.replaced_by
+  WHERE id = v_bg1_identity.id;
+
+  v_ok := public.count_super_owners() = 3
     AND public.count_normal_super_owners() = 2
-    AND (SELECT COUNT(*)::int FROM public.platform_break_glass_identities WHERE active) = 0
+    AND (SELECT COUNT(*)::int FROM public.platform_break_glass_identities WHERE active) = 1
     AND public.is_super_owner(v_so1) AND public.is_normal_super_owner(v_so1)
     AND public.is_super_owner(v_so2) AND public.is_normal_super_owner(v_so2)
-    AND NOT EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'staging-g7f1bc1a-%@example.test')
-    AND NOT EXISTS (SELECT 1 FROM auth.users WHERE lower(email) = 'staging-g7f1b-break-glass@example.test');
+    AND public.is_super_owner(v_bg1) AND public.is_active_break_glass(v_bg1)
+    AND NOT public.is_normal_super_owner(v_bg1)
+    AND (SELECT id FROM public.platform_break_glass_identities WHERE active) = v_bg1_identity.id
+    AND EXISTS (
+      SELECT 1 FROM public.platform_roles
+      WHERE id = v_bg1_role.id AND user_id = v_bg1 AND role = 'super_owner'
+        AND created_at = v_bg1_role.created_at AND created_by IS NOT DISTINCT FROM v_bg1_role.created_by
+    )
+    AND NOT EXISTS (SELECT 1 FROM public.tenant_memberships WHERE user_id = v_bg1)
+    AND NOT EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'staging-g7f1bc1a-%@example.test');
   r := r || jsonb_build_array(jsonb_build_object('test','Z_final_state','ok',v_ok,
     'so', public.count_super_owners(),
     'normal', public.count_normal_super_owners(),
-    'bg', (SELECT COUNT(*)::int FROM public.platform_break_glass_identities WHERE active)));
+    'bg', (SELECT COUNT(*)::int FROM public.platform_break_glass_identities WHERE active),
+    'bg1_restored', public.is_active_break_glass(v_bg1)));
 
   INSERT INTO g6b_private.g7f1bc1a_test_results (payload) VALUES (r);
 END;

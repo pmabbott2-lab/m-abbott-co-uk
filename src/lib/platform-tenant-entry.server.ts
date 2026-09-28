@@ -18,6 +18,7 @@ import {
   type PlatformTenantAccessSessionView,
 } from "@/lib/platform-tenant-entry";
 import { getAppEnvironment } from "@/lib/app-environment.server";
+import { PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC, PRIVILEGED_MFA_ACTIONS } from "@/lib/privileged-mfa";
 
 export class PlatformTenantEntryError extends Error {
   readonly code:
@@ -27,7 +28,8 @@ export class PlatformTenantEntryError extends Error {
     | "CROSS_TENANT"
     | "BREAK_GLASS_CONFIRM_REQUIRED"
     | "BREAK_GLASS_REASON_REQUIRED"
-    | "BREAK_GLASS_AUDIT_REQUIRED";
+    | "BREAK_GLASS_AUDIT_REQUIRED"
+    | "BREAK_GLASS_SESSION_REQUIRED";
   constructor(
     code: PlatformTenantEntryError["code"],
     message = "Platform tenant entry denied.",
@@ -50,6 +52,7 @@ type SessionRow = {
   expires_at: string;
   ended_at: string | null;
   revoked_at: string | null;
+  auth_session_id: string | null;
 };
 
 function cookieSecure(): boolean {
@@ -161,7 +164,7 @@ export async function validatePlatformTenantAccessSession(input: {
   const { data: row, error } = await db
     .from("platform_tenant_access_sessions")
     .select(
-      "id, platform_user_id, tenant_id, authority_basis, access_level, grant_id, reason, started_at, expires_at, ended_at, revoked_at",
+      "id, platform_user_id, tenant_id, authority_basis, access_level, grant_id, reason, started_at, expires_at, ended_at, revoked_at, auth_session_id",
     )
     .eq("id", cookieId)
     .maybeSingle();
@@ -204,6 +207,16 @@ export async function validatePlatformTenantAccessSession(input: {
     const platformActive = await isBreakGlassPlatformSessionActive(input.userId);
     if (!platformActive) return null;
   }
+
+  // Authentication assurance after authority revalidation: AAL2 + same Auth session (enforce only).
+  const { checkBoundAuthSession } = await import("@/lib/privileged-mfa.server");
+  const boundOk = await checkBoundAuthSession(undefined, {
+    action: PRIVILEGED_MFA_ACTIONS.g7dRequest,
+    userId: input.userId,
+    tenantId: input.tenantId,
+    storedAuthSessionId: session.auth_session_id,
+  });
+  if (!boundOk) return null;
 
   const tenant = await loadTenant({ tenantId: input.tenantId });
   if (!tenant || tenant.status !== "active") return null;
@@ -412,6 +425,7 @@ export async function startPlatformTenantEntryImpl(input: {
   // BG GROUP entry: mandatory emergency confirm + reason. EXTERNAL still denied via resolveEntryAuthority.
   let sessionReason = authority.reason;
   let maxHours = undefined as number | undefined;
+  let bgBoundAuthSessionId: string | null | undefined;
   if (bg.isBreakGlass && authority.basis === "super_owner_group_access") {
     if (!input.emergencyConfirm) {
       throw new PlatformTenantEntryError(
@@ -440,7 +454,21 @@ export async function startPlatformTenantEntryImpl(input: {
         "Break-glass platform session is not active. Re-authenticate to continue emergency access.",
       );
     }
+    bgBoundAuthSessionId = bgSession.authSessionId ?? null;
   }
+
+  const { requireFreshPrivilegedAuth, getVerifiedAuthSessionId } = await import(
+    "@/lib/privileged-mfa.server"
+  );
+  await requireFreshPrivilegedAuth(undefined, {
+    action: PRIVILEGED_MFA_ACTIONS.g7dEntry,
+    userId,
+    tenantId: tenant.id,
+    target: authority.basis,
+    maxAgeSec: PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.g7dEntry,
+    ...(bgBoundAuthSessionId !== undefined ? { bindSessionId: bgBoundAuthSessionId } : {}),
+  });
+  const authSessionId = getVerifiedAuthSessionId();
 
   await endOpenSessionsForUser(userId);
 
@@ -475,6 +503,7 @@ export async function startPlatformTenantEntryImpl(input: {
       reason: sessionReason,
       started_at: startedAt.toISOString(),
       expires_at: expiresAt.toISOString(),
+      auth_session_id: authSessionId,
     })
     .select("id, started_at, expires_at")
     .single();

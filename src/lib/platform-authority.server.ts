@@ -13,6 +13,11 @@ import {
   type PlatformAuthorityView,
   type PlatformRole,
 } from "@/lib/platform-authority";
+import {
+  PRIVILEGED_MFA_ACTIONS,
+  platformPrivilegedMfaRequired,
+  type PrivilegedMfaAction,
+} from "@/lib/privileged-mfa";
 
 export class PlatformRouteDeniedError extends Error {
   readonly code = "PLATFORM_AUTHORITY_REQUIRED" as const;
@@ -50,14 +55,32 @@ export async function resolvePlatformAuthority(userId: string | null | undefined
   }
 }
 
+/**
+ * Authentication assurance after authorization: platform_roles / BG registry decide whether
+ * AAL2 is mandatory (legacy user_roles are not consulted). Denies only in enforce mode.
+ */
+async function requirePrivilegedPlatformAssurance(
+  view: PlatformAuthorityView,
+  action: PrivilegedMfaAction,
+): Promise<void> {
+  const platformRoles: PlatformRole[] = [];
+  if (view.isSuperOwner) platformRoles.push("super_owner");
+  if (view.isSuperAdmin) platformRoles.push("super_admin");
+  if (!platformPrivilegedMfaRequired({ platformRoles, isBreakGlass: view.isBreakGlass })) return;
+  const { requirePlatformAal2 } = await import("@/lib/privileged-mfa.server");
+  await requirePlatformAal2(undefined, { action, userId: view.userId });
+}
+
 export async function requirePlatformRouteAccess(userId: string): Promise<PlatformAuthorityView> {
   const view = await resolvePlatformAuthority(userId);
   if (!view.canAccessPlatform) throw new PlatformRouteDeniedError();
+  await requirePrivilegedPlatformAssurance(view, PRIVILEGED_MFA_ACTIONS.platformRouteAccess);
   return view;
 }
 
 export async function requireSuperOwner(userId: string): Promise<PlatformAuthorityView> {
   const view = await resolvePlatformAuthority(userId);
   if (!view.isSuperOwner) throw new PlatformRouteDeniedError();
+  await requirePrivilegedPlatformAssurance(view, PRIVILEGED_MFA_ACTIONS.superOwnerAccess);
   return view;
 }

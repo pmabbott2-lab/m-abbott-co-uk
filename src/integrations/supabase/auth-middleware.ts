@@ -8,6 +8,8 @@ import {
   isNetworkAuthError,
   jwtPayloadUsable,
 } from '@/lib/auth-jwt-fallback.server'
+import { fromVerifiedSupabaseClaims, unverifiedAuthContext } from '@/lib/privileged-mfa'
+import { runWithRequestAuthAssurance } from '@/lib/request-auth-context.server'
 
 
 
@@ -118,26 +120,38 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
     }
 
     if (data?.claims?.sub) {
-      return next({
-        context: {
-          supabase,
-          userId: data.claims.sub,
-          claims: data.claims,
-        },
-      });
+      const authAssurance =
+        fromVerifiedSupabaseClaims(data.claims as unknown as Record<string, unknown>) ??
+        unverifiedAuthContext(data.claims.sub);
+      return runWithRequestAuthAssurance(authAssurance, () =>
+        next({
+          context: {
+            supabase,
+            userId: data!.claims.sub,
+            claims: data!.claims,
+            authAssurance,
+          },
+        }),
+      );
     }
 
     if (lastError && isNetworkAuthError(lastError)) {
       const fallback = decodeJwtPayload(token);
       if (jwtPayloadUsable(fallback)) {
         console.warn('[Supabase] getClaims unreachable — using JWT payload fallback for', fallback!.sub);
-        return next({
-          context: {
-            supabase,
-            userId: fallback!.sub as string,
-            claims: fallback!,
-          },
-        });
+        // Signature NOT verified: may identify the user for ordinary flows only.
+        // Never satisfies AAL2 / fresh privileged auth / platform, BG or G7D MFA.
+        const authAssurance = unverifiedAuthContext(fallback!.sub as string);
+        return runWithRequestAuthAssurance(authAssurance, () =>
+          next({
+            context: {
+              supabase,
+              userId: fallback!.sub as string,
+              claims: fallback!,
+              authAssurance,
+            },
+          }),
+        );
       }
       throw new Error('Auth service unavailable — check your internet connection and try again.');
     }

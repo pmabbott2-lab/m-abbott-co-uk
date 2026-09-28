@@ -1,5 +1,10 @@
 import type { Session } from "@supabase/supabase-js";
 
+/**
+ * Customer login convenience only (client sessionStorage, never sent to or checked by the server).
+ * NOT authentication assurance: must never satisfy AAL2, fresh privileged auth, or platform /
+ * break-glass / G7D MFA. Privileged MFA is decided server-side in privileged-mfa.server.ts.
+ */
 const KEY = "mh_login_sms_verified";
 
 function sessionKey(session: Session): string {

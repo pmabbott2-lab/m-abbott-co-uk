@@ -59,6 +59,16 @@ export const establishBreakGlassIdentity = createServerFn({ method: "POST" })
     if (!actingUserId) throw new Error("Unauthorized");
     const { requireSuperOwner } = await import("@/lib/platform-authority.server");
     await requireSuperOwner(actingUserId);
+    const { requireFreshPrivilegedAuth } = await import("@/lib/privileged-mfa.server");
+    const { PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC, PRIVILEGED_MFA_ACTIONS } = await import(
+      "@/lib/privileged-mfa"
+    );
+    await requireFreshPrivilegedAuth(context.authAssurance, {
+      action: PRIVILEGED_MFA_ACTIONS.breakGlassIdentityEstablish,
+      userId: actingUserId,
+      targetUserId: data.targetUserId,
+      maxAgeSec: PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.platformAuthorityChange,
+    });
     const { establishBreakGlassIdentityRpc } = await import("@/lib/break-glass-registry.server");
     return establishBreakGlassIdentityRpc({
       actingUserId,

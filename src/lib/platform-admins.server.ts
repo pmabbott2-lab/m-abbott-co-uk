@@ -21,6 +21,8 @@ import {
 } from "@/lib/platform-admins";
 import { isPlatformRole, type PlatformRole, type SuperAdminAccessLevel } from "@/lib/platform-authority";
 import { requireSuperOwner } from "@/lib/platform-authority.server";
+import { PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC, PRIVILEGED_MFA_ACTIONS } from "@/lib/privileged-mfa";
+import { requireFreshPrivilegedAuth } from "@/lib/privileged-mfa.server";
 
 export class PlatformAdminError extends Error {
   readonly code:
@@ -196,6 +198,12 @@ export async function addPlatformAdministratorImpl(input: {
   | { outcome: "invited"; email: string; platformRole: PlatformRole; expiresAt: string }
 > {
   await requireSuperOwner(input.userId);
+  await requireFreshPrivilegedAuth(undefined, {
+    action: PRIVILEGED_MFA_ACTIONS.platformRoleGrant,
+    userId: input.userId,
+    target: input.platformRole,
+    maxAgeSec: PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.platformAuthorityChange,
+  });
   const platformRole = parseRole(input.platformRole);
   const email = input.email.trim().toLowerCase();
   const firstName = input.firstName.trim();
@@ -472,6 +480,12 @@ export async function revokePlatformAdministratorImpl(input: {
   confirm?: boolean;
 }): Promise<{ ok: true }> {
   await requireSuperOwner(input.userId);
+  await requireFreshPrivilegedAuth(undefined, {
+    action: PRIVILEGED_MFA_ACTIONS.platformRoleRevoke,
+    userId: input.userId,
+    target: "platform_role",
+    maxAgeSec: PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.platformAuthorityChange,
+  });
   if (!input.confirm) {
     throw new PlatformAdminError("INVALID", "Explicit confirmation is required to revoke.");
   }
@@ -595,6 +609,12 @@ export async function acceptPlatformInviteImpl(input: {
   userId: string;
   rawToken: string;
 }): Promise<{ platformRole: PlatformRole; email: string }> {
+  await requireFreshPrivilegedAuth(undefined, {
+    action: PRIVILEGED_MFA_ACTIONS.platformInviteAccept,
+    userId: input.userId,
+    target: "platform_invitation",
+    maxAgeSec: PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.platformAuthorityChange,
+  });
   const email = await loadAuthEmail(input.userId);
   if (!email) {
     throw new PlatformAdminError("INVITE", "Could not resolve your account email.");
@@ -820,6 +840,12 @@ export async function upsertSuperAdminTenantGrantImpl(input: {
   confirmExternal?: boolean;
 }): Promise<{ outcome: "created" | "changed" | "revoked"; accessLevel: SuperAdminGrantAccessOption }> {
   await requireSuperOwner(input.userId);
+  await requireFreshPrivilegedAuth(undefined, {
+    action: PRIVILEGED_MFA_ACTIONS.superAdminGrantUpsert,
+    userId: input.userId,
+    target: input.companyCode,
+    maxAgeSec: PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.platformAuthorityChange,
+  });
   const admin = await resolveSuperAdminByEmail(input.adminEmail);
   const tenant = await loadTenantByCompanyCodeStrict(input.companyCode);
 
@@ -968,6 +994,12 @@ export async function revokeSuperAdminTenantGrantImpl(input: {
   confirm?: boolean;
 }): Promise<{ ok: true }> {
   await requireSuperOwner(input.userId);
+  await requireFreshPrivilegedAuth(undefined, {
+    action: PRIVILEGED_MFA_ACTIONS.superAdminGrantRevoke,
+    userId: input.userId,
+    target: input.companyCode,
+    maxAgeSec: PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.platformAuthorityChange,
+  });
   if (!input.confirm) {
     throw new PlatformAdminError("INVALID", "Explicit confirmation is required to revoke.");
   }
