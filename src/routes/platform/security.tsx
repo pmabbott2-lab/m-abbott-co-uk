@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { MfaRecoveryAdminPanel } from "@/components/platform/MfaRecoveryAdminPanel";
 import { PrivilegedMfaPanel } from "@/components/platform/PrivilegedMfaPanel";
 import { safePlatformRedirect } from "@/lib/privileged-mfa-flow";
 import { usePlatformAuthority } from "@/lib/platform-ui";
@@ -41,6 +42,11 @@ function PlatformSecurityPage() {
         Authenticator apps cannot be removed here. Replacing or resetting an authenticator is a controlled
         administrator process, and the last verified authenticator on a platform account is never removed.
       </p>
+      {authority.isSuperOwner ? (
+        <div className="rounded-lg border border-slate-300 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <MfaRecoveryAdminPanel isBreakGlass={authority.isBreakGlass} />
+        </div>
+      ) : null}
     </div>
   );
 }

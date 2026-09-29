@@ -19,6 +19,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as PlatformIndexRouteImport } from './routes/platform/index'
 import { Route as TenantSlugIndexRouteImport } from './routes/$tenantSlug/index'
 import { Route as RafCodeRouteImport } from './routes/raf.$code'
+import { Route as PlatformMfaRecoveryRouteImport } from './routes/platform_.mfa-recovery'
 import { Route as PlatformTenantsRouteImport } from './routes/platform/tenants'
 import { Route as PlatformSecurityRouteImport } from './routes/platform/security'
 import { Route as PlatformCompaniesRouteImport } from './routes/platform/companies'
@@ -122,6 +123,11 @@ const TenantSlugIndexRoute = TenantSlugIndexRouteImport.update({
 const RafCodeRoute = RafCodeRouteImport.update({
   id: '/raf/$code',
   path: '/raf/$code',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlatformMfaRecoveryRoute = PlatformMfaRecoveryRouteImport.update({
+  id: '/platform_/mfa-recovery',
+  path: '/platform/mfa-recovery',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlatformTenantsRoute = PlatformTenantsRouteImport.update({
@@ -452,6 +458,7 @@ export interface FileRoutesByFullPath {
   '/platform/companies': typeof PlatformCompaniesRouteWithChildren
   '/platform/security': typeof PlatformSecurityRoute
   '/platform/tenants': typeof PlatformTenantsRoute
+  '/platform/mfa-recovery': typeof PlatformMfaRecoveryRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug/': typeof TenantSlugIndexRoute
   '/platform/': typeof PlatformIndexRoute
@@ -515,6 +522,7 @@ export interface FileRoutesByTo {
   '/platform/audit': typeof PlatformAuditRoute
   '/platform/security': typeof PlatformSecurityRoute
   '/platform/tenants': typeof PlatformTenantsRoute
+  '/platform/mfa-recovery': typeof PlatformMfaRecoveryRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug': typeof TenantSlugIndexRoute
   '/platform': typeof PlatformIndexRoute
@@ -583,6 +591,7 @@ export interface FileRoutesById {
   '/platform/companies': typeof PlatformCompaniesRouteWithChildren
   '/platform/security': typeof PlatformSecurityRoute
   '/platform/tenants': typeof PlatformTenantsRoute
+  '/platform_/mfa-recovery': typeof PlatformMfaRecoveryRoute
   '/raf/$code': typeof RafCodeRoute
   '/$tenantSlug/': typeof TenantSlugIndexRoute
   '/platform/': typeof PlatformIndexRoute
@@ -651,6 +660,7 @@ export interface FileRouteTypes {
     | '/platform/companies'
     | '/platform/security'
     | '/platform/tenants'
+    | '/platform/mfa-recovery'
     | '/raf/$code'
     | '/$tenantSlug/'
     | '/platform/'
@@ -714,6 +724,7 @@ export interface FileRouteTypes {
     | '/platform/audit'
     | '/platform/security'
     | '/platform/tenants'
+    | '/platform/mfa-recovery'
     | '/raf/$code'
     | '/$tenantSlug'
     | '/platform'
@@ -781,6 +792,7 @@ export interface FileRouteTypes {
     | '/platform/companies'
     | '/platform/security'
     | '/platform/tenants'
+    | '/platform_/mfa-recovery'
     | '/raf/$code'
     | '/$tenantSlug/'
     | '/platform/'
@@ -829,6 +841,7 @@ export interface RootRouteChildren {
   ApiTtsRoute: typeof ApiTtsRoute
   BookSlugRoute: typeof BookSlugRoute
   GoSlugRoute: typeof GoSlugRoute
+  PlatformMfaRecoveryRoute: typeof PlatformMfaRecoveryRoute
   RafCodeRoute: typeof RafCodeRoute
   ApiAuthRequestPasswordResetRoute: typeof ApiAuthRequestPasswordResetRoute
   ApiCalculatorEstimateRateRoute: typeof ApiCalculatorEstimateRateRoute
@@ -916,6 +929,13 @@ declare module '@tanstack/react-router' {
       path: '/raf/$code'
       fullPath: '/raf/$code'
       preLoaderRoute: typeof RafCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/platform_/mfa-recovery': {
+      id: '/platform_/mfa-recovery'
+      path: '/platform/mfa-recovery'
+      fullPath: '/platform/mfa-recovery'
+      preLoaderRoute: typeof PlatformMfaRecoveryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/platform/tenants': {
@@ -1440,6 +1460,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTtsRoute: ApiTtsRoute,
   BookSlugRoute: BookSlugRoute,
   GoSlugRoute: GoSlugRoute,
+  PlatformMfaRecoveryRoute: PlatformMfaRecoveryRoute,
   RafCodeRoute: RafCodeRoute,
   ApiAuthRequestPasswordResetRoute: ApiAuthRequestPasswordResetRoute,
   ApiCalculatorEstimateRateRoute: ApiCalculatorEstimateRateRoute,

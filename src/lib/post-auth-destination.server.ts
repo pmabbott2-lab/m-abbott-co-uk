@@ -43,10 +43,11 @@ export async function resolvePostAuthDestinationForUser(input: {
   const platform = await resolvePlatformAuthority(input.userId);
   const requested = normalisePublicTenantSlug(input.requestedTenantSlug);
   let soleMembershipSlug: string | null = null;
-  if (!platform.canAccessPlatform && !requested) {
+  if (!platform.canAccessPlatform && !platform.mfaRecoveryRequired && !requested) {
     soleMembershipSlug = await loadSoleMembershipSlug(input.userId);
   }
   return resolvePostAuthDestination({
+    mfaRecoveryRequired: platform.mfaRecoveryRequired === true,
     canAccessPlatform: platform.canAccessPlatform,
     requestedTenantSlug: requested,
     soleMembershipSlug,

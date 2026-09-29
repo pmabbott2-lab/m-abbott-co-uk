@@ -123,6 +123,9 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
       const authAssurance =
         fromVerifiedSupabaseClaims(data.claims as unknown as Record<string, unknown>) ??
         unverifiedAuthContext(data.claims.sub);
+      // Asymmetric JWTs are verified locally, so a deleted Auth session is not detected by getClaims.
+      const { assertAuthContextNotSuperseded } = await import('@/lib/platform-authority.server');
+      await assertAuthContextNotSuperseded(authAssurance);
       return runWithRequestAuthAssurance(authAssurance, () =>
         next({
           context: {
@@ -142,6 +145,8 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
         // Signature NOT verified: may identify the user for ordinary flows only.
         // Never satisfies AAL2 / fresh privileged auth / platform, BG or G7D MFA.
         const authAssurance = unverifiedAuthContext(fallback!.sub as string);
+        const { assertAuthContextNotSuperseded } = await import('@/lib/platform-authority.server');
+        await assertAuthContextNotSuperseded(authAssurance);
         return runWithRequestAuthAssurance(authAssurance, () =>
           next({
             context: {

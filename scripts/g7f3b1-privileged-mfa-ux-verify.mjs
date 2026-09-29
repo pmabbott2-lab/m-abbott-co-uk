@@ -126,6 +126,7 @@ globalThis.fetch = async (input, init = {}) => {
   }
   net.calls.push({ method, path: url.pathname, body });
   const json = (v, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json" } });
+  if (url.pathname === "/rest/v1/rpc/platform_mfa_recovery_authority_state") return json("ok");
   if (url.pathname === "/rest/v1/rpc/is_super_owner") return json(net.so);
   if (url.pathname === "/rest/v1/rpc/is_super_admin") return json(net.sa);
   if (url.pathname === "/rest/v1/rpc/is_active_break_glass") return json(net.bg);
@@ -752,7 +753,13 @@ ok(
   );
   ok(
     "REVERIFY_TEST_12_no_authority_changes",
-    net.calls.every((c) => c.method === "GET" || c.path === "/rest/v1/security_audit_events" || c.path.startsWith("/rest/v1/rpc/is_")) &&
+    net.calls.every(
+      (c) =>
+        c.method === "GET" ||
+        c.path === "/rest/v1/security_audit_events" ||
+        c.path.startsWith("/rest/v1/rpc/is_") ||
+        c.path === "/rest/v1/rpc/platform_mfa_recovery_authority_state",
+    ) &&
       !/platform_roles|tenant_memberships|super_admin_tenant_access/.test(panelSrc + flowSrc),
   );
   ok(
@@ -806,7 +813,7 @@ ok(
 ok(
   "TEST_32_no_owner_authority_created",
   !allPaths.some((p) => /platform_roles|tenant_owner|owner|grant/.test(p) && !/rpc\/is_super_(owner|admin)/.test(p)) &&
-    allPaths.filter((p) => p.startsWith("POST ") && !/rpc\/is_|security_audit_events/.test(p)).length === 0,
+    allPaths.filter((p) => p.startsWith("POST ") && !/rpc\/is_|rpc\/platform_mfa_recovery_authority_state$|security_audit_events/.test(p)).length === 0,
 );
 
 globalThis.fetch = realFetch;

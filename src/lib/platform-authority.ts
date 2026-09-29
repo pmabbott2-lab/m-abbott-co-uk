@@ -35,6 +35,11 @@ export type PlatformAuthorityView = {
   breakGlassSessionActive: boolean;
   /** BG session refused only because privileged MFA (enforce mode) is unsatisfied. */
   breakGlassMfaRequired?: boolean;
+  /**
+   * G7F-3C3: an executed MFA recovery suspends all platform authority until replacement
+   * enrolment completes. Only the isolated /platform/mfa-recovery route is reachable.
+   */
+  mfaRecoveryRequired?: boolean;
   canAccessPlatform: boolean;
   canListPlatformTenants: boolean;
   canCreateCompany: boolean;

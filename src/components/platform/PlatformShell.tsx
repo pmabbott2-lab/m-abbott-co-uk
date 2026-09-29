@@ -9,6 +9,7 @@ import { getMyPlatformAuthority } from "@/lib/platform-authority.functions";
 import { isPlatformNavActive, PLATFORM_NAV_ITEMS } from "@/lib/platform-dashboard";
 import { PlatformAuthorityProvider, usePlatformAuthority } from "@/lib/platform-ui";
 import { PRIVILEGED_MFA_SETUP_PATH } from "@/lib/privileged-mfa-flow";
+import { MFA_RECOVERY_PATH } from "@/lib/privileged-mfa-recovery";
 import { getMyPrivilegedMfaStatus } from "@/lib/privileged-mfa-status.functions";
 import { PrivilegedMfaPanel } from "@/components/platform/PrivilegedMfaPanel";
 import { PrivilegedStepUpProvider } from "@/components/platform/PrivilegedStepUp";
@@ -108,6 +109,19 @@ function BreakGlassMfaRequired({ onVerified }: { onVerified: () => Promise<unkno
   );
 }
 
+/** G7F-3C3: platform authority is suspended; only the isolated recovery route is reachable. */
+function MfaRecoveryRequiredRedirect() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    void navigate({ to: MFA_RECOVERY_PATH, replace: true });
+  }, [navigate]);
+  return (
+    <div className="flex min-h-screen items-center justify-center px-4 text-center text-sm text-muted-foreground">
+      Authenticator recovery in progress. Opening recovery…
+    </div>
+  );
+}
+
 /**
  * Session + platform_roles gate. Does not use tenant membership.
  * Independent of the tenant authenticated membership gate.
@@ -146,6 +160,10 @@ export function PlatformAuthenticatedGate({ children }: { children: ReactNode })
 
   if (!sessionUserId) {
     return null;
+  }
+
+  if (authorityQ.data?.mfaRecoveryRequired === true) {
+    return <MfaRecoveryRequiredRedirect />;
   }
 
   if (authorityQ.isError || !authorityQ.data?.canAccessPlatform) {

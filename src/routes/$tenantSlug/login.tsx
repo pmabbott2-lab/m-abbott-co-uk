@@ -49,7 +49,7 @@ function TenantLoginBridge() {
 
       try {
         const result = await checkTenantMembershipFn({
-          data: { slug: tenant.slug, userId: user.id },
+          data: { slug: tenant.slug },
         });
         if (!result.member) {
           setDenied(true);

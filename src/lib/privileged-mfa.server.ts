@@ -16,6 +16,7 @@ import {
   evaluatePlatformAal2,
   isVerifiedAuthContext,
   parsePrivilegedMfaMode,
+  PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC,
   PRIVILEGED_MFA_ERROR_MESSAGES,
   privilegedMfaShouldDeny,
   type AuthAssuranceContext,
@@ -203,6 +204,30 @@ export async function requireFreshPrivilegedAuth(
   const ctx = resolveAuth(auth);
   const evaluation = evaluateFreshPrivilegedAuthForRequest(ctx, opts);
   return decideOrThrow("fresh", opts, evaluation, ctx);
+}
+
+/**
+ * G7F-3C3 recovery action: verified claims + aal2 + session_id + TOTP AMR within 5 minutes.
+ * Denies in every PRIVILEGED_MFA_MODE (disabled / audit / enforce); the recovery RPCs re-check
+ * the same conditions against Auth state inside their transaction.
+ */
+export async function requireRecoveryFreshAuth(
+  auth: AuthAssuranceInput,
+  check: PrivilegedMfaCheck,
+): Promise<VerifiedAuthContext & { sessionId: string }> {
+  const ctx = resolveAuth(auth);
+  const evaluation = evaluateFreshPrivilegedAuthForRequest(ctx, {
+    maxAgeSec: PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.mfaRecovery,
+    userId: check.userId,
+  });
+  await recordPrivilegedMfaEvaluation("fresh", check, evaluation, ctx);
+  if (!evaluation.satisfied || !isVerifiedAuthContext(ctx) || !ctx.sessionId) {
+    throw new PrivilegedMfaRequiredError(
+      evaluation.reason === "aal_insufficient" ? "PRIVILEGED_AAL_REQUIRED" : "PRIVILEGED_REAUTH_REQUIRED",
+      evaluation.reason,
+    );
+  }
+  return ctx as VerifiedAuthContext & { sessionId: string };
 }
 
 /**

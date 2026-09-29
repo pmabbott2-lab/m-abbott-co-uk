@@ -31,6 +31,7 @@ export const PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC = {
   platformAuthorityChange: 5 * 60,
   breakGlassSession: 5 * 60,
   g7dEntry: 10 * 60,
+  mfaRecovery: 5 * 60,
 } as const;
 
 /** Tolerated forward clock skew for AMR timestamps, in seconds. */
@@ -56,6 +57,12 @@ export const PRIVILEGED_MFA_ACTIONS = {
   g7dRequest: "platform.g7d_request",
   breakGlassSessionCreate: "platform.break_glass_session_create",
   breakGlassSessionUse: "platform.break_glass_session_use",
+  mfaRecoveryRequest: "platform.mfa_recovery_request",
+  mfaRecoveryApprove: "platform.mfa_recovery_approve",
+  mfaRecoveryExecute: "platform.mfa_recovery_execute",
+  mfaRecoveryCancel: "platform.mfa_recovery_cancel",
+  mfaRecoveryReissue: "platform.mfa_recovery_reissue",
+  mfaRecoveryComplete: "platform.mfa_recovery_complete",
 } as const;
 export type PrivilegedMfaAction = (typeof PRIVILEGED_MFA_ACTIONS)[keyof typeof PRIVILEGED_MFA_ACTIONS];
 

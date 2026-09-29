@@ -41,7 +41,7 @@ export function TenantAuthenticatedGate({
       }
       try {
         const result = await checkTenantMembershipFn({
-          data: { slug: tenant.slug, userId },
+          data: { slug: tenant.slug },
         });
         let hasPlatform = false;
         if (!result.member) {

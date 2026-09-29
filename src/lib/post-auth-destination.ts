@@ -11,7 +11,8 @@ export type PostAuthDestinationKind =
   | "platform"
   | "tenant"
   | "legacy_home"
-  | "platform_denied";
+  | "platform_denied"
+  | "platform_mfa_recovery";
 
 export type PostAuthDestination = {
   to: string;
@@ -25,6 +26,8 @@ export type PostAuthDestinationInput = {
   start?: PostAuthStart | null;
   /** Navigation intent from Platform sign in. Never grants authority. */
   platformIntent?: boolean;
+  /** G7F-3C3: executed MFA recovery awaiting replacement enrolment (server-resolved only). */
+  mfaRecoveryRequired?: boolean;
 };
 
 /**
@@ -32,6 +35,9 @@ export type PostAuthDestinationInput = {
  * `canAccessPlatform` must already be derived from platform_roles only.
  */
 export function resolvePostAuthDestination(input: PostAuthDestinationInput): PostAuthDestination {
+  if (input.mfaRecoveryRequired === true) {
+    return { to: "/platform/mfa-recovery", kind: "platform_mfa_recovery" };
+  }
   if (input.canAccessPlatform) {
     return { to: "/platform", kind: "platform" };
   }
