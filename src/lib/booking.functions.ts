@@ -13,6 +13,7 @@ import {
 } from "@/lib/sms.server";
 import { clearSessionAttention, assertStaffCanAccessCustomer } from "@/lib/sessions.functions";
 import type { BookableAdvisor } from "@/lib/booking-availability.server";
+import { publicAppointmentInput } from "@/lib/public-booking-contract";
 
 export { emailForCustomerAccount } from "@/lib/customer-account-email";
 
@@ -686,6 +687,10 @@ export const getAvailableSlots = createServerFn({ method: "GET" })
     }
   });
 
+/**
+ * Trusted internal booking contract. Never used as a server-function input validator: public
+ * endpoints use publicAppointmentInput (see public-booking-contract.ts).
+ */
 const appointmentInput = z.object({
   slug: z.string().min(1).optional(),
   /** Hub tenant route slug (e.g. mortgageeasy) — preferred public tenant authority. */
@@ -895,7 +900,12 @@ async function sendBookingConfirmations(opts: {
   }
 }
 
-async function bookAppointment(
+/**
+ * Trusted booking implementation. customerId / sessionId are written without further checks, so
+ * callers must have established ownership or staff / introducer authority first. Client-shaped
+ * input must go through bookAppointmentPublic instead.
+ */
+async function bookAppointmentTrusted(
   data: z.infer<typeof appointmentInput>,
   actingUserId?: string,
 ) {
@@ -1098,7 +1108,8 @@ async function bookAppointment(
       .from("introducer_leads")
       .update({ status: "booked", appointment_id: appointment.id })
       .eq("id", leadId)
-      .eq("tenant_id", tenantId);
+      .eq("tenant_id", tenantId)
+      .is("appointment_id", null);
   }
 
   let customerIdForIntro = targetCustomerId;
@@ -1161,9 +1172,22 @@ async function bookAppointment(
   return { ...appointment, session_id: linkedSessionId ?? appointment.session_id };
 }
 
+/**
+ * Public-safe booking: the only route from client-shaped input to bookAppointmentTrusted.
+ * `actingUserId` must come from verified auth context or an account created by this request.
+ */
+async function bookAppointmentPublic(input: unknown, actingUserId?: string) {
+  const { planPublicBooking } = await import("@/lib/public-booking-guard.server");
+  const plan = await planPublicBooking(input, {
+    actingUserId: actingUserId ?? null,
+    resolveTenantId: (opts) => resolveBookingTenantId(opts),
+  });
+  return bookAppointmentTrusted(plan, actingUserId);
+}
+
 export const createAppointment = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => appointmentInput.parse(d))
-  .handler(async ({ data }) => bookAppointment(data));
+  .inputValidator((d: unknown) => publicAppointmentInput.parse(d))
+  .handler(async ({ data }) => bookAppointmentPublic(data));
 
 const customerAppointmentSignupInput = z.object({
   customerName: z.string().min(2),
@@ -1180,13 +1204,22 @@ export const customerAppointmentSignup = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => customerAppointmentSignupInput.parse(d))
   .handler(async ({ data }) => {
     const { customerAppointmentSignupImpl } = await import("@/lib/appointment-signup.server");
-    return customerAppointmentSignupImpl(data, { book: bookAppointment });
+    return customerAppointmentSignupImpl(data, {
+      // The signup impl only sets customerId for an account it created in this request, and
+      // always passes that same id as actingUserId.
+      book: async ({ customerId, ...booking }, actingUserId) => {
+        if (customerId !== actingUserId) throw new Error("Booking identity mismatch.");
+        return bookAppointmentPublic(booking, actingUserId);
+      },
+    });
   });
 
 export const createAppointmentAuth = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => appointmentInput.parse(d))
-  .handler(async ({ data, context }) => bookAppointment({ ...data, channel: data.channel ?? "direct_booking" }, context.userId));
+  .inputValidator((d: unknown) => publicAppointmentInput.parse(d))
+  .handler(async ({ data, context }) =>
+    bookAppointmentPublic({ ...data, channel: data.channel ?? "direct_booking" }, context.userId),
+  );
 
 export const bookSessionAppointment = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -1216,7 +1249,7 @@ export const bookSessionAppointment = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (session.customer_id !== context.userId) throw new Error("Forbidden");
 
-    return bookAppointment(
+    return bookAppointmentTrusted(
       {
         sessionId: data.sessionId,
         channel: data.channel,
@@ -1308,7 +1341,7 @@ export const bookCustomerAppointmentAsStaff = createServerFn({ method: "POST" })
       }
     }
 
-    return bookAppointment(
+    return bookAppointmentTrusted(
       {
         sessionId: sessionId ?? undefined,
         customerId: data.customerId,
@@ -1386,7 +1419,7 @@ export const bookCaseFollowUpAppointment = createServerFn({ method: "POST" })
       advisorId = alloc?.advisor_id ?? null;
     }
 
-    return bookAppointment(
+    return bookAppointmentTrusted(
       {
         sessionId: data.sessionId,
         customerId: data.customerId,
@@ -3187,7 +3220,7 @@ export const bookNewCustomerAsStaff = createServerFn({ method: "POST" })
       customerPhone: data.customerPhone,
       customerEmail: data.customerEmail,
     });
-    return bookAppointment(
+    return bookAppointmentTrusted(
       {
         customerId,
         advisorId: data.advisorId,
@@ -3359,7 +3392,7 @@ export const bookNewCustomerAsIntroducer = createServerFn({ method: "POST" })
       customerPhone: data.customerPhone,
       customerEmail: data.customerEmail,
     });
-    const result = await bookAppointment(
+    const result = await bookAppointmentTrusted(
       {
         customerId,
         advisorId: data.advisorId,
