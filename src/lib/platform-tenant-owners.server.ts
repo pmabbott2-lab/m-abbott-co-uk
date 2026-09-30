@@ -89,20 +89,16 @@ async function countActiveOwners(tenantId: string, exceptUserId?: string): Promi
   return count ?? 0;
 }
 
-async function findAuthUserIdByEmail(email: string): Promise<string | null> {
-  const normalised = email.trim().toLowerCase();
-  const { data: profile } = await db
-    .from("profiles")
-    .select("id")
-    .eq("email", normalised)
-    .maybeSingle();
-  if (profile?.id) return profile.id as string;
-
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 });
-  if (error) throw new Error(error.message);
-  const hit = (data.users ?? []).find((u) => (u.email ?? "").toLowerCase() === normalised);
-  return hit?.id ?? null;
+// Canonical auth.users email only — profiles.email is user-editable.
+async function findAuthUserIdByEmail(
+  email: string,
+  opts?: { requireConfirmed?: boolean },
+): Promise<string | null> {
+  const { findAuthUserByEmail } = await import("@/lib/auth-identity.server");
+  const hit = await findAuthUserByEmail(email);
+  if (!hit) return null;
+  if (opts?.requireConfirmed && !hit.emailConfirmed) return null;
+  return hit.id;
 }
 
 export async function listPlatformCompanyOwnersImpl(input: {
@@ -194,7 +190,14 @@ export async function addPlatformTenantOwnerImpl(input: {
 }): Promise<
   | { outcome: "already_owner"; email: string }
   | { outcome: "added"; email: string }
-  | { outcome: "invited"; email: string; expiresAt: string }
+  | {
+      outcome: "invited";
+      email: string;
+      expiresAt: string;
+      /** Raw Owner invite token — returned once to the platform operator only. */
+      inviteToken: string;
+      inviteRegisterPath: string;
+    }
   | { outcome: "needs_confirmation"; email: string; existingRoles: string[] }
 > {
   await requireSuperOwner(input.userId);
@@ -215,7 +218,9 @@ export async function addPlatformTenantOwnerImpl(input: {
   }
   const displayName = `${firstName} ${lastName}`.trim();
 
-  const existingUserId = await findAuthUserIdByEmail(email);
+  // Unconfirmed Auth accounts are not granted directly; they get an invite that
+  // can only be accepted once that address is confirmed.
+  const existingUserId = await findAuthUserIdByEmail(email, { requireConfirmed: true });
 
   if (existingUserId) {
     const { data: memberships, error } = await db
@@ -312,9 +317,13 @@ export async function addPlatformTenantOwnerImpl(input: {
 
   // New user → staff_invitations owner invite (7 days, matching Create Company).
   const expiresAt = new Date(Date.now() + 7 * 24 * 3600_000).toISOString();
+  const { newStaffInviteToken } = await import("@/lib/staff-invite.server");
+  const { staffInviteRegisterPath } = await import("@/lib/staff-invite-contract");
+  const inviteToken = newStaffInviteToken();
   const { data: invite, error: invErr } = await db
     .from("staff_invitations")
     .insert({
+      token_hash: inviteToken.hash,
       role: "admin",
       membership_role: "owner",
       email,
@@ -335,7 +344,13 @@ export async function addPlatformTenantOwnerImpl(input: {
     metadata: { companyCode: tenant.company_code, action: "invite_owner" },
   });
 
-  return { outcome: "invited", email, expiresAt: invite.expires_at as string };
+  return {
+    outcome: "invited",
+    email,
+    expiresAt: invite.expires_at as string,
+    inviteToken: inviteToken.raw,
+    inviteRegisterPath: staffInviteRegisterPath(inviteToken.raw),
+  };
 }
 
 export async function removePlatformTenantOwnerImpl(input: {

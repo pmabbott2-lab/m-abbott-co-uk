@@ -241,6 +241,8 @@ globalThis.fetch = async (input, init = {}) => {
 };
 
 const mod = await import("../src/lib/appointment-signup.server.ts");
+// G7F-4S3B: appointment-created Auth identities use the phone-derived synthetic email.
+const syntheticEmail = (e164) => `phone+${e164.replace(/\D/g, "")}@customers.mortgagehub.local`;
 const store = await import("../src/lib/auth-sms.store.server.ts");
 
 let books;
@@ -399,7 +401,7 @@ res = await signup(
 );
 const freshId =
   createUsers().length === 1
-    ? [...db.authUsers.values()].find((u) => u.email === "fresh.customer@example.test")?.id
+    ? [...db.authUsers.values()].find((u) => u.email === syntheticEmail("+447700900777"))?.id
     : null;
 const freshCode = sms[0] ? codeFrom(sms[0].body) : null;
 db.profiles.set(freshId, {
@@ -415,7 +417,7 @@ const tok = await mod
 const linkEmail = linkCalls()[0]?.body?.email;
 ok(
   "7 magic link uses Auth email of the bound account, not profiles.email",
-  linkEmail === "fresh.customer@example.test" && tok?.tokenHash === `synthetic-hash-${freshId}`,
+  linkEmail === syntheticEmail("+447700900777") && tok?.tokenHash === `synthetic-hash-${freshId}`,
 );
 
 // --- defence in depth: a challenge bound to a privileged/staff account never yields a link ----
@@ -513,7 +515,8 @@ const staffNew = await mod.resolveCustomerIdForStaffBooking({
 });
 ok(
   "staff booking new customer still creates account",
-  createUsers().length === 1 && db.authUsers.get(staffNew)?.email === "new.person@example.test",
+  createUsers().length === 1 &&
+    db.authUsers.get(staffNew)?.email === syntheticEmail("+447700900321"),
 );
 
 // --- 10: legitimate new-customer booking ------------------------------------------------------
@@ -529,7 +532,7 @@ res = await signup(
 );
 const created = createUsers();
 const newUserId = [...db.authUsers.values()].find(
-  (u) => u.email === "new.customer@example.test",
+  (u) => u.email === syntheticEmail("+447700900444"),
 )?.id;
 ok(
   "10 new customer: account created once without password",
@@ -554,7 +557,7 @@ const newTok = await mod
 ok(
   "10 new customer: SMS verification signs in the new account",
   newTok?.tokenHash === `synthetic-hash-${newUserId}` &&
-    linkCalls()[0]?.body?.email === "new.customer@example.test",
+    linkCalls()[0]?.body?.email === syntheticEmail("+447700900444"),
 );
 ok(
   "10 code is single-use",

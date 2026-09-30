@@ -1662,22 +1662,37 @@ export function RecentlyDeletedCard() {
   );
 }
 
-type CreatedInvite = { token: string; role: string; email: string | null; expires_at: string };
+type CreatedInvite = {
+  registerPath: string;
+  role: string;
+  membershipRole: string;
+  email: string;
+  expiresAt: string;
+};
 
-function inviteLink(token: string): string {
+function inviteUrl(registerPath: string): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
-  return `${origin}/register?invite=${token}`;
+  return `${origin}${registerPath}`;
 }
 
-// Create shareable staff invite links + manage existing invites.
-export function InviteStaffCard() {
+// Create one-time staff invite links + manage existing invites (metadata only).
+// Role options mirror the server hierarchy; the server enforces it regardless.
+export function InviteStaffCard({
+  isOwner = false,
+  isSupervisor = false,
+}: {
+  isOwner?: boolean;
+  isSupervisor?: boolean;
+}) {
   const qc = useQueryClient();
   const createFn = useServerFn(createStaffInvite);
   const listFn = useServerFn(listStaffInvites);
   const revokeFn = useServerFn(revokeStaffInvite);
 
+  const canInviteAdmin = isOwner || isSupervisor;
   const [open, setOpen] = useState(false);
   const [role, setRole] = useState<"advisor" | "introducer" | "admin">("advisor");
+  const [adminLevel, setAdminLevel] = useState<"general" | "supervisor">("general");
   const [email, setEmail] = useState("");
   const [companyMode, setCompanyMode] = useState<"new" | "join">("new");
   const [companyCode, setCompanyCode] = useState("");
@@ -1690,13 +1705,20 @@ export function InviteStaffCard() {
       createFn({
         data: {
           role,
-          email: email.trim() || undefined,
+          membershipRole: role === "admin" ? (isOwner ? adminLevel : "general") : undefined,
+          email: email.trim(),
           companyMode: role === "introducer" ? companyMode : undefined,
           companyCode: role === "introducer" && companyMode === "join" ? companyCode : undefined,
         },
       }),
     onSuccess: (res) => {
-      setCreated(res as CreatedInvite);
+      setCreated({
+        registerPath: res.registerPath,
+        role: res.role,
+        membershipRole: res.membershipRole,
+        email: res.email,
+        expiresAt: res.expiresAt,
+      });
       qc.invalidateQueries({ queryKey: ["staff-invites"] });
       toast.success("Invite link created");
     },
@@ -1714,6 +1736,7 @@ export function InviteStaffCard() {
 
   const resetForm = () => {
     setRole("advisor");
+    setAdminLevel("general");
     setEmail("");
     setCompanyMode("new");
     setCompanyCode("");
@@ -1757,8 +1780,8 @@ export function InviteStaffCard() {
             <DialogHeader>
               <DialogTitle>Create a staff invite link</DialogTitle>
               <DialogDescription>
-                Generates a shareable registration link. The recipient sets their own password and is
-                granted the chosen role automatically — no customer signup required.
+                Generates a registration link for one email address. Only that person, signed in
+                with that confirmed email, can accept it and receive the chosen role.
               </DialogDescription>
             </DialogHeader>
 
@@ -1766,26 +1789,25 @@ export function InviteStaffCard() {
               <div className="space-y-4">
                 <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
                   <p className="text-sm font-medium text-foreground">
-                    Invite ready — share this link with the new {created.role}.
+                    Invite ready for {created.email} ({created.membershipRole}).
                   </p>
                   <p className="text-xs text-muted-foreground break-all font-mono">
-                    {inviteLink(created.token)}
+                    {inviteUrl(created.registerPath)}
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    <CopyLinkButton value={inviteLink(created.token)} />
-                    {created.email && (
-                      <Button asChild variant="outline" size="sm">
-                        <a
-                          href={`mailto:${created.email}?subject=${encodeURIComponent("Your Mortgage Hub invitation")}&body=${encodeURIComponent(`You've been invited to join Mortgage Hub. Use this link to set up your account:\n\n${inviteLink(created.token)}`)}`}
-                        >
-                          <Mail className="w-4 h-4 mr-1.5" />
-                          Email link
-                        </a>
-                      </Button>
-                    )}
+                    <CopyLinkButton value={inviteUrl(created.registerPath)} />
+                    <Button asChild variant="outline" size="sm">
+                      <a
+                        href={`mailto:${created.email}?subject=${encodeURIComponent("Your Mortgage Hub invitation")}&body=${encodeURIComponent(`You've been invited to join Mortgage Hub. Use this link to set up your account:\n\n${inviteUrl(created.registerPath)}`)}`}
+                      >
+                        <Mail className="w-4 h-4 mr-1.5" />
+                        Email link
+                      </a>
+                    </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Expires {safeFormatDistanceToNow(created.expires_at, { addSuffix: true })}.
+                    This link is shown only once. If it is lost, revoke the invite and create a new
+                    one. Expires {safeFormatDistanceToNow(created.expiresAt, { addSuffix: true })}.
                   </p>
                 </div>
                 <DialogFooter>
@@ -1799,7 +1821,9 @@ export function InviteStaffCard() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <span className="text-sm font-medium">Role</span>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div
+                    className={`grid grid-cols-1 gap-2 ${canInviteAdmin ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
+                  >
                     <button
                       type="button"
                       onClick={() => setRole("advisor")}
@@ -1814,15 +1838,35 @@ export function InviteStaffCard() {
                     >
                       <Link2 className="w-4 h-4" /> Introducer
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setRole("admin")}
-                      className={`flex items-center gap-2 rounded-lg border p-3 text-sm text-left ${role === "admin" ? "border-primary bg-primary/5" : ""}`}
-                    >
-                      <UserCog className="w-4 h-4" /> Admin
-                    </button>
+                    {canInviteAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setRole("admin")}
+                        className={`flex items-center gap-2 rounded-lg border p-3 text-sm text-left ${role === "admin" ? "border-primary bg-primary/5" : ""}`}
+                      >
+                        <UserCog className="w-4 h-4" /> Admin
+                      </button>
+                    )}
                   </div>
                 </div>
+
+                {role === "admin" && isOwner && (
+                  <div className="space-y-2">
+                    <span className="text-sm font-medium">Admin level</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["general", "supervisor"] as const).map((level) => (
+                        <button
+                          key={level}
+                          type="button"
+                          onClick={() => setAdminLevel(level)}
+                          className={`rounded-lg border p-3 text-sm text-left capitalize ${adminLevel === level ? "border-primary bg-primary/5" : ""}`}
+                        >
+                          {level}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {role === "introducer" && (
                   <div className="space-y-2">
@@ -1868,17 +1912,17 @@ export function InviteStaffCard() {
                 )}
 
                 <div className="space-y-1.5">
-                  <Label htmlFor="invite-email">Email (optional)</Label>
+                  <Label htmlFor="invite-email">Email</Label>
                   <Input
                     id="invite-email"
                     type="email"
                     placeholder="name@company.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    required
                   />
                   <p className="text-xs text-muted-foreground">
-                    Pre-fills their email on the registration page and lets you email the link. The
-                    link works without it.
+                    The invite can only be accepted by an account with this confirmed email address.
                   </p>
                 </div>
 
@@ -1886,6 +1930,7 @@ export function InviteStaffCard() {
                   <Button
                     disabled={
                       create.isPending ||
+                      !email.trim() ||
                       (role === "introducer" && companyMode === "join" && companyCode.length !== 4)
                     }
                     onClick={() => create.mutate()}
@@ -1901,8 +1946,8 @@ export function InviteStaffCard() {
 
       <div className="rounded-2xl border bg-card divide-y">
         <div className="p-4 text-xs text-muted-foreground">
-          Invite links let new advisors or introducers register themselves with the right role. Links
-          expire after 14 days.
+          Invite links let the invited person register with the right role. Links expire after 14
+          days and are shown only when created — lost the link? Revoke it and create a new one.
         </div>
         {invitesQ.isLoading && <div className="p-4 text-sm text-muted-foreground">Loading invites…</div>}
         {!invitesQ.isLoading && invites.length === 0 && (
@@ -1933,20 +1978,17 @@ export function InviteStaffCard() {
                   </span>
                 </div>
               </div>
-              {isOpen && (
-                <>
-                  <CopyLinkButton value={inviteLink(inv.token)} />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-destructive"
-                    aria-label="Revoke invite"
-                    disabled={revoke.isPending && revoke.variables?.id === inv.id}
-                    onClick={() => revoke.mutate({ id: inv.id })}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </>
+              {isOpen && inv.can_revoke && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-destructive"
+                  aria-label="Revoke invite"
+                  disabled={revoke.isPending && revoke.variables?.id === inv.id}
+                  onClick={() => revoke.mutate({ id: inv.id })}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
               )}
             </div>
           );

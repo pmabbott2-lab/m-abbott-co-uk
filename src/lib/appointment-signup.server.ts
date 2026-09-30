@@ -1,9 +1,15 @@
 import { randomInt } from "node:crypto";
-import { emailForCustomerAccount } from "@/lib/customer-account-email";
 import {
+  APPOINTMENT_CUSTOMER_IDENTITY,
+  syntheticCustomerAuthEmail,
+} from "@/lib/customer-account-email";
+import {
+  clearAppointmentSignupChallenge,
   consumeAppointmentSignupChallenge,
+  reserveCustomerSmsSend,
   storeAppointmentSignupChallenge,
 } from "@/lib/auth-sms.store.server";
+import { isValidUkMobile } from "@/lib/phone";
 import { isTwilioConfigured, normaliseUkPhone, sendSms } from "@/lib/sms.server";
 
 /**
@@ -56,12 +62,25 @@ export async function resolveOrCreateCustomerProfile(
     const rows = (byEmail ?? []) as Array<{ id: string }>;
     if (rows.length > 1) return { kind: "ambiguous" };
     if (rows.length === 1) {
-      // profiles.email is user-editable; only treat it as this account's email when Auth agrees.
+      // profiles.email is user-editable; only treat it as this account's email when Auth agrees
+      // (the Auth email, or the service-role-only contact_email of an appointment identity).
       const { data: authUser, error: authErr } = await supabaseAdmin.auth.admin.getUserById(
         rows[0].id,
       );
-      const authEmail = authErr ? null : authUser?.user?.email?.trim().toLowerCase();
-      return authEmail === email ? { kind: "existing", userId: rows[0].id } : { kind: "ambiguous" };
+      const user = authErr ? null : authUser?.user;
+      const authEmail = user?.email?.trim().toLowerCase();
+      const appMeta = (user?.app_metadata ?? {}) as {
+        mh_identity?: unknown;
+        contact_email?: unknown;
+      };
+      const contactEmail =
+        appMeta.mh_identity === APPOINTMENT_CUSTOMER_IDENTITY &&
+        typeof appMeta.contact_email === "string"
+          ? appMeta.contact_email.trim().toLowerCase()
+          : null;
+      return authEmail === email || contactEmail === email
+        ? { kind: "existing", userId: rows[0].id }
+        : { kind: "ambiguous" };
     }
   }
 
@@ -77,9 +96,12 @@ export async function resolveOrCreateCustomerProfile(
     if (rows.length === 1) return { kind: "existing", userId: rows[0].id };
   }
 
+  // Nobody has proved ownership of the supplied email, so the Auth identity uses the
+  // phone-derived synthetic address; the real email is contact data only.
   const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
-    email: emailForCustomerAccount(email, phone),
+    email: syntheticCustomerAuthEmail(phone),
     email_confirm: true,
+    app_metadata: { mh_identity: APPOINTMENT_CUSTOMER_IDENTITY, contact_email: email || null },
     user_metadata: { full_name: input.customerName, phone },
   });
   if (error) {
@@ -270,6 +292,11 @@ export async function verifyAppointmentSignupSmsImpl(data: {
   const { data: authUser, error: authErr } = await supabaseAdmin.auth.admin.getUserById(userId);
   const authEmail = authErr ? null : (authUser?.user?.email as string | undefined);
   if (!authEmail) throw new Error("Could not complete sign-in.");
+  // The code went to `phone`; only the identity whose Auth email is derived from that phone
+  // may be signed in with it.
+  if (authEmail.trim().toLowerCase() !== syntheticCustomerAuthEmail(phone)) {
+    throw new Error(INVALID_CODE_MESSAGE);
+  }
 
   const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
     type: "magiclink",
@@ -281,4 +308,93 @@ export async function verifyAppointmentSignupSmsImpl(data: {
   const tokenHash = linkData.properties?.hashed_token as string | undefined;
   if (!tokenHash) throw new Error("Could not complete sign-in.");
   return { tokenHash };
+}
+
+type AuthIdentityLookupRow = {
+  user_id: string;
+  appointment_identity: boolean;
+  disabled: boolean;
+};
+
+export type CustomerPhoneSignInDeps = {
+  sendSms?: (opts: { to: string; body: string }) => Promise<unknown>;
+  isTwilioConfigured?: () => boolean;
+};
+
+export const CUSTOMER_PHONE_SIGN_IN_SENT =
+  "If this mobile number belongs to a customer account, we've texted it a 6-digit sign-in code.";
+const CUSTOMER_PHONE_SIGN_IN_UNAVAILABLE =
+  "Mobile sign-in isn't available right now. Please try again later.";
+const CUSTOMER_PHONE_SIGN_IN_THROTTLED = "Please wait a minute before requesting another code.";
+
+/**
+ * Re-entry for appointment-created customers. The account is derived from the phone number alone:
+ * it must be the single appointment identity whose Auth email is that phone's synthetic address.
+ * The response is identical whether or not a code was sent.
+ */
+export async function startCustomerPhoneSignInImpl(
+  data: { phone: string },
+  deps: CustomerPhoneSignInDeps = {},
+): Promise<{ message: string }> {
+  if (!isValidUkMobile(data.phone)) {
+    throw new Error("Enter a valid UK mobile number (e.g. 07123 456789).");
+  }
+  const phone = normaliseUkPhone(data.phone);
+  if (!(deps.isTwilioConfigured ?? isTwilioConfigured)()) {
+    throw new Error(CUSTOMER_PHONE_SIGN_IN_UNAVAILABLE);
+  }
+  if (!reserveCustomerSmsSend(phone)) throw new Error(CUSTOMER_PHONE_SIGN_IN_THROTTLED);
+
+  const userId = await resolveCustomerPhoneSignInUser(phone);
+  if (!userId) return { message: CUSTOMER_PHONE_SIGN_IN_SENT };
+
+  const code = String(randomInt(100000, 1000000));
+  storeAppointmentSignupChallenge(phone, userId, code);
+  try {
+    await (deps.sendSms ?? sendSms)({
+      to: phone,
+      body: `Your Mortgage Hub sign-in code is ${code} (10 min). Don't share it with anyone.`,
+    });
+  } catch {
+    clearAppointmentSignupChallenge(phone);
+    console.error("customer phone sign-in: SMS send failed");
+  }
+  return { message: CUSTOMER_PHONE_SIGN_IN_SENT };
+}
+
+async function resolveCustomerPhoneSignInUser(phone: string): Promise<string | null> {
+  const supabaseAdmin = await loadAdmin();
+  const { data, error } = await supabaseAdmin.rpc("lookup_auth_identity_by_email", {
+    p_email: syntheticCustomerAuthEmail(phone),
+  });
+  if (error) return null;
+  const rows = (Array.isArray(data) ? data : []) as AuthIdentityLookupRow[];
+  if (rows.length !== 1) return null;
+  const [row] = rows;
+  if (!row.appointment_identity || row.disabled) return null;
+  if (!(await isEligibleForAppointmentSmsSignIn(row.user_id))) return null;
+  return row.user_id;
+}
+
+export type CustomerSignupEmailCheck = { status: "ok" } | { status: "use_phone_sign_in" };
+
+/**
+ * Self-signup pre-check. An email already recorded as the contact email of an appointment-created
+ * account must not become a second, separate account; the caller is sent to phone sign-in instead.
+ * One, several, or privileged matches all produce the same answer, and nothing is merged.
+ */
+export async function checkCustomerSignupEmailImpl(data: {
+  email: string;
+}): Promise<CustomerSignupEmailCheck> {
+  const email = data.email.trim().toLowerCase();
+  if (!email) return { status: "ok" };
+  const supabaseAdmin = await loadAdmin();
+  const { data: rows, error } = await supabaseAdmin.rpc(
+    "lookup_appointment_identities_by_contact_email",
+    { p_email: email },
+  );
+  if (error) throw new Error("Could not check this email address. Please try again.");
+  return Array.isArray(rows) && rows.length > 0
+    ? { status: "use_phone_sign_in" }
+    : { status: "ok" };
 }

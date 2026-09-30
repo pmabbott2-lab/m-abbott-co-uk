@@ -2,7 +2,8 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
-import { getStaffInvite, markStaffInviteUsed } from "@/lib/sessions.functions";
+import { acceptStaffInvite, getStaffInvite } from "@/lib/sessions.functions";
+import type { StaffInvitePreview } from "@/lib/staff-invite-contract";
 import { getAuthCallbackUrl } from "@/lib/app-url";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,16 +11,6 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { ShieldCheck, Link2 } from "lucide-react";
 import avatarImg from "@/assets/susan.png";
-
-type ResolvedInvite = {
-  tenantId: string;
-  tenantSlug: string | null;
-  role: "advisor" | "introducer" | "admin";
-  email: string | null;
-  companyName: string | null;
-  companyCode: string | null;
-  createCompany: boolean;
-};
 
 export const Route = createFileRoute("/register")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -34,24 +25,27 @@ export const Route = createFileRoute("/register")({
   component: RegisterPage,
 });
 
-const ROLE_LABEL: Record<ResolvedInvite["role"], string> = {
+const ROLE_LABEL: Record<StaffInvitePreview["role"], string> = {
   advisor: "Advisor",
   introducer: "Introducer",
   admin: "Admin",
 };
 
+type Mode = "create" | "signin";
+
 function RegisterPage() {
   const navigate = useNavigate();
   const { invite: token } = Route.useSearch();
   const getInviteFn = useServerFn(getStaffInvite);
-  const markUsedFn = useServerFn(markStaffInviteUsed);
+  const acceptFn = useServerFn(acceptStaffInvite);
 
   const [loadingInvite, setLoadingInvite] = useState(true);
-  const [invite, setInvite] = useState<ResolvedInvite | null>(null);
+  const [invite, setInvite] = useState<StaffInvitePreview | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
 
+  const [mode, setMode] = useState<Mode>("create");
   const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -67,9 +61,7 @@ function RegisterPage() {
       }
       try {
         const resolved = await getInviteFn({ data: { token } });
-        if (cancelled) return;
-        setInvite(resolved);
-        if (resolved.email) setEmail(resolved.email);
+        if (!cancelled) setInvite(resolved);
       } catch (e) {
         if (!cancelled) {
           setInviteError(e instanceof Error ? e.message : "This invite link is not valid.");
@@ -82,6 +74,16 @@ function RegisterPage() {
       cancelled = true;
     };
   }, [token, getInviteFn]);
+
+  useEffect(() => {
+    void supabase.auth.getSession().then(({ data }) => {
+      setSessionEmail(data.session?.user.email?.trim().toLowerCase() ?? null);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSessionEmail(session?.user.email?.trim().toLowerCase() ?? null);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
 
   const showStatus = (type: "error" | "success", text: string) => {
     setStatus({ type, text });
@@ -100,72 +102,88 @@ function RegisterPage() {
     void navigate({ to: "/" });
   };
 
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!token || !invite) return;
+  // Acceptance always runs as the signed-in user; the server binds the invite to
+  // that account's confirmed email. No user id is ever sent from the browser.
+  const accept = async () => {
+    if (!token) return;
+    const result = await acceptFn({ data: { token } });
+    showStatus("success", "Invitation accepted — taking you to your dashboard…");
+    goAfterInvite(result.tenantSlug);
+  };
+
+  const run = async (fn: () => Promise<void>) => {
     setStatus(null);
     setSubmitting(true);
     try {
-      const trimmedEmail = email.trim();
+      await fn();
+    } catch (err) {
+      showStatus("error", err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const onCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!invite) return;
+    void run(async () => {
       const { data, error } = await supabase.auth.signUp({
-        email: trimmedEmail,
+        email: invite.email,
         password,
         options: {
           emailRedirectTo: getAuthCallbackUrl(invite.tenantSlug),
           data: { full_name: fullName.trim(), phone: phone.trim() },
         },
       });
-
       const alreadyRegistered =
         (data.user && data.user.identities?.length === 0) ||
         (error && /already (been )?registered|already exists|user already/i.test(error.message));
-
       if (alreadyRegistered) {
-        const { data: signedIn, error: signInErr } = await supabase.auth.signInWithPassword({
-          email: trimmedEmail,
-          password,
-        });
-        if (signInErr || !signedIn.user) {
-          showStatus(
-            "error",
-            "This email already has an account. Sign in with that password on this invite link to attach the staff role, or use a different email.",
-          );
-          return;
-        }
-        await markUsedFn({ data: { token, userId: signedIn.user.id } });
-        showStatus("success", "Invite attached to your existing account — taking you to your dashboard…");
-        goAfterInvite(invite.tenantSlug);
+        setMode("signin");
+        showStatus(
+          "error",
+          "This email already has an account. Sign in below to accept the invite.",
+        );
         return;
       }
-
       if (error) throw error;
-      if (!data.user) {
-        showStatus("error", "Sign-up did not complete. Please try again.");
-        return;
-      }
-
-      // Consume the invite server-side: grants the advisor/introducer/admin role and
-      // marks the invite used. This is what stops the new account being a plain
-      // customer.
-      await markUsedFn({ data: { token, userId: data.user.id } });
-
       if (data.session) {
-        showStatus("success", "Welcome aboard — taking you to your dashboard…");
-        goAfterInvite(invite.tenantSlug);
+        await accept();
         return;
       }
-
+      setMode("signin");
       showStatus(
         "success",
-        "Account created and your role is set up. Check your email to confirm, then sign in.",
+        "Account created. Check your inbox and confirm your email, then return to this invite link and sign in to accept.",
       );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Something went wrong";
-      showStatus("error", msg);
-    } finally {
-      setSubmitting(false);
-    }
+    });
   };
+
+  const onSignIn = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!invite) return;
+    void run(async () => {
+      const { error } = await supabase.auth.signInWithPassword({ email: invite.email, password });
+      if (error) {
+        if (/not confirmed/i.test(error.message)) {
+          throw new Error(
+            "Confirm your email address first — check your inbox, then sign in here.",
+          );
+        }
+        throw error;
+      }
+      await accept();
+    });
+  };
+
+  const onSignOut = () => {
+    void run(async () => {
+      await supabase.auth.signOut();
+    });
+  };
+
+  const signedInMatches = Boolean(invite && sessionEmail && sessionEmail === invite.email);
+  const signedInOther = Boolean(invite && sessionEmail && sessionEmail !== invite.email);
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-12 bg-background">
@@ -188,13 +206,13 @@ function RegisterPage() {
                 You&apos;ve been invited to join Mortgage Hub as an {ROLE_LABEL[invite.role]}
               </h1>
               <p className="text-sm text-muted-foreground">
+                This invitation is for{" "}
+                <span className="font-medium text-foreground">{invite.email}</span>.
                 {invite.role === "introducer"
                   ? invite.createCompany
-                    ? "Create your account below. We'll set you up with your own introducer company and referral links."
-                    : `Create your account below. You'll be linked to ${invite.companyName ? `“${invite.companyName}”` : `company ${invite.companyCode}`}.`
-                  : invite.role === "admin"
-                    ? "Create your account below. If this email is already registered (for example a test account), use that password — we'll attach the admin role and mark the invite as used."
-                    : "Create your account below to start working with customer fact-finds."}
+                    ? " We'll set you up with your own introducer company and referral links."
+                    : ` You'll be linked to ${invite.companyName ? `“${invite.companyName}”` : `company ${invite.companyCode}`}.`
+                  : ""}
               </p>
             </>
           ) : (
@@ -225,42 +243,79 @@ function RegisterPage() {
             </div>
           )}
 
-          {invite && !inviteError && (
-            <form onSubmit={onSubmit} className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="name">Full name</Label>
-                <Input id="name" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="phone">Mobile number</Label>
-                <Input
-                  id="phone"
-                  type="tel"
-                  autoComplete="tel"
-                  inputMode="tel"
-                  placeholder="07…"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  required
-                />
-              </div>
+          {invite && !inviteError && signedInMatches && (
+            <div className="space-y-3">
+              <p className="text-sm">
+                Signed in as <span className="font-medium">{sessionEmail}</span>.
+              </p>
+              <Button
+                type="button"
+                disabled={submitting}
+                className="w-full"
+                onClick={() => void run(accept)}
+              >
+                {submitting ? "Accepting…" : "Accept invitation"}
+              </Button>
+            </div>
+          )}
+
+          {invite && !inviteError && signedInOther && (
+            <div className="space-y-3">
+              <p className="text-sm">
+                You&apos;re signed in as <span className="font-medium">{sessionEmail}</span>, but
+                this invitation is for <span className="font-medium">{invite.email}</span>. Sign
+                out, then sign in or create an account with the invited email address.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={submitting}
+                className="w-full"
+                onClick={onSignOut}
+              >
+                Sign out
+              </Button>
+            </div>
+          )}
+
+          {invite && !inviteError && !sessionEmail && (
+            <form onSubmit={mode === "create" ? onCreate : onSignIn} className="space-y-3">
+              {mode === "create" && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="name">Full name</Label>
+                    <Input
+                      id="name"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="phone">Mobile number</Label>
+                    <Input
+                      id="phone"
+                      type="tel"
+                      autoComplete="tel"
+                      inputMode="tel"
+                      placeholder="07…"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      required
+                    />
+                  </div>
+                </>
+              )}
               <div className="space-y-1.5">
                 <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
+                <Input id="email" type="email" value={invite.email} readOnly disabled />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="password">Password</Label>
                 <Input
                   id="password"
                   type="password"
-                  autoComplete="new-password"
+                  autoComplete={mode === "create" ? "new-password" : "current-password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
@@ -268,22 +323,32 @@ function RegisterPage() {
                 />
               </div>
               <Button type="submit" disabled={submitting} className="w-full">
-                {submitting ? "Creating your account…" : "Create account"}
+                {mode === "create"
+                  ? submitting
+                    ? "Creating your account…"
+                    : "Create account"
+                  : submitting
+                    ? "Signing in…"
+                    : "Sign in and accept"}
               </Button>
+              <button
+                type="button"
+                className="w-full text-xs text-muted-foreground hover:underline"
+                onClick={() => {
+                  setStatus(null);
+                  setMode(mode === "create" ? "signin" : "create");
+                }}
+              >
+                {mode === "create"
+                  ? "Already have an account with this email? Sign in instead"
+                  : "New here? Create an account instead"}
+              </button>
             </form>
           )}
         </div>
 
         <p className="text-xs text-center text-muted-foreground space-x-3">
           <Link to="/" className="hover:underline">← Back home</Link>
-          <span>·</span>
-          <Link
-            to="/auth"
-            search={invite?.tenantSlug ? { tenant: invite.tenantSlug } : {}}
-            className="hover:underline"
-          >
-            Already have an account? Sign in
-          </Link>
         </p>
       </div>
     </div>

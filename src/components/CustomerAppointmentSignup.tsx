@@ -202,7 +202,8 @@ export function CustomerAppointmentSignup({
         <h2 className="text-2xl font-semibold">Appointment confirmed</h2>
         <p className="text-sm text-muted-foreground">
           Your call is booked for <strong>{format(bookedAt, "EEE d MMM yyyy, HH:mm")}</strong>. Sign
-          in to your account to manage it.
+          in to manage it — if you booked without a password, choose &quot;Sign in with text
+          message&quot; and use the mobile number from your booking.
         </p>
         <Button onClick={onSwitchSignIn}>Sign in</Button>
       </div>

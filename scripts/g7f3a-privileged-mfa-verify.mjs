@@ -483,6 +483,16 @@ ok("FRESH_AGE_constants_central", pure.PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.platfor
     const json = (v, status = 200) =>
       new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json" } });
     if (url.pathname === "/rest/v1/profiles" && method === "GET") return json([{ email: INVITEE }]);
+    // G7F-4S3B: the invitee email is the canonical confirmed auth.users email, not profiles.email.
+    if (url.pathname === `/auth/v1/admin/users/${UID}` && method === "GET") {
+      return json({
+        id: UID,
+        email: INVITEE,
+        email_confirmed_at: "2026-01-01T00:00:00Z",
+        aud: "authenticated",
+        role: "authenticated",
+      });
+    }
     if (url.pathname === "/rest/v1/rpc/claim_platform_invitation") {
       if (claimReply === "used") return json({ code: "28000", message: "platform_invite_used", details: null, hint: null }, 400);
       return json([
@@ -514,7 +524,7 @@ ok("FRESH_AGE_constants_central", pure.PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.platfor
 
   const acc = adminsMod.acceptPlatformInviteImpl.toString();
   const iHook = acc.indexOf("requireFreshPrivilegedAuth(");
-  const iEmail = acc.indexOf("loadAuthEmail(");
+  const iEmail = acc.indexOf("loadConfirmedAuthEmail(");
   const iClaim = acc.indexOf("claim_platform_invitation");
   const accStart = admins.indexOf("export async function acceptPlatformInviteImpl(");
   const accSrc = admins.slice(accStart, admins.indexOf("\n}\n", accStart));
@@ -584,7 +594,7 @@ ok("FRESH_AGE_constants_central", pure.PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.platfor
       goodClaim.p_user_id === UID &&
       goodClaim.p_email === INVITEE &&
       Object.keys(goodClaim).sort().join(",") === "p_email,p_token_hash,p_user_id" &&
-      goodOrder[0] === "GET /rest/v1/profiles" &&
+      goodOrder[0] === `GET /auth/v1/admin/users/${UID}` &&
       goodOrder[1] === "POST /rest/v1/rpc/claim_platform_invitation" &&
       !replay.ok && !replay.mfa && replay.error?.code === "INVITE" && /already been used/.test(replay.error?.message ?? "") &&
       !auditEvents().includes("PLATFORM_ROLE_GRANTED"),

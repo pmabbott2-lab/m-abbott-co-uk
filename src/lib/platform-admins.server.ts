@@ -23,6 +23,7 @@ import { isPlatformRole, type PlatformRole, type SuperAdminAccessLevel } from "@
 import { requireSuperOwner } from "@/lib/platform-authority.server";
 import { PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC, PRIVILEGED_MFA_ACTIONS } from "@/lib/privileged-mfa";
 import { requireFreshPrivilegedAuth } from "@/lib/privileged-mfa.server";
+import { findAuthUserByEmail, loadConfirmedAuthEmail } from "@/lib/auth-identity.server";
 
 export class PlatformAdminError extends Error {
   readonly code:
@@ -77,29 +78,15 @@ async function writeAdminAudit(
   }
 }
 
-async function findAuthUserIdByEmail(email: string): Promise<string | null> {
-  const normalised = email.trim().toLowerCase();
-  const { data: profile } = await db
-    .from("profiles")
-    .select("id")
-    .eq("email", normalised)
-    .maybeSingle();
-  if (profile?.id) return profile.id as string;
-
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 });
-  if (error) throw new Error(error.message);
-  const hit = (data.users ?? []).find((u) => (u.email ?? "").toLowerCase() === normalised);
-  return hit?.id ?? null;
-}
-
-async function loadAuthEmail(userId: string): Promise<string | null> {
-  const { data: profile } = await db.from("profiles").select("email").eq("id", userId).maybeSingle();
-  if (profile?.email) return String(profile.email).toLowerCase();
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
-  if (error) return null;
-  return data.user?.email?.toLowerCase() ?? null;
+// Canonical auth.users email only — profiles.email is user-editable.
+async function findAuthUserIdByEmail(
+  email: string,
+  opts?: { requireConfirmed?: boolean },
+): Promise<string | null> {
+  const hit = await findAuthUserByEmail(email);
+  if (!hit) return null;
+  if (opts?.requireConfirmed && !hit.emailConfirmed) return null;
+  return hit.id;
 }
 
 function parseRole(role: string): PlatformRole {
@@ -219,7 +206,7 @@ export async function addPlatformAdministratorImpl(input: {
   }
   // Future dual-control (separate gate): insert after confirmSuperOwner, before grant/invite.
 
-  const existingUserId = await findAuthUserIdByEmail(email);
+  const existingUserId = await findAuthUserIdByEmail(email, { requireConfirmed: true });
   const displayName = `${firstName} ${lastName}`.trim();
 
   if (existingUserId) {
@@ -615,9 +602,12 @@ export async function acceptPlatformInviteImpl(input: {
     target: "platform_invitation",
     maxAgeSec: PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC.platformAuthorityChange,
   });
-  const email = await loadAuthEmail(input.userId);
+  const email = await loadConfirmedAuthEmail(input.userId);
   if (!email) {
-    throw new PlatformAdminError("INVITE", "Could not resolve your account email.");
+    throw new PlatformAdminError(
+      "INVITE",
+      "Confirm your account email address before accepting this invitation.",
+    );
   }
   const hash = hashInviteToken(input.rawToken.trim());
   const { data, error } = await db.rpc("claim_platform_invitation", {

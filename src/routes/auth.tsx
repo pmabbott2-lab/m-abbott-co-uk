@@ -9,7 +9,13 @@ import {
   isPasswordRecoveryPending,
   isPasswordRecoveryUrl,
 } from "@/lib/auth-recovery";
-import { sendLoginSmsCode, verifyLoginSmsCodeFn } from "@/lib/auth.functions";
+import {
+  checkCustomerSignupEmail,
+  sendLoginSmsCode,
+  startCustomerPhoneSignIn,
+  verifyCustomerPhoneSignIn,
+  verifyLoginSmsCodeFn,
+} from "@/lib/auth.functions";
 import {
   clearLoginSmsVerified,
   isLoginSmsVerified,
@@ -155,6 +161,9 @@ function AuthPage() {
 
   const sendLoginSmsFn = useServerFn(sendLoginSmsCode);
   const verifyLoginSmsFn = useServerFn(verifyLoginSmsCodeFn);
+  const startCustomerPhoneSignInFn = useServerFn(startCustomerPhoneSignIn);
+  const verifyCustomerPhoneSignInFn = useServerFn(verifyCustomerPhoneSignIn);
+  const checkCustomerSignupEmailFn = useServerFn(checkCustomerSignupEmail);
   const resolveDestinationFn = useServerFn(resolveMyPostAuthDestination);
   const signInInFlight = useRef(false);
   const platformIntent = intent === "platform";
@@ -639,6 +648,16 @@ function AuthPage() {
         }
         const phoneValue = normaliseUkPhone(phoneRaw);
 
+        const existing = await checkCustomerSignupEmailFn({ data: { email: emailValue } });
+        if (existing.status === "use_phone_sign_in") {
+          switchMode("phone");
+          showStatus(
+            "error",
+            "This email was used to book an appointment. Sign in with the mobile number you booked with instead of creating a new account.",
+          );
+          return;
+        }
+
         const { data, error } = await supabase.auth.signUp({
           email: emailValue,
           password: passwordValue,
@@ -739,21 +758,12 @@ function AuthPage() {
     setStatus(null);
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithOtp({ phone: e164 });
-      if (error) throw error;
+      const result = await startCustomerPhoneSignInFn({ data: { phone: e164 } });
       setOtpSentTo(e164);
       setOtpCode("");
-      showStatus("success", `We've texted a 6-digit code to ${e164}.${resend ? " (resent)" : ""}`);
+      showStatus("success", `${result.message}${resend ? " (resent)" : ""}`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Could not send the code";
-      if (/signups not allowed|otp.*disabled|phone.*provider|not enabled/i.test(msg)) {
-        showStatus(
-          "error",
-          "Phone sign-in isn't enabled yet. An admin must turn on the Phone provider and an SMS provider in Supabase.",
-        );
-      } else {
-        showStatus("error", msg);
-      }
+      showStatus("error", err instanceof Error ? err.message : "Could not send the code");
     } finally {
       setLoading(false);
     }
@@ -770,10 +780,12 @@ function AuthPage() {
     setStatus(null);
     setLoading(true);
     try {
+      const { tokenHash } = await verifyCustomerPhoneSignInFn({
+        data: { phone: otpSentTo, code: token },
+      });
       const { data, error } = await supabase.auth.verifyOtp({
-        phone: otpSentTo,
-        token,
-        type: "sms",
+        token_hash: tokenHash,
+        type: "magiclink",
       });
       if (error) throw error;
       if (!data.session) {
@@ -872,7 +884,7 @@ function AuthPage() {
         : mode === "phone"
         ? otpSentTo
           ? "Enter the 6-digit code we just texted you."
-          : "Customers and introducers: we'll text you a one-time code to sign in — no authenticator app needed."
+          : "Booked an appointment with us? We'll text a one-time code to the mobile number you booked with."
         : mode === "signup" && journeyStart === "voice"
           ? "A short spoken fact-find with Susan — create your account to begin."
           : mode === "signup" && journeyStart === "chat"
@@ -1207,6 +1219,20 @@ function AuthPage() {
           </form>
           )}
 
+          {mode === "forgot" && (
+            <p className="text-xs text-muted-foreground">
+              Booked an appointment without setting a password?{" "}
+              <button
+                type="button"
+                onClick={() => switchMode("phone")}
+                className="underline hover:text-foreground"
+              >
+                Sign in with your mobile number
+              </button>
+              .
+            </p>
+          )}
+
           {mode === "phone" && !otpSentTo && (
             <form
               onSubmit={(e) => {
@@ -1229,7 +1255,8 @@ function AuthPage() {
                   autoFocus
                 />
                 <p className="text-xs text-muted-foreground">
-                  UK mobile only. For customers and introducers — advisors and admins should sign in with email and an authenticator app.
+                  UK mobile only. For customers who booked an appointment — staff and introducers
+                  should sign in with email.
                 </p>
               </div>
               <Button type="submit" disabled={loading} className="w-full">

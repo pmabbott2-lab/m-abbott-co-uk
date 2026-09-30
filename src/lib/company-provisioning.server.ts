@@ -11,6 +11,8 @@ import { supabaseAdminUntyped as db } from "@/integrations/supabase/client.serve
 import { isReservedTenantSlug } from "@/lib/tenant-presentation";
 import { withForcedTenantId } from "@/lib/tenant-assert.server";
 import { PRIVILEGED_FRESH_AUTH_MAX_AGE_SEC, PRIVILEGED_MFA_ACTIONS } from "@/lib/privileged-mfa";
+import { staffInviteRegisterPath } from "@/lib/staff-invite-contract";
+import { newStaffInviteToken } from "@/lib/staff-invite.server";
 
 export class PlatformAuthorityError extends Error {
   readonly code = "PLATFORM_AUTHORITY_REQUIRED" as const;
@@ -65,7 +67,9 @@ export type ProvisionResult = {
   slug: string;
   tenantType: "GROUP" | "EXTERNAL";
   status: string;
+  /** Raw Owner invite token — returned once to the provisioning platform operator. */
   inviteToken: string;
+  inviteRegisterPath: string;
   inviteExpiresAt: string | null;
 };
 
@@ -206,15 +210,17 @@ export async function provisionTenantInternal(
     }
 
     const expires = new Date(Date.now() + 7 * 24 * 3600_000).toISOString();
+    const inviteToken = newStaffInviteToken();
     // app_role has no 'owner' — use admin + membership_role=owner (G6).
     const { data: invite, error: iErr } = await db
       .from("staff_invitations")
       .insert(
         withForcedTenantId(
           {
+            token_hash: inviteToken.hash,
             role: "admin",
             membership_role: "owner",
-            email: input.initialOwner.email.toLowerCase(),
+            email: input.initialOwner.email.trim().toLowerCase(),
             create_company: false,
             company_code: null,
             company_name: input.companyName,
@@ -224,7 +230,7 @@ export async function provisionTenantInternal(
           tenantId,
         ),
       )
-      .select("token, expires_at")
+      .select("expires_at")
       .single();
     if (iErr || !invite) throw new Error(iErr?.message || "Owner invite failed.");
 
@@ -234,7 +240,8 @@ export async function provisionTenantInternal(
       slug: tenant.slug,
       tenantType: tenant.tenant_type,
       status: tenant.status,
-      inviteToken: invite.token,
+      inviteToken: inviteToken.raw,
+      inviteRegisterPath: staffInviteRegisterPath(inviteToken.raw),
       inviteExpiresAt: invite.expires_at ?? null,
     };
   } catch (e) {

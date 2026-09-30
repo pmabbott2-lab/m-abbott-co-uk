@@ -33,6 +33,7 @@ import {
 import { startPlatformTenantEntry } from "@/lib/platform-tenant-entry.functions";
 import { usePlatformAuthority } from "@/lib/platform-ui";
 import { useStepUpServerFn } from "@/components/platform/PrivilegedStepUp";
+import { OneTimeInviteLink } from "@/components/staff/OneTimeInviteLink";
 import { toast } from "sonner";
 
 export function PlatformStatCards({ overview }: { overview: PlatformDashboardOverview }) {
@@ -354,6 +355,7 @@ function CompanyOwnersPanel({
     email: string;
     existingRoles: string[];
   } | null>(null);
+  const [issuedInvite, setIssuedInvite] = useState<{ email: string; path: string } | null>(null);
 
   const ownersQ = useQuery({
     queryKey: ["platform-company-owners", companyCode],
@@ -386,7 +388,8 @@ function CompanyOwnersPanel({
       } else if (res.outcome === "added") {
         toast.success(`Owner added: ${res.email}`);
       } else if (res.outcome === "invited") {
-        toast.success(`Owner invitation sent to ${res.email}`);
+        setIssuedInvite({ email: res.email, path: res.inviteRegisterPath });
+        toast.success(`Owner invitation created for ${res.email}`);
       }
       setAddOpen(false);
       setElevateConfirm(null);
@@ -455,6 +458,15 @@ function CompanyOwnersPanel({
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">
+        {issuedInvite ? (
+          <div className="space-y-2 rounded-lg border border-border p-3">
+            <p className="text-sm font-medium">Owner invite link for {issuedInvite.email}</p>
+            <OneTimeInviteLink path={issuedInvite.path} email={issuedInvite.email} />
+            <Button type="button" size="sm" variant="ghost" onClick={() => setIssuedInvite(null)}>
+              Done
+            </Button>
+          </div>
+        ) : null}
         {ownersQ.isLoading ? (
           <p className="text-sm text-muted-foreground">Loading owners…</p>
         ) : ownersQ.isError ? (

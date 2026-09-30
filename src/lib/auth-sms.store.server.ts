@@ -65,3 +65,32 @@ export function consumeAppointmentSignupChallenge(phone: string, code: string): 
   appointmentSignupChallenges.delete(phone);
   return entry.userId;
 }
+
+export function clearAppointmentSignupChallenge(phone: string): void {
+  appointmentSignupChallenges.delete(phone);
+}
+
+// Customer phone re-entry sends are throttled per destination phone, whether or not the number
+// matches an account, so the throttle itself reveals nothing.
+const CUSTOMER_SMS_MIN_INTERVAL_MS = 60 * 1000;
+const CUSTOMER_SMS_WINDOW_MS = 60 * 60 * 1000;
+const CUSTOMER_SMS_MAX_PER_WINDOW = 5;
+const customerSmsSends = new Map<string, number[]>();
+
+/** Records a send attempt for `phone`; returns false when the attempt must be refused. */
+export function reserveCustomerSmsSend(phone: string, now: number = Date.now()): boolean {
+  const recent = (customerSmsSends.get(phone) ?? []).filter(
+    (t) => now - t < CUSTOMER_SMS_WINDOW_MS,
+  );
+  const last = recent[recent.length - 1];
+  if (
+    (last !== undefined && now - last < CUSTOMER_SMS_MIN_INTERVAL_MS) ||
+    recent.length >= CUSTOMER_SMS_MAX_PER_WINDOW
+  ) {
+    customerSmsSends.set(phone, recent);
+    return false;
+  }
+  recent.push(now);
+  customerSmsSends.set(phone, recent);
+  return true;
+}

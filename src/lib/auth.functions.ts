@@ -77,3 +77,42 @@ export const verifyAppointmentSignupSms = createServerFn({ method: "POST" })
     const { verifyAppointmentSignupSmsImpl } = await import("@/lib/appointment-signup.server");
     return verifyAppointmentSignupSmsImpl(data);
   });
+
+/** Customer re-entry: text a sign-in code to the phone of an appointment-created account. */
+export const startCustomerPhoneSignIn = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) =>
+    z
+      .object({ phone: z.string().trim().min(7).max(32) })
+      .strict()
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { startCustomerPhoneSignInImpl } = await import("@/lib/appointment-signup.server");
+    return startCustomerPhoneSignInImpl(data);
+  });
+
+/** Customer re-entry: exchange the texted code for a magic-link token for the bound account. */
+export const verifyCustomerPhoneSignIn = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) =>
+    z
+      .object({ phone: z.string().trim().min(7).max(32), code: z.string().regex(/^\d{6}$/) })
+      .strict()
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { verifyAppointmentSignupSmsImpl } = await import("@/lib/appointment-signup.server");
+    return verifyAppointmentSignupSmsImpl(data);
+  });
+
+/** Self-signup pre-check against emails already attached to appointment-created accounts. */
+export const checkCustomerSignupEmail = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) =>
+    z
+      .object({ email: z.string().trim().email().max(320) })
+      .strict()
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { checkCustomerSignupEmailImpl } = await import("@/lib/appointment-signup.server");
+    return checkCustomerSignupEmailImpl(data);
+  });

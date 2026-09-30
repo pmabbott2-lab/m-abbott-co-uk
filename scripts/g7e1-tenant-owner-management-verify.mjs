@@ -63,7 +63,13 @@ ok("server_no_admin_profiles_authority", !server.includes('.from("admin_profiles
 ok("server_invite_reuses_staff", server.includes("staff_invitations") && server.includes('membership_role: "owner"'));
 ok("server_invite_7d", server.includes("7 * 24 * 3600"));
 ok("server_no_password", !server.toLowerCase().includes("password"));
-ok("server_no_token_return", !server.includes("inviteToken") && !server.includes("token:"));
+// G7F-4S3B: the Owner link is returned once to the platform operator; only its hash is stored.
+ok(
+  "server_no_token_return",
+  !server.includes("token:") &&
+    server.includes("token_hash: inviteToken.hash") &&
+    !/select\([^)]*\btoken\b/.test(server),
+);
 ok("server_soft_deactivate", server.includes("active: false"));
 ok("server_audit_invited", server.includes("TENANT_OWNER_INVITED"));
 ok("server_audit_added", server.includes("TENANT_OWNER_ADDED"));

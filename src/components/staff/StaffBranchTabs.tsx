@@ -140,7 +140,9 @@ function ManagementBranchPanel({
               isSupervisor={staff.isSupervisor}
             />
           }
-          invitesPanel={<InviteStaffCard />}
+          invitesPanel={
+            <InviteStaffCard isOwner={staff.isOwner} isSupervisor={staff.isSupervisor} />
+          }
         />
       ),
     });

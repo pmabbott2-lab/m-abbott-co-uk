@@ -11,7 +11,11 @@ import {
 } from "@/lib/sms.server";
 import { canAmend } from "@/lib/admin-access";
 import type { OwnerCustomerExportRow } from "@/lib/report-export.types";
-import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
+import {
+  createStaffInviteInputSchema,
+  staffInviteTokenInputSchema,
+  type StaffInvitePreview,
+} from "@/lib/staff-invite-contract";
 
 // Each customer file (session) can be allocated to at most this many advisors.
 const MAX_ADVISORS_PER_SESSION = 3;
@@ -3628,244 +3632,51 @@ export const listBinnedStaff = createServerFn({ method: "GET" })
     return { advisors: binnedAdvisors, introducers: binnedIntroducers, customers: binnedCustomers };
   });
 
-// Admin creates a shareable staff invite. Returns the invite token; the UI
-// builds the registration link (/register?invite=<token>).
-function membershipRoleForStaffInvite(
-  role: "advisor" | "introducer" | "admin",
-  membershipRole?: "general" | "supervisor" | "adviser" | "introducer" | null,
-): "general" | "supervisor" | "adviser" | "introducer" {
-  if (membershipRole) return membershipRole;
-  if (role === "admin") return "general";
-  if (role === "introducer") return "introducer";
-  return "adviser";
-}
-
+// Admin creates a staff invite for a specific email. The raw token/link is
+// returned once, in this response only; the database stores its SHA-256 hash.
 export const createStaffInvite = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) =>
-    z
-      .object({
-        role: z.enum(["advisor", "introducer", "admin"]),
-        /** Tenant membership role. Owner invites are platform-provisioning only. */
-        membershipRole: z.enum(["general", "supervisor", "adviser", "introducer"]).optional(),
-        email: z.string().email().optional().or(z.literal("")),
-        // Introducer-only: create a new company vs join an existing one.
-        companyMode: z.enum(["new", "join"]).optional(),
-        companyCode: z.string().regex(/^\d{4}$/).optional(),
-      })
-      .parse(d),
-  )
+  .inputValidator((d: unknown) => createStaffInviteInputSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await requireAdmin(context.userId);
-    const { resolveSoleMembershipTenant, withForcedTenantId, rejectMismatchedClientTenantId } =
-      await import("@/lib/tenant-assert.server");
-    const authorised = await resolveSoleMembershipTenant(context.userId);
-    // Ignore any forged tenant_id in the body — authority is membership only.
-    rejectMismatchedClientTenantId(authorised.tenant.id, (data as { tenant_id?: string }).tenant_id);
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-
-    const membershipRole = membershipRoleForStaffInvite(data.role, data.membershipRole);
-    if (membershipRole === "supervisor" && data.role !== "admin") {
-      throw new Error("Supervisor invites require the admin role.");
-    }
-
-    const isJoin = data.role === "introducer" && data.companyMode === "join";
-    let companyName: string | null = null;
-    if (isJoin) {
-      if (!data.companyCode) throw new Error("Enter the 4-digit company code to join.");
-      const { data: company, error: companyErr } = await supabaseAdmin
-        .from("introducers")
-        .select("company_name")
-        .eq("company_code", data.companyCode)
-        .eq("tenant_id", authorised.tenant.id)
-        .limit(1)
-        .maybeSingle();
-      if (companyErr && !isMissingTableError(companyErr)) throw new Error(companyErr.message);
-      if (!company) throw new Error(`No company found with code ${data.companyCode}.`);
-      companyName = (company as { company_name?: string | null }).company_name ?? null;
-    }
-
-    const { data: invite, error } = await supabaseAdmin
-      .from("staff_invitations")
-      .insert(
-        withForcedTenantId(
-          {
-            role: data.role,
-            membership_role: membershipRole,
-            email: data.email ? data.email.trim().toLowerCase() : null,
-            create_company: data.role === "introducer" ? data.companyMode !== "join" : false,
-            company_code: isJoin ? data.companyCode : null,
-            company_name: companyName,
-            created_by: context.userId,
-          },
-          authorised.tenant.id,
-        ),
-      )
-      .select("token, role, membership_role, email, expires_at, tenant_id")
-      .single();
-    if (error) {
-      if (isMissingTableError(error)) {
-        throw new Error("Run the staff_invitations migration (APPLY_NEW_FEATURES.sql) first.");
-      }
-      throw new Error(error.message);
-    }
-    return invite;
+    const { createStaffInviteImpl } = await import("@/lib/staff-invite.server");
+    return createStaffInviteImpl({ actorUserId: context.userId, data });
   });
 
-// List open + recent staff invites for the Manage tab.
+// List open + recent staff invites for the Manage tab (metadata only, no tokens).
 export const listStaffInvites = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireAdmin(context.userId);
-    const { resolveSoleMembershipTenant } = await import("@/lib/tenant-assert.server");
-    const authorised = await resolveSoleMembershipTenant(context.userId);
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-    const { data, error } = await supabaseAdmin
-      .from("staff_invitations")
-      .select(
-        "id, token, role, membership_role, email, company_code, company_name, create_company, created_at, expires_at, used_at, tenant_id",
-      )
-      .eq("tenant_id", authorised.tenant.id)
-      .order("created_at", { ascending: false })
-      .limit(50);
-    if (error) {
-      if (isMissingTableError(error)) return [];
-      throw new Error(error.message);
-    }
-    return data ?? [];
+    const { listStaffInvitesImpl } = await import("@/lib/staff-invite.server");
+    return listStaffInvitesImpl({ actorUserId: context.userId });
   });
 
-// Revoke (delete) an unused invite.
+// Revoke (delete) an unused invite by id.
 export const revokeStaffInvite = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).strict().parse(d))
   .handler(async ({ data, context }) => {
-    await requireAdmin(context.userId);
-    const { resolveSoleMembershipTenant, assertRowBelongsToTenant } = await import(
-      "@/lib/tenant-assert.server"
-    );
-    const authorised = await resolveSoleMembershipTenant(context.userId);
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-    await assertRowBelongsToTenant({
-      table: "staff_invitations",
-      id: data.id,
-      authorisedTenantId: authorised.tenant.id,
-      select: "id, tenant_id",
-    });
-    const { error } = await supabaseAdmin
-      .from("staff_invitations")
-      .delete()
-      .eq("id", data.id)
-      .eq("tenant_id", authorised.tenant.id)
-      .is("used_at", null);
-    if (error && !isMissingTableError(error)) throw new Error(error.message);
-    return { ok: true };
+    const { revokeStaffInviteImpl } = await import("@/lib/staff-invite.server");
+    return revokeStaffInviteImpl({ actorUserId: context.userId, id: data.id });
   });
 
-type ResolvedInvite = {
-  tenantId: string;
-  tenantSlug: string | null;
-  role: "advisor" | "introducer" | "admin";
-  /** Intended tenant_membership.role — never derived from URL/slug. */
-  membershipRole: "owner" | "supervisor" | "general" | "adviser" | "introducer";
-  email: string | null;
-  companyName: string | null;
-  companyCode: string | null;
-  createCompany: boolean;
-};
-
-function resolveMembershipRoleFromInvite(invite: {
-  role: string;
-  membership_role?: string | null;
-}): ResolvedInvite["membershipRole"] {
-  const mr = invite.membership_role;
-  if (
-    mr === "owner" ||
-    mr === "supervisor" ||
-    mr === "general" ||
-    mr === "adviser" ||
-    mr === "introducer"
-  ) {
-    return mr;
-  }
-  // Legacy fallback (pre-G6): admin was incorrectly treated as owner — now general.
-  if (invite.role === "admin") return "general";
-  if (invite.role === "introducer") return "introducer";
-  return "adviser";
-}
-
-// Resolve a staff invite by its secret token. PUBLIC (no auth) — uses the
-// service-role client so the unauthenticated /register page can validate the
-// token without client RLS. Rejects missing / used / expired invites.
-async function resolveInviteByToken(token: string): Promise<{
-  id: string;
-  tenantId: string;
-  resolved: ResolvedInvite;
-}> {
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-  const { data: invite, error } = await supabaseAdmin
-    .from("staff_invitations")
-    .select(
-      "id, tenant_id, role, membership_role, email, company_code, company_name, create_company, expires_at, used_at",
-    )
-    .eq("token", token)
-    .maybeSingle();
-  if (error) {
-    if (isMissingTableError(error)) throw new Error("This invite link is not valid.");
-    throw new Error(error.message);
-  }
-  if (!invite) throw new Error("This invite link is not valid.");
-  if (invite.used_at) throw new Error("This invite link has already been used.");
-  if (invite.expires_at && new Date(invite.expires_at).getTime() < Date.now()) {
-    throw new Error("This invite link has expired. Ask an admin for a new one.");
-  }
-  if (!invite.tenant_id) {
-    throw new Error("This invite link is not valid.");
-  }
-  let tenantSlug: string | null = null;
-  const { data: tenantRow } = await supabaseAdmin
-    .from("tenants")
-    .select("slug, status")
-    .eq("id", invite.tenant_id)
-    .maybeSingle();
-  if (tenantRow && (tenantRow as { status?: string }).status === "active") {
-    tenantSlug = normalisePublicTenantSlug((tenantRow as { slug?: string }).slug);
-  }
-  const role =
-    invite.role === "introducer"
-      ? "introducer"
-      : invite.role === "admin"
-        ? "admin"
-        : "advisor";
-  return {
-    id: invite.id,
-    tenantId: invite.tenant_id,
-    resolved: {
-      tenantId: invite.tenant_id,
-      tenantSlug,
-      role,
-      membershipRole: resolveMembershipRoleFromInvite(invite),
-      email: invite.email ?? null,
-      companyName: invite.company_name ?? null,
-      companyCode: invite.company_code ?? null,
-      createCompany: invite.create_company ?? true,
-    },
-  };
-}
-
+// Public invite preview for /register, looked up by token hash. Rejects missing,
+// used, expired, email-less, mismatched-role and inactive-tenant invites.
 export const getStaffInvite = createServerFn({ method: "GET" })
-  .inputValidator((d: unknown) => z.object({ token: z.string().uuid() }).parse(d))
-  .handler(async ({ data }): Promise<ResolvedInvite> => {
-    const { resolved } = await resolveInviteByToken(data.token);
-    return resolved;
+  .inputValidator((d: unknown) => staffInviteTokenInputSchema.parse(d))
+  .handler(async ({ data }): Promise<StaffInvitePreview> => {
+    const { resolveStaffInvitePreviewImpl } = await import("@/lib/staff-invite.server");
+    return resolveStaffInvitePreviewImpl({ rawToken: data.token });
+  });
+
+// Accept a staff invite as the signed-in user. The actor is context.userId only;
+// the invitation must match that user's confirmed auth.users email. Role, tenant
+// and membership come from the invitation row inside one atomic database call.
+export const acceptStaffInvite = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => staffInviteTokenInputSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const { acceptStaffInviteImpl } = await import("@/lib/staff-invite.server");
+    return acceptStaffInviteImpl({ userId: context.userId, rawToken: data.token });
   });
 
 /** Owner-only master customer report with fees and commission totals. */
@@ -4056,118 +3867,4 @@ export const exportOwnerCustomerReport = createServerFn({ method: "GET" })
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
 
     return { rows };
-  });
-
-// Consume an invite after the new user has signed up: grant the proper staff
-// role (advisor → code, introducer → create/join company) and mark the invite
-// used. PUBLIC (no auth) — the secret token is the authorization, and the user
-// id comes from the just-created Supabase account. Idempotency: the used_at
-// stamp is written conditionally so a token can only be consumed once.
-export const markStaffInviteUsed = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) =>
-    z.object({ token: z.string().uuid(), userId: z.string().uuid() }).parse(d),
-  )
-  .handler(async ({ data }) => {
-    const { id, tenantId, resolved } = await resolveInviteByToken(data.token);
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-
-    // Claim the invite first (atomic): only one caller may flip used_at.
-    const { data: claimed, error: claimErr } = await supabaseAdmin
-      .from("staff_invitations")
-      .update({ used_at: new Date().toISOString(), used_by: data.userId })
-      .eq("id", id)
-      .eq("tenant_id", tenantId)
-      .is("used_at", null)
-      .select("id")
-      .maybeSingle();
-    if (claimErr) throw new Error(claimErr.message);
-    if (!claimed) throw new Error("This invite link has already been used.");
-
-    try {
-      const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(data.userId);
-      const meta = (authUser.user?.user_metadata ?? {}) as { full_name?: string; phone?: string };
-      const { error: profileUpsertErr } = await supabaseAdmin.from("profiles").upsert({
-        id: data.userId,
-        email: authUser.user?.email?.toLowerCase() ?? resolved.email,
-        full_name: meta.full_name ?? null,
-        phone: meta.phone ?? null,
-      });
-      if (profileUpsertErr && !isMissingTableError(profileUpsertErr)) {
-        console.error("staff invite profile upsert failed", profileUpsertErr);
-      }
-
-      if (resolved.role === "advisor" || resolved.membershipRole === "adviser") {
-        const { error } = await supabaseAdmin
-          .from("user_roles")
-          .upsert({ user_id: data.userId, role: "advisor" }, { onConflict: "user_id,role" });
-        if (error) throw new Error(error.message);
-        await ensureAdvisorCode(data.userId);
-        await setAdvisorDeletedAt(data.userId, null);
-      } else if (resolved.role === "admin") {
-        const { error } = await supabaseAdmin
-          .from("user_roles")
-          .upsert({ user_id: data.userId, role: "admin" }, { onConflict: "user_id,role" });
-        if (error) throw new Error(error.message);
-        const adminLevel =
-          resolved.membershipRole === "owner"
-            ? "owner"
-            : resolved.membershipRole === "supervisor"
-              ? "supervisor"
-              : "general";
-        const { error: profileErr } = await supabaseAdmin.from("admin_profiles").upsert(
-          {
-            user_id: data.userId,
-            level: adminLevel,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "user_id" },
-        );
-        if (profileErr && !isMissingTableError(profileErr)) throw new Error(profileErr.message);
-      } else {
-        await grantIntroducerRole(
-          data.userId,
-          resolved.createCompany ? "new" : "join",
-          resolved.companyCode ?? undefined,
-          tenantId,
-        );
-      }
-
-      // Membership role comes from the invite row (tenant-bound), never from URL/slug.
-      // Same Auth user + additional tenant → additional membership (no duplicate Auth).
-      const membershipRole = resolved.membershipRole;
-      const { data: existingMem } = await supabaseAdmin
-        .from("tenant_memberships")
-        .select("id, active")
-        .eq("tenant_id", tenantId)
-        .eq("user_id", data.userId)
-        .eq("role", membershipRole)
-        .maybeSingle();
-      if (existingMem) {
-        const { error: membershipErr } = await supabaseAdmin
-          .from("tenant_memberships")
-          .update({ active: true })
-          .eq("id", existingMem.id)
-          .eq("tenant_id", tenantId);
-        if (membershipErr) throw new Error(membershipErr.message);
-      } else {
-        const { error: membershipErr } = await supabaseAdmin.from("tenant_memberships").insert({
-          tenant_id: tenantId,
-          user_id: data.userId,
-          role: membershipRole,
-          active: true,
-        });
-        if (membershipErr) throw new Error(membershipErr.message);
-      }
-    } catch (e) {
-      // Roll back the claim so the invite can be retried.
-      await supabaseAdmin
-        .from("staff_invitations")
-        .update({ used_at: null, used_by: null })
-        .eq("id", id);
-      throw e;
-    }
-
-    return { ok: true, role: resolved.role };
   });

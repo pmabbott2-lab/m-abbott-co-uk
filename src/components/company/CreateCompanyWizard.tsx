@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useStepUpServerFn } from "@/components/platform/PrivilegedStepUp";
+import { OneTimeInviteLink } from "@/components/staff/OneTimeInviteLink";
 import {
   canAccessPlatformCompanies,
   listPlatformCompanies,
@@ -316,9 +317,12 @@ export function CreateCompanyWizard({ cancelTo = "/home" }: { cancelTo?: "/home"
             {create.isPending ? "Creating…" : "Create / Activate"}
           </Button>
           {create.data ? (
-            <p className="text-sm text-green-700 dark:text-green-400">
-              Created {create.data.companyCode} · invite token issued (do not email in tests)
-            </p>
+            <div className="space-y-2">
+              <p className="text-sm text-green-700 dark:text-green-400">
+                Created {create.data.companyCode} · Initial Owner invite for {ownerEmail}
+              </p>
+              <OneTimeInviteLink path={create.data.inviteRegisterPath} email={ownerEmail} />
+            </div>
           ) : null}
         </div>
       )}
