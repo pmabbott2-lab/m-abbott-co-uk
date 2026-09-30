@@ -13,19 +13,13 @@ import {
 } from "@/lib/sms.server";
 import { clearSessionAttention, assertStaffCanAccessCustomer } from "@/lib/sessions.functions";
 
+export { emailForCustomerAccount } from "@/lib/customer-account-email";
+
 const SLOT_MINUTES = 90;
 const BOOKING_HORIZON_DAYS = 28;
 /** Demo diary hours for test advisors (Europe/London wall clock). */
 const TEST_DIARY_START = "09:00";
 const TEST_DIARY_END = "17:00";
-
-/** Auth email for customers without an address — phone-only bookings. */
-export function emailForCustomerAccount(email: string, phone: string): string {
-  const trimmed = email.trim().toLowerCase();
-  if (trimmed) return trimmed;
-  const digits = phone.replace(/\D/g, "");
-  return `phone+${digits}@customers.mortgagehub.local`;
-}
 
 function parseTimeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -917,68 +911,6 @@ async function ensureStaffIntroducerRecord(staffUserId: string): Promise<string>
   return inserted.id;
 }
 
-async function resolveOrCreateCustomerProfile(data: {
-  customerName: string;
-  customerPhone: string;
-  customerEmail: string;
-}): Promise<string> {
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-  const phone = normaliseUkPhone(data.customerPhone);
-  const email = data.customerEmail.trim().toLowerCase();
-  const authEmail = emailForCustomerAccount(email, phone);
-
-  if (email) {
-    const { data: byEmail } = await supabaseAdmin
-      .from("profiles")
-      .select("id")
-      .ilike("email", email)
-      .maybeSingle();
-    if (byEmail?.id) {
-      await supabaseAdmin
-        .from("profiles")
-        .update({ full_name: data.customerName, phone, email })
-        .eq("id", byEmail.id);
-      return byEmail.id;
-    }
-  }
-
-  if (phone) {
-    const { data: byPhone } = await supabaseAdmin
-      .from("profiles")
-      .select("id")
-      .eq("phone", phone)
-      .maybeSingle();
-    if (byPhone?.id) {
-      await supabaseAdmin
-        .from("profiles")
-        .update({ full_name: data.customerName, email: email || undefined })
-        .eq("id", byPhone.id);
-      return byPhone.id;
-    }
-  }
-
-  const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
-    email: authEmail,
-    email_confirm: true,
-    user_metadata: { full_name: data.customerName, phone },
-  });
-  if (error) throw new Error(error.message);
-
-  const userId = created.user.id;
-  await supabaseAdmin.from("profiles").upsert({
-    id: userId,
-    full_name: data.customerName,
-    email: email || null,
-    phone,
-  });
-  await supabaseAdmin
-    .from("user_roles")
-    .upsert({ user_id: userId, role: "customer" }, { onConflict: "user_id,role" });
-  return userId;
-}
-
 async function sendBookingConfirmations(opts: {
   customerName: string;
   customerPhone: string;
@@ -1309,7 +1241,6 @@ const customerAppointmentSignupInput = z.object({
   startsAt: z.string().datetime(),
   advisorId: z.string().uuid().optional(),
   preferAnyAdvisor: z.boolean().optional(),
-  password: z.string().min(6).optional(),
   journey: z.enum(["voice", "chat", "book"]).optional(),
   slug: z.string().min(1).optional(),
 });
@@ -1317,78 +1248,8 @@ const customerAppointmentSignupInput = z.object({
 export const customerAppointmentSignup = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => customerAppointmentSignupInput.parse(d))
   .handler(async ({ data }) => {
-    const phone = normaliseUkPhone(data.customerPhone);
-    const emailRaw = data.customerEmail?.trim().toLowerCase() || "";
-    const password = data.password?.trim() || "";
-    const authEmail = emailForCustomerAccount(emailRaw, phone);
-
-    const userId = await resolveOrCreateCustomerProfile({
-      customerName: data.customerName,
-      customerPhone: data.customerPhone,
-      customerEmail: emailRaw,
-    });
-
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-
-    if (password.length >= 6) {
-      const { error: pwErr } = await supabaseAdmin.auth.admin.updateUserById(userId, { password });
-      if (pwErr) throw new Error(pwErr.message);
-    }
-
-    const channel =
-      data.journey === "voice"
-        ? "voice"
-        : data.journey === "chat"
-          ? "text"
-          : "direct_booking";
-
-    await bookAppointment(
-      {
-        customerId: userId,
-        customerName: data.customerName,
-        customerPhone: data.customerPhone,
-        customerEmail: emailRaw,
-        startsAt: data.startsAt,
-        advisorId: data.advisorId,
-        preferAnyAdvisor: data.preferAnyAdvisor ?? !data.advisorId,
-        channel,
-        slug: data.slug,
-      },
-      userId,
-    );
-
-    let needsSmsCode = false;
-    if (password.length < 6) {
-      if (!isTwilioConfigured()) {
-        throw new Error(
-          "Appointment saved but SMS sign-in is not configured. Set a password or contact support.",
-        );
-      }
-      const { storeLoginSmsCode } = await import("@/lib/auth-sms.store.server");
-      const code = String(Math.floor(100000 + Math.random() * 900000));
-      storeLoginSmsCode(userId, code);
-      const when = new Date(data.startsAt);
-      const whenLabel = when.toLocaleString("en-GB", {
-        weekday: "short",
-        day: "numeric",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      await sendSms({
-        to: phone,
-        body: `Hi ${data.customerName}, your mortgage appointment is confirmed for ${whenLabel}. Sign-in code: ${code} (10 min).`,
-      });
-      needsSmsCode = true;
-    }
-
-    return {
-      signInEmail: password.length >= 6 ? authEmail : undefined,
-      needsSmsCode,
-      bookedAt: data.startsAt,
-    };
+    const { customerAppointmentSignupImpl } = await import("@/lib/appointment-signup.server");
+    return customerAppointmentSignupImpl(data, { book: bookAppointment });
   });
 
 export const createAppointmentAuth = createServerFn({ method: "POST" })
@@ -3389,7 +3250,8 @@ export const bookNewCustomerAsStaff = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertStaffBookingAccess(context.userId);
-    const customerId = await resolveOrCreateCustomerProfile({
+    const { resolveCustomerIdForStaffBooking } = await import("@/lib/appointment-signup.server");
+    const customerId = await resolveCustomerIdForStaffBooking({
       customerName: data.customerName,
       customerPhone: data.customerPhone,
       customerEmail: data.customerEmail,
@@ -3560,7 +3422,8 @@ export const bookNewCustomerAsIntroducer = createServerFn({ method: "POST" })
       await assertIntroducerBookingAccess(targetUserId);
     }
 
-    const customerId = await resolveOrCreateCustomerProfile({
+    const { resolveCustomerIdForStaffBooking } = await import("@/lib/appointment-signup.server");
+    const customerId = await resolveCustomerIdForStaffBooking({
       customerName: data.customerName,
       customerPhone: data.customerPhone,
       customerEmail: data.customerEmail,

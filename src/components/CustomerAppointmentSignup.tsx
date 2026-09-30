@@ -64,7 +64,6 @@ export function CustomerAppointmentSignup({
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [bookedAt, setBookedAt] = useState<Date | null>(null);
   const [smsCode, setSmsCode] = useState("");
   const [smsSent, setSmsSent] = useState(false);
@@ -127,13 +126,6 @@ export function CustomerAppointmentSignup({
         throw new Error("Enter a valid UK mobile number (e.g. 07123 456789).");
       }
       const emailTrim = customerEmail.trim();
-      const passwordTrim = password.trim();
-      if (passwordTrim && passwordTrim.length < 6) {
-        throw new Error("Password must be at least 6 characters, or leave it blank.");
-      }
-      if (passwordTrim && !emailTrim) {
-        throw new Error("Enter your email if you want to set a password — or leave password blank.");
-      }
 
       const adv = advisorChoiceToPayload(advisorChoice);
       const result = await signupFn({
@@ -142,7 +134,6 @@ export function CustomerAppointmentSignup({
           customerPhone: customerPhone.trim(),
           customerEmail: emailTrim,
           startsAt: selectedSlot,
-          password: passwordTrim || undefined,
           journey,
           slug: getReferralSlug() ?? undefined,
           ...adv,
@@ -151,27 +142,13 @@ export function CustomerAppointmentSignup({
 
       setBookedAt(new Date(selectedSlot));
 
-      if (result.signInEmail && passwordTrim) {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: result.signInEmail,
-          password: passwordTrim,
-        });
-        if (error) throw error;
-        if (!data.session) throw new Error("Sign-in did not complete — try again.");
-        await finishSession(data.session);
-        return;
-      }
-
       if (result.needsSmsCode) {
         setSmsSent(true);
         setStatus({
           type: "success",
           text: "Appointment booked. Enter the 6-digit code we texted you to continue.",
         });
-        return;
       }
-
-      onComplete();
     },
     onError: (e: unknown) => {
       const msg = e instanceof Error ? e.message : "Could not book appointment";
@@ -223,9 +200,10 @@ export function CustomerAppointmentSignup({
         <CheckCircle2 className="w-12 h-12 mx-auto text-accent" />
         <h2 className="text-2xl font-semibold">Appointment confirmed</h2>
         <p className="text-sm text-muted-foreground">
-          Your call is booked for <strong>{format(bookedAt, "EEE d MMM yyyy, HH:mm")}</strong>.
+          Your call is booked for <strong>{format(bookedAt, "EEE d MMM yyyy, HH:mm")}</strong>. Sign
+          in to your account to manage it.
         </p>
-        <Button onClick={onComplete}>Continue</Button>
+        <Button onClick={onSwitchSignIn}>Sign in</Button>
       </div>
     );
   }
@@ -243,7 +221,6 @@ export function CustomerAppointmentSignup({
           </h1>
           <p className="text-sm text-muted-foreground max-w-xl">
             Choose a slot and enter your details — this books your call, not just an account.
-            Password is optional; we can text you a sign-in code instead.
           </p>
         </div>
         <button
@@ -366,21 +343,6 @@ export function CustomerAppointmentSignup({
               value={customerEmail}
               onChange={(e) => setCustomerEmail(e.target.value)}
             />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="appt-password">Password (optional)</Label>
-            <Input
-              id="appt-password"
-              type="password"
-              autoComplete="new-password"
-              placeholder="Leave blank to sign in with a text code"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              minLength={6}
-            />
-            <p className="text-xs text-muted-foreground">
-              Optional — skip this if you prefer a one-time text code when you return.
-            </p>
           </div>
           <Button
             type="button"

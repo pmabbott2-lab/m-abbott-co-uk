@@ -65,7 +65,7 @@ export const verifyLoginSmsCodeFn = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-/** After appointment signup without a password — verify SMS and return a magic-link token. */
+/** After appointment signup that created a new account — verify SMS and return a magic-link token. */
 export const verifyAppointmentSignupSms = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) =>
     z.object({
@@ -74,31 +74,6 @@ export const verifyAppointmentSignupSms = createServerFn({ method: "POST" })
     }).parse(d),
   )
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const phone = normaliseUkPhone(data.phone);
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("id, email, phone")
-      .eq("phone", phone)
-      .maybeSingle();
-    if (!profile?.id) {
-      throw new Error("No account found for that mobile number.");
-    }
-    if (!verifyLoginSmsCode(profile.id, data.code)) {
-      throw new Error("That code is invalid or expired. Request a new one.");
-    }
-
-    const { emailForCustomerAccount } = await import("@/lib/booking.functions");
-    const authEmail = emailForCustomerAccount(profile.email ?? "", phone);
-
-    const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
-      type: "magiclink",
-      email: authEmail,
-    });
-    if (linkError) throw new Error(linkError.message);
-
-    const tokenHash = linkData.properties?.hashed_token;
-    if (!tokenHash) throw new Error("Could not complete sign-in.");
-
-    return { tokenHash };
+    const { verifyAppointmentSignupSmsImpl } = await import("@/lib/appointment-signup.server");
+    return verifyAppointmentSignupSmsImpl(data);
   });
