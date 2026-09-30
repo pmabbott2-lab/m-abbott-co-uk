@@ -12,6 +12,7 @@ import {
   textChannelInviteMessage,
 } from "@/lib/sms.server";
 import { clearSessionAttention, assertStaffCanAccessCustomer } from "@/lib/sessions.functions";
+import type { BookableAdvisor } from "@/lib/booking-availability.server";
 
 export { emailForCustomerAccount } from "@/lib/customer-account-email";
 
@@ -130,83 +131,11 @@ async function getPrimaryAdvisorId(tenantId?: string | null): Promise<string> {
   return [...pool].sort((a, b) => a.id.localeCompare(b.id))[0]!.id;
 }
 
-export type BookableAdvisor = {
-  id: string;
-  fullName: string;
-  email: string | null;
-  isTest: boolean;
-  teamsLinked: boolean;
-};
+export type { BookableAdvisor };
 
-/**
- * Advisors who can receive customer bookings.
- * - Live advisors: Teams/Outlook must be linked (availability defaults to Outlook).
- * - Test advisor accounts: included while live, Hub diary only (no Outlook required).
- */
 async function listBookableAdvisors(tenantId?: string | null): Promise<BookableAdvisor[]> {
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-  const { isTestAccountEmail } = await import("@/lib/test-accounts");
-
-  let ids: string[] = [];
-  if (tenantId) {
-    const { data: members, error: memErr } = await supabaseAdmin
-      .from("tenant_memberships")
-      .select("user_id")
-      .eq("tenant_id", tenantId)
-      .eq("active", true)
-      .in("role", ["adviser", "owner", "supervisor", "general"]);
-    if (memErr) throw new Error(memErr.message);
-    const rows = (members ?? []) as Array<{ user_id: string }>;
-    const memberIds = [...new Set(rows.map((m) => m.user_id))];
-    if (memberIds.length === 0) return [];
-    ids = memberIds;
-  } else {
-    ids = [];
-  }
-  if (ids.length === 0) return [];
-
-  const { data: profiles } = await supabaseAdmin
-    .from("profiles")
-    .select("id, full_name, email")
-    .in("id", ids);
-
-  const { data: advProfiles } = await supabaseAdmin
-    .from("advisor_profiles")
-    .select("user_id, deleted_at, teams_calendar_enabled, teams_calendar_linked_at")
-    .in("user_id", ids);
-
-  const advById = new Map(
-    (advProfiles ?? []).map((r) => [
-      r.user_id,
-      r as {
-        user_id: string;
-        deleted_at?: string | null;
-        teams_calendar_enabled?: boolean | null;
-        teams_calendar_linked_at?: string | null;
-      },
-    ]),
-  );
-
-  const out: BookableAdvisor[] = [];
-  for (const p of profiles ?? []) {
-    const ap = advById.get(p.id);
-    if (ap?.deleted_at) continue;
-    const email = p.email ?? null;
-    const isTest = isTestAccountEmail(email);
-    const teamsLinked = Boolean(ap?.teams_calendar_enabled);
-    // Live advisors need Teams/Outlook linked. Test advisors stay bookable on Hub hours.
-    if (!isTest && !teamsLinked) continue;
-    out.push({
-      id: p.id,
-      fullName: (p.full_name ?? "").trim() || email || "Advisor",
-      email,
-      isTest,
-      teamsLinked,
-    });
-  }
-  return out.sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const { listBookableAdvisorsForTenant } = await import("@/lib/booking-availability.server");
+  return listBookableAdvisorsForTenant(tenantId);
 }
 
 /** Resolve tenant for booking from slug / introducer / user / advisor — never invent 001. */
@@ -601,18 +530,19 @@ export const getAvailableSlots = createServerFn({ method: "GET" })
         pool: z.boolean().optional(),
         /** Tenant slug — when set, only advisers with membership in that tenant. */
         tenantSlug: z.string().min(1).max(64).optional(),
+        /** Introducer referral slug — tenant is resolved server-side from the introducer. */
+        slug: z.string().min(1).max(128).optional(),
       })
       .parse(d),
   )
   .handler(async ({ data }) => {
-    let tenantId: string | null = null;
-    if (data.tenantSlug) {
-      const { getTenantContextBySlug } = await import("@/lib/tenant-assert.server");
-      const { requireTenantFeature } = await import("@/lib/tenant-features.server");
-      const ctx = await getTenantContextBySlug(data.tenantSlug);
-      tenantId = ctx.tenant.id;
-      await requireTenantFeature(tenantId, "appointment_booking");
-    }
+    const { resolveAvailabilityTenant, filterAdvisorIdsToTenant } = await import(
+      "@/lib/booking-availability.server"
+    );
+    const tenantContext = await resolveAvailabilityTenant({
+      tenantSlug: data.tenantSlug,
+      referralSlug: data.slug,
+    });
 
     const empty = {
       slots: [] as string[],
@@ -622,6 +552,8 @@ export const getAvailableSlots = createServerFn({ method: "GET" })
       >,
       advisorId: null as string | null,
     };
+    if (tenantContext.kind === "denied") return { ...empty, advisorId: data.advisorId ?? null };
+    const tenantId = tenantContext.kind === "tenant" ? tenantContext.tenantId : null;
 
     const mergeTestDiaryFallback = async (
       slots: string[],
@@ -641,13 +573,21 @@ export const getAvailableSlots = createServerFn({ method: "GET" })
           if (error) console.error("hub_test_diary_slots failed", error.message);
           return { slots, advisorsBySlot };
         }
-        const nextSlots = new Set(slots);
-        const nextBySlot = { ...advisorsBySlot };
-        for (const row of rows as Array<{
+        const diaryRows = rows as Array<{
           starts_at: string;
           advisor_id: string;
           advisor_name: string;
-        }>) {
+        }>;
+        const tenantAdvisorIds = tenantId
+          ? await filterAdvisorIdsToTenant(
+              [...new Set(diaryRows.map((r) => r.advisor_id))],
+              tenantId,
+            )
+          : null;
+        const nextSlots = new Set(slots);
+        const nextBySlot = { ...advisorsBySlot };
+        for (const row of diaryRows) {
+          if (tenantAdvisorIds && !tenantAdvisorIds.has(row.advisor_id)) continue;
           if (data.advisorId && row.advisor_id !== data.advisorId) continue;
           const iso = new Date(row.starts_at).toISOString();
           nextSlots.add(iso);
@@ -787,17 +727,8 @@ async function buildIntroducerBookUrl(
 }
 
 async function resolveIntroducer(slug?: string) {
-  if (!slug) return null;
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-  const { data } = await supabaseAdmin
-    .from("introducers")
-    .select("id, company_name, slug, tenant_id")
-    .eq("slug", slug)
-    .eq("active", true)
-    .maybeSingle();
-  return data;
+  const { resolveActiveIntroducerBySlug } = await import("@/lib/booking-availability.server");
+  return resolveActiveIntroducerBySlug(slug);
 }
 
 function slugifyStaffName(value: string): string {

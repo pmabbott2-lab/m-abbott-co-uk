@@ -73,9 +73,10 @@ export function CustomerAppointmentSignup({
   const HintIcon = hint.icon;
 
   const dateKey = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null;
+  const referralSlug = getReferralSlug() ?? undefined;
   const slotsQ = useQuery({
-    queryKey: ["appointment-signup-slots", dateKey, "pool"],
-    queryFn: () => slotsFn({ data: { date: dateKey!, pool: true } }),
+    queryKey: ["appointment-signup-slots", dateKey, "pool", referralSlug ?? null],
+    queryFn: () => slotsFn({ data: { date: dateKey!, pool: true, slug: referralSlug } }),
     enabled: Boolean(dateKey),
   });
   const advisorsForSlot =
