@@ -1300,18 +1300,82 @@ const S3_FILES = [
   "src/lib/booking.functions.ts",
   "supabase/migrations/20260930210201_gate_g7f4s3b_staff_invite_identity_binding.sql",
 ];
-const changedS3 = S3_FILES.filter((f) => {
+// Last S4B commit (S4B change + verifier baseline pin).
+const S4B_REF = "517d68a";
+// Attribution / referral / commission writers in S3 files that later authorised gates (from
+// G7F-4S4C2) also edit for read-path tenant scoping. These must stay byte-identical.
+const S3_WRITERS = {
+  "src/lib/introducer-attribution.ts": [
+    "ensureCustomerIntroducerLink",
+    "resolveIntroducerIdForCustomerAtDate",
+    "resolveIntroducerIdForCustomer",
+    "findIntroducerIdForCustomer",
+  ],
+  "src/lib/referrals.functions.ts": [
+    "resolveReferralCodeMeta",
+    "resolveReferralCode",
+    "claimReferral",
+    "createReferralLink",
+    "textReferralLink",
+    "textRafInviteToFriend",
+    "updateReferralBonusStatus",
+    "listMyReferralActivity",
+    "ensureMyReferralLink",
+    "sendMyReferralLink",
+  ],
+  "src/lib/booking.functions.ts": [
+    "resolveBookingTenantId",
+    "bookAppointmentTrusted",
+    "ensureStaffIntroducerRecord",
+    "customerAppointmentSignup",
+    "bookNewCustomerAsStaff",
+    "bookNewCustomerAsIntroducer",
+  ],
+};
+function gitDiffers(args) {
   try {
-    execFileSync("git", ["diff", "--quiet", PRE_S4B_REF, "--", f], { cwd: root });
+    execFileSync("git", ["diff", "--quiet", ...args], { cwd: root });
     return false;
   } catch {
     return true;
   }
-});
+}
+function topLevelDeclaration(src, name) {
+  const start = new RegExp(`^(?:export )?(?:async )?(?:function|const) ${name}\\b`, "m").exec(src);
+  if (!start) return null;
+  const rest = src.slice(start.index);
+  const end =
+    /\n(?=export |async function |function |const |let |type |interface |\/\*\*|\/\/ )/.exec(
+      rest.slice(start[0].length),
+    );
+  return (end ? rest.slice(0, start[0].length + end.index) : rest).trimEnd();
+}
+// 14a: the S4B change set itself never touched an S3 file.
+const s4bTouchedS3 = S3_FILES.filter((f) => gitDiffers([PRE_S4B_REF, S4B_REF, "--", f]));
+// 14b: in the working tree, S3 files without a writer list stay byte-identical, and every listed
+// writer is byte-identical to its pre-S4B version.
+const changedS3 = [];
+for (const f of S3_FILES) {
+  const writers = S3_WRITERS[f];
+  if (!writers) {
+    if (gitDiffers([PRE_S4B_REF, "--", f])) changedS3.push(f);
+    continue;
+  }
+  const before = execFileSync("git", ["show", `${PRE_S4B_REF}:${f}`], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  const now = readFileSync(resolve(root, f), "utf8");
+  for (const name of writers) {
+    const a = topLevelDeclaration(before, name);
+    const b = topLevelDeclaration(now, name);
+    if (a === null || a !== b) changedS3.push(`${f}#${name}`);
+  }
+}
 ok(
-  "TEST_14 S3 invite/introducer/referral/commission modules and the S3B migration are byte-identical to the pre-S4B commit",
-  changedS3.length === 0,
-  changedS3.join(","),
+  "TEST_14 S4B changed no S3 invite/introducer/referral/commission module or the S3B migration; S3 attribution/referral/commission writers are byte-identical to the pre-S4B commit",
+  s4bTouchedS3.length === 0 && changedS3.length === 0,
+  [...s4bTouchedS3.map((f) => `S4B:${f}`), ...changedS3].join(","),
 );
 ok(
   "TEST_14b no S4B path writes company_code, customer_introducer_links, referrals, finance or session_advisors (verified at runtime in TEST_8/9d/9e)",

@@ -4,6 +4,8 @@ import { z } from "zod";
 import { isTwilioConfigured, sendSms, getAppBaseUrl, getSmsSenderLabel } from "@/lib/sms.server";
 import { rafShareMessage } from "@/lib/referral";
 import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
+import { canView } from "@/lib/admin-access";
+import type { ResourceCapability } from "@/lib/tenant-assert.server";
 
 // ============================================================================
 // Refer a friend (RAF) — ADMIN-DRIVEN.
@@ -102,6 +104,85 @@ async function requireRafView(userId: string, email?: string): Promise<void> {
   await requireAdmin(userId);
 }
 
+function rafViewCapability(): ResourceCapability {
+  return {
+    mutate: false,
+    allocation: "none",
+    allow: (v) =>
+      v.adminAccess.isOwner ||
+      v.adminAccess.isSupervisor ||
+      canView(v.adminAccess, "raf") ||
+      v.isMainAdmin,
+  };
+}
+
+/** People related to a tenant: active members (any role) and customers of its sessions. */
+async function tenantPeopleIds(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: { from: (table: string) => any },
+  tenantId: string,
+): Promise<string[]> {
+  const ids = new Set<string>();
+  const { data: members, error: mErr } = await admin
+    .from("tenant_memberships")
+    .select("user_id")
+    .eq("tenant_id", tenantId)
+    .eq("active", true);
+  if (mErr) throw new Error(mErr.message);
+  for (const m of (members ?? []) as Array<{ user_id: string | null }>) {
+    if (m.user_id) ids.add(m.user_id);
+  }
+  const page = 1000;
+  for (let from = 0; ; from += page) {
+    const { data: rows, error } = await admin
+      .from("interview_sessions")
+      .select("customer_id")
+      .eq("tenant_id", tenantId)
+      .not("customer_id", "is", null)
+      .order("id", { ascending: true })
+      .range(from, from + page - 1);
+    if (error) throw new Error(error.message);
+    const list = (rows ?? []) as Array<{ customer_id: string | null }>;
+    for (const r of list) if (r.customer_id) ids.add(r.customer_id);
+    if (list.length < page) break;
+  }
+  return [...ids];
+}
+
+/** Effective tenant of RAF rows: own tenant_id, else the referral code's tenant. */
+async function scopeReferralRowsToTenant<
+  T extends { tenant_id?: string | null; referral_code_id?: string | null },
+>(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: { from: (table: string) => any },
+  rows: T[],
+  tenantId: string,
+): Promise<T[]> {
+  const codeIds = [
+    ...new Set(
+      rows
+        .filter((r) => !r.tenant_id && r.referral_code_id)
+        .map((r) => r.referral_code_id as string),
+    ),
+  ];
+  const codeTenant = new Map<string, string | null>();
+  if (codeIds.length > 0) {
+    const { data, error } = await admin
+      .from("referral_codes")
+      .select("id, tenant_id")
+      .in("id", codeIds);
+    if (error && !isMissingTableError(error)) throw new Error(error.message);
+    for (const c of (data ?? []) as Array<{ id: string; tenant_id: string | null }>) {
+      codeTenant.set(c.id, c.tenant_id);
+    }
+  }
+  return rows.filter((r) => {
+    const effective =
+      r.tenant_id ?? (r.referral_code_id ? (codeTenant.get(r.referral_code_id) ?? null) : null);
+    return effective === tenantId;
+  });
+}
+
 async function requireRafAmend(userId: string, email?: string): Promise<void> {
   const { resolveAdminAccess } = await import("@/lib/admin.functions");
   const { canAmend } = await import("@/lib/admin-access");
@@ -137,42 +218,62 @@ export const searchCustomers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ query: z.string().max(120) }).parse(d))
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    await requireRafView(context.userId, email);
+    type CustomerHit = {
+      id: string;
+      full_name: string | null;
+      email: string | null;
+      phone: string | null;
+    };
+    const { resolveActingTenantForList, selectInChunks } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, rafViewCapability());
     // Sanitise: PostgREST `.or()` uses , and () as delimiters, and ilike treats
     // % and _ as wildcards. Strip those so a raw query can't break the filter.
     const safe = data.query.replace(/[,%_()*]/g, " ").trim();
-    if (safe.length < 2)
-      return [] as Array<{
-        id: string;
-        full_name: string | null;
-        email: string | null;
-        phone: string | null;
-      }>;
+    if (safe.length < 2) return [] as CustomerHit[];
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
     const like = `%${safe}%`;
 
+    const candidateIds = await tenantPeopleIds(supabaseAdmin, tenantId);
+    if (candidateIds.length === 0) return [] as CustomerHit[];
+
+    const byName = (a: CustomerHit, b: CustomerHit) =>
+      String(a.full_name ?? "").localeCompare(String(b.full_name ?? ""));
+
     // Phone column may not exist yet (pre-migration) — fall back to name/email.
-    const withPhone = await supabaseAdmin
-      .from("profiles")
-      .select("id, full_name, email, phone")
-      .or(`full_name.ilike.${like},email.ilike.${like},phone.ilike.${like}`)
-      .order("full_name", { ascending: true })
-      .limit(10);
-    if (withPhone.error) {
-      const { data: basic, error } = await supabaseAdmin
-        .from("profiles")
-        .select("id, full_name, email")
-        .or(`full_name.ilike.${like},email.ilike.${like}`)
-        .order("full_name", { ascending: true })
-        .limit(10);
-      if (error) throw new Error(error.message);
-      return (basic ?? []).map((p) => ({ ...p, phone: null as string | null }));
+    try {
+      const hits = await selectInChunks(candidateIds, async (chunk) => {
+        const { data: part, error } = await supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, email, phone")
+          .in("id", chunk)
+          .or(`full_name.ilike.${like},email.ilike.${like},phone.ilike.${like}`)
+          .order("full_name", { ascending: true })
+          .limit(10);
+        if (error) throw error;
+        return (part ?? []) as CustomerHit[];
+      });
+      return hits.sort(byName).slice(0, 10);
+    } catch {
+      const hits = await selectInChunks(candidateIds, async (chunk) => {
+        const { data: part, error } = await supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, email")
+          .in("id", chunk)
+          .or(`full_name.ilike.${like},email.ilike.${like}`)
+          .order("full_name", { ascending: true })
+          .limit(10);
+        if (error) throw new Error(error.message);
+        return ((part ?? []) as Omit<CustomerHit, "phone">[]).map((p) => ({
+          ...p,
+          phone: null as string | null,
+        }));
+      });
+      return hits.sort(byName).slice(0, 10);
     }
-    return withPhone.data ?? [];
   });
 
 // Public share base URL (APP_BASE_URL on server — used when copying RAF messages from localhost).
@@ -524,15 +625,17 @@ export const textRafInviteToFriend = createServerFn({ method: "POST" })
 export const listReferralLinks = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const email = (context.claims as { email?: string }).email;
-    await requireRafView(context.userId, email);
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
+    const { resolveActingTenantForList } = await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, rafViewCapability());
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
 
     const { data: links, error } = await supabaseAdmin
       .from("referral_codes")
-      .select("id, code, referrer_user_id, referrer_name, referrer_phone, active, created_at, tenant_id")
+      .select(
+        "id, code, referrer_user_id, referrer_name, referrer_phone, active, created_at, tenant_id",
+      )
+      .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false });
     if (error) {
       if (isMissingTableError(error)) return [];
@@ -541,9 +644,20 @@ export const listReferralLinks = createServerFn({ method: "GET" })
 
     // Count referrals per code so the admin sees uptake at a glance.
     const counts = new Map<string, number>();
-    const { data: refs, error: refErr } = await supabaseAdmin.from("referrals").select("code");
+    const { data: refsRaw, error: refErr } = await supabaseAdmin
+      .from("referrals")
+      .select("code, tenant_id, referral_code_id");
     if (refErr && !isMissingTableError(refErr)) throw new Error(refErr.message);
-    for (const r of refs ?? []) {
+    const refs = await scopeReferralRowsToTenant(
+      supabaseAdmin,
+      (refsRaw ?? []) as Array<{
+        code: string | null;
+        tenant_id: string | null;
+        referral_code_id: string | null;
+      }>,
+      tenantId,
+    );
+    for (const r of refs) {
       if (r.code) counts.set(r.code, (counts.get(r.code) ?? 0) + 1);
     }
 
@@ -567,28 +681,46 @@ export const listReferralLinks = createServerFn({ method: "GET" })
 export const listAllReferrals = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const email = (context.claims as { email?: string }).email;
-    await requireRafView(context.userId, email);
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
+    const { resolveActingTenantForList } = await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, rafViewCapability());
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
 
-    const { data: refs, error } = await supabaseAdmin
+    const { data: refsRaw, error } = await supabaseAdmin
       .from("referrals")
       .select(
-        "id, code, referrer_user_id, referred_user_id, referred_email, status, bonus_status, notes, created_at, updated_at",
+        "id, code, referrer_user_id, referred_user_id, referred_email, status, bonus_status, notes, created_at, updated_at, tenant_id, referral_code_id",
       )
       .order("created_at", { ascending: false });
     if (error) {
       if (isMissingTableError(error)) return [];
       throw new Error(error.message);
     }
+    const refs = await scopeReferralRowsToTenant(
+      supabaseAdmin,
+      (refsRaw ?? []) as Array<{
+        id: string;
+        code: string | null;
+        referrer_user_id: string | null;
+        referred_user_id: string | null;
+        referred_email: string | null;
+        status: string;
+        bonus_status: string;
+        notes: string | null;
+        created_at: string;
+        updated_at: string;
+        tenant_id: string | null;
+        referral_code_id: string | null;
+      }>,
+      tenantId,
+    );
 
     // Resolve referrer display names. Code-level referrer_name covers off-system
     // referrers; profile names cover existing users.
     const { data: codes, error: codeErr } = await supabaseAdmin
       .from("referral_codes")
-      .select("code, referrer_name");
+      .select("code, referrer_name")
+      .eq("tenant_id", tenantId);
     if (codeErr && !isMissingTableError(codeErr)) throw new Error(codeErr.message);
     const codeName = new Map<string, string | null>();
     for (const c of codes ?? []) codeName.set(c.code, c.referrer_name ?? null);

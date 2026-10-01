@@ -1,7 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { resolveAdminAccess } from "@/lib/admin.functions";
 import { canView, canAmend } from "@/lib/admin-access";
 import { computeActionableFromDate, normalizeLenderKey, researchLenderLeadTimeDays } from "@/lib/lender-remortgage.server";
 
@@ -30,9 +29,17 @@ export const getCaseMortgageDetails = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canView(access, "customers")) throw new Error("Forbidden");
+    const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+    await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: {
+        mutate: false,
+        allocation: "adviser_must_be_allocated",
+        allow: (v) => canView(v.adminAccess, "customers"),
+      },
+    });
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: row, error } = await supabaseAdmin
@@ -81,11 +88,20 @@ export const upsertCaseMortgageDetails = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canAmend(access, "customers")) throw new Error("Forbidden");
+    const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+    const { tenantId } = await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: {
+        mutate: true,
+        allocation: "adviser_must_be_allocated",
+        allow: (v) => canAmend(v.adminAccess, "customers"),
+      },
+    });
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdmin, supabaseAdminUntyped } =
+      await import("@/integrations/supabase/client.server");
     const now = new Date().toISOString();
 
     let actionableFromDate = data.actionableFromDate ?? null;
@@ -104,6 +120,7 @@ export const upsertCaseMortgageDetails = createServerFn({ method: "POST" })
 
     const patch = {
       session_id: data.sessionId,
+      tenant_id: tenantId,
       current_lender: data.currentLender?.trim() || null,
       product_expiry_date: data.productExpiryDate ?? null,
       amount_borrowed_pence:
@@ -120,7 +137,7 @@ export const upsertCaseMortgageDetails = createServerFn({ method: "POST" })
       updated_at: now,
     };
 
-    const { error } = await supabaseAdmin.from("case_mortgage_details").upsert(patch, {
+    const { error } = await supabaseAdminUntyped.from("case_mortgage_details").upsert(patch, {
       onConflict: "session_id",
     });
     if (error) {

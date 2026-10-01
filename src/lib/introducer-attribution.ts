@@ -84,6 +84,22 @@ export async function resolveIntroducerIdForCustomer(
   return found;
 }
 
+/** Same resolution as resolveIntroducerIdForCustomer, without writing a customer link. */
+export async function peekIntroducerIdForCustomer(
+  supabaseAdmin: SupabaseAdmin,
+  customerId: string,
+  sessionId?: string | null,
+): Promise<string | null> {
+  const { data: direct, error: directErr } = await supabaseAdmin
+    .from("customer_introducer_links")
+    .select("introducer_id")
+    .eq("customer_id", customerId)
+    .maybeSingle();
+  if (directErr && !isMissing(directErr)) throw new Error(directErr.message);
+  if (direct?.introducer_id) return direct.introducer_id;
+  return findIntroducerIdForCustomer(supabaseAdmin, customerId, sessionId);
+}
+
 async function findIntroducerIdForCustomer(
   supabaseAdmin: SupabaseAdmin,
   customerId: string,

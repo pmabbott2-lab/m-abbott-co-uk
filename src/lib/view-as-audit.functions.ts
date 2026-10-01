@@ -67,15 +67,19 @@ export const listViewAsAuditLog = createServerFn({ method: "GET" })
       .parse(d ?? {}),
   )
   .handler(async ({ data, context }) => {
-    const {
-      data: { user },
-    } = await context.supabase.auth.getUser();
-    await assertViewAsAuditor(context.userId, user?.email ?? null);
+    const { resolveActingTenantForList } = await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, {
+      mutate: false,
+      allocation: "none",
+      allow: (v) => v.adminAccess.isOwner || v.adminAccess.isSupervisor,
+    });
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
     let query = supabaseAdmin
       .from("view_as_audit_log")
       .select("id, view_type, acting_user_id, target_user_id, action, summary, detail, created_at")
+      .eq("tenant_id", tenantId)
       .eq("view_type", data.viewType)
       .order("created_at", { ascending: false })
       .limit(data.limit ?? 200);

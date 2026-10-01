@@ -43,7 +43,7 @@ export async function ensureWelcomeCallTask(
   supabaseAdmin: SupabaseAdmin,
   sessionId: string,
   createdBy: string | null,
-  opts?: { dueAt?: string },
+  opts?: { dueAt?: string; tenantId?: string },
 ): Promise<void> {
   // One welcome call per session ever (completed or open) — staff-only contact task.
   const { data: existing, error: readErr } = await supabaseAdmin
@@ -67,6 +67,7 @@ export async function ensureWelcomeCallTask(
     task_type: "welcome_call",
     due_at: dueAt,
     created_by: createdBy,
+    ...(opts?.tenantId ? { tenant_id: opts.tenantId } : {}),
   });
   if (error && !isMissingTaskTable(error)) console.error("ensureWelcomeCallTask insert failed", error);
 }
@@ -79,7 +80,9 @@ export async function ensureWelcomeCallTask(
 export async function backfillWelcomeCallsFromAppointments(
   supabaseAdmin: SupabaseAdmin,
   sessionIds?: string[],
+  opts?: { tenantId?: string },
 ): Promise<number> {
+  if (opts?.tenantId && (!sessionIds || sessionIds.length === 0)) return 0;
   let apptQuery = supabaseAdmin
     .from("appointments")
     .select("session_id, created_at")
@@ -121,7 +124,10 @@ export async function backfillWelcomeCallsFromAppointments(
   for (const [sessionId, createdAt] of bySession) {
     if (have.has(sessionId)) continue;
     const dueAt = new Date(new Date(createdAt).getTime() + WELCOME_CALL_DUE_MS).toISOString();
-    await ensureWelcomeCallTask(supabaseAdmin, sessionId, null, { dueAt });
+    await ensureWelcomeCallTask(supabaseAdmin, sessionId, null, {
+      dueAt,
+      tenantId: opts?.tenantId,
+    });
     created += 1;
   }
   return created;

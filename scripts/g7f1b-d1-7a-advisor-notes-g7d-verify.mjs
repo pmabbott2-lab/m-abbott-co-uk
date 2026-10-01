@@ -48,7 +48,10 @@ const p2 = read("supabase/migrations/20260921140000_gate_p2_tenant_membership_rl
 
 ok("resolve_helper_exists", resolveFn.includes("interview_sessions") && resolveFn.includes("tenant_id"));
 ok("resolve_no_client_tenant", !resolveFn.includes("data.tenantId") && !resolveFn.includes("input.tenantId"));
-ok("resolve_requires_customer_and_tenant", resolveFn.includes("customerId") && resolveFn.includes("Forbidden"));
+// G7F-4S4C2: a missing or tenantless session is refused with the canonical generic "Not found.".
+const resolveRefuses =
+  resolveFn.includes("Forbidden") || resolveFn.includes("RESOURCE_NOT_FOUND_MESSAGE");
+ok("resolve_requires_customer_and_tenant", resolveFn.includes("customerId") && resolveRefuses);
 
 ok("add_uses_resolve", addFn.includes("resolveInterviewSessionForStaffNoteAccess"));
 ok("add_assert_mutation", addFn.includes("assertStaffCanAccessCustomer") && addFn.includes("forMutation: true"));
@@ -100,7 +103,11 @@ ok("no_fake_owner_mapping", !addFn.includes("isOwner: true") && !addFn.includes(
 // Case → invariant mapping (static proofs for review)
 ok("t01_owner_path", sessions.includes("assertStaffCanAccessCustomer") && role.includes("isOwner"));
 ok("t02_supervisor_path", role.includes("isSupervisor") || role.includes("supervisorAdmin"));
-ok("t03_general_path", sessions.includes('canAmend(access, "customers")'));
+ok(
+  "t03_general_path",
+  sessions.includes('canAmend(access, "customers")') ||
+    sessions.includes('canAmend(v.adminAccess, "customers")'),
+);
 ok("t04_adviser_path", sessions.includes("isAdvisor") && sessions.includes("session_advisors"));
 ok("t05_bg_ops_via_g7d_view", role.includes("platformAccessTenantRoleView") && role.includes("operational_admin"));
 ok("t06_tenant_id_on_insert", addFn.includes("tenant_id: sess.tenantId"));
@@ -110,7 +117,7 @@ ok("t09_no_adviser_identity_create", !addFn.includes("setAdvisorRole") && !addFn
 ok("t10_list_after_auth", listFn.includes("assertStaffCanAccessCustomer") && listFn.includes("supabaseAdmin"));
 ok("t11_cross_tenant_write_denied_by_assert", roleServer.includes("validatePlatformTenantAccessSession"));
 ok("t12_cross_tenant_read_denied_by_assert", listFn.includes("assertStaffCanAccessCustomer"));
-ok("t13_invalid_session_forbidden", resolveFn.includes("Forbidden"));
+ok("t13_invalid_session_forbidden", resolveRefuses);
 ok("t14_expired_bg_via_g7d_validate", read("src/lib/platform-tenant-entry.server.ts").includes("isBreakGlassPlatformSessionActive"));
 ok("t15_ended_g7d_via_validate", roleServer.includes("validatePlatformTenantAccessSession"));
 ok("t16_readonly_blocked_for_mutation", addFn.includes("forMutation: true") && role.includes("assertTenantViewMayMutate"));

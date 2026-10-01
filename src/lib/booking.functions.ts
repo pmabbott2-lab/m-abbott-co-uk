@@ -2025,15 +2025,23 @@ async function appendContactLog(
 export const listAdvisorContacts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<AdvisorContact[]> => {
-    const flags = await actingTenantStaffFlags(context.userId);
-    const adminAccess = flags.view.adminAccess;
+    const { resolveActingTenantForList, scopeRowsToTenant, listTenantSessionIds, selectInChunks } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId, view } = await resolveActingTenantForList(context.userId, {
+      mutate: false,
+      allocation: "none",
+      allow: (v) =>
+        v.isAdvisor || v.adminAccess.isOwner || v.adminAccess.isSupervisor || v.adminAccess.isAdmin,
+    });
+    const adminAccess = view.adminAccess;
     const isStaffAdmin = adminAccess.isOwner || adminAccess.isSupervisor || adminAccess.isAdmin;
-    const isAdvisor = flags.isAdvisor;
-    if (!isAdvisor && !isStaffAdmin) throw new Error("Forbidden");
+    const isAdvisor = view.isAdvisor;
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
+    const tenantSessionIds = await listTenantSessionIds(tenantId);
+    const tenantSessionSet = new Set(tenantSessionIds);
 
     const opened = new Set<string>();
     const contactedAtByKey = new Map<string, string>();
@@ -2057,7 +2065,9 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
         .select("session_id")
         .eq("advisor_id", context.userId);
       for (const a of allocs ?? []) {
-        if (a.session_id) allocatedSessionIds.add(a.session_id);
+        if (a.session_id && tenantSessionSet.has(a.session_id)) {
+          allocatedSessionIds.add(a.session_id);
+        }
       }
     }
 
@@ -2066,14 +2076,32 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
     {
       let apptQuery = supabaseAdmin
         .from("appointments")
-        .select("id, customer_name, customer_phone, customer_email, session_id, starts_at, status, created_at, advisor_id")
+        .select(
+          "id, customer_name, customer_phone, customer_email, session_id, starts_at, status, created_at, advisor_id, tenant_id",
+        )
         .order("starts_at", { ascending: true });
       if (!isStaffAdmin) {
         apptQuery = apptQuery.eq("advisor_id", context.userId);
       }
-      const { data: appts, error } = await apptQuery;
+      const { data: apptsRaw, error } = await apptQuery;
       if (error && !isMissingContactTable(error)) throw new Error(error.message);
-      for (const a of appts ?? []) {
+      const appts = await scopeRowsToTenant(
+        (apptsRaw ?? []) as Array<{
+          id: string;
+          customer_name: string;
+          customer_phone: string;
+          customer_email: string | null;
+          session_id: string | null;
+          starts_at: string;
+          status: string;
+          created_at: string;
+          advisor_id: string | null;
+          tenant_id: string | null;
+        }>,
+        tenantId,
+        { tenantOf: (r) => r.tenant_id, sessionOf: (r) => r.session_id },
+      );
+      for (const a of appts) {
         const contactedAt = contactedAtByKey.get(`appointment:${a.id}`) ?? null;
         if (contactedAt && !contactArchiveVisible(contactedAt)) continue;
 
@@ -2112,12 +2140,30 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
       let cbQuery = supabaseAdmin
         .from("callback_requests")
         .select(
-          "id, customer_name, customer_phone, customer_email, session_id, preferred_window, status, created_at, advisor_id, notes, phone_call_id",
+          "id, customer_name, customer_phone, customer_email, session_id, preferred_window, status, created_at, advisor_id, notes, phone_call_id, tenant_id",
         )
         .in("status", ["new", "contacted"])
         .order("created_at", { ascending: false });
-      const { data: callbacks, error } = await cbQuery;
+      const { data: callbacksRaw, error } = await cbQuery;
       if (error && !isMissingContactTable(error)) throw new Error(error.message);
+      const callbacks = await scopeRowsToTenant(
+        (callbacksRaw ?? []) as Array<{
+          id: string;
+          customer_name: string;
+          customer_phone: string;
+          customer_email: string | null;
+          session_id: string | null;
+          preferred_window: string;
+          status: string;
+          created_at: string;
+          advisor_id: string | null;
+          notes: string | null;
+          phone_call_id?: string | null;
+          tenant_id: string | null;
+        }>,
+        tenantId,
+        { tenantOf: (r) => r.tenant_id, sessionOf: (r) => r.session_id },
+      );
 
       const callIds = (callbacks ?? [])
         .map((c) => (c as { phone_call_id?: string | null }).phone_call_id)
@@ -2204,19 +2250,49 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
     );
 
     {
-      let callQuery = supabaseAdmin
-        .from("phone_calls")
-        .select(
-          "id, session_id, advisor_id, call_kind, direction, from_number, to_number, started_at, summary, ai_status, status",
-        )
-        .not("session_id", "is", null)
-        .in("call_kind", ["outbound", "inbound_voicemail"])
-        .order("started_at", { ascending: false })
-        .limit(40);
-      const { data: phoneCalls, error } = await callQuery;
-      if (error && !isMissingContactTable(error)) throw new Error(error.message);
+      type CallRow = {
+        id: string;
+        session_id: string | null;
+        advisor_id: string | null;
+        call_kind: string;
+        direction: string | null;
+        from_number: string | null;
+        to_number: string | null;
+        started_at: string;
+        summary: string | null;
+        ai_status: string;
+        status: string;
+        tenant_id: string | null;
+      };
+      let phoneCallsRaw: CallRow[] = [];
+      try {
+        phoneCallsRaw = await selectInChunks(tenantSessionIds, async (chunk) => {
+          const { data: part, error } = await supabaseAdmin
+            .from("phone_calls")
+            .select(
+              "id, session_id, advisor_id, call_kind, direction, from_number, to_number, started_at, summary, ai_status, status, tenant_id",
+            )
+            .in("session_id", chunk)
+            .in("call_kind", ["outbound", "inbound_voicemail"])
+            .order("started_at", { ascending: false })
+            .limit(40);
+          if (error) throw error;
+          return (part ?? []) as CallRow[];
+        });
+      } catch (e) {
+        const err = e as { code?: string; message?: string };
+        if (!isMissingContactTable(err)) throw new Error(err.message ?? "Request failed.");
+      }
+      const phoneCalls = (
+        await scopeRowsToTenant(phoneCallsRaw, tenantId, {
+          tenantOf: (r) => r.tenant_id,
+          sessionOf: (r) => r.session_id,
+        })
+      )
+        .sort((a, b) => String(b.started_at).localeCompare(String(a.started_at)))
+        .slice(0, 40);
 
-      for (const call of phoneCalls ?? []) {
+      for (const call of phoneCalls) {
         if (call.call_kind === "inbound_voicemail" && callbackPhoneCallIds.has(call.id)) continue;
 
         const sessionId = call.session_id as string;
@@ -2279,6 +2355,7 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
       let sessQuery = supabaseAdmin
         .from("interview_sessions")
         .select("id, customer_id, status, started_at, updated_at, created_at, channel, current_section")
+        .eq("tenant_id", tenantId)
         .eq("status", "in_progress")
         .order("updated_at", { ascending: false })
         .limit(150);
@@ -2296,6 +2373,7 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
           const fallback = await supabaseAdmin
             .from("interview_sessions")
             .select("id, customer_id, status, started_at, updated_at, created_at")
+            .eq("tenant_id", tenantId)
             .eq("status", "in_progress")
             .order("updated_at", { ascending: false })
             .limit(150);
@@ -2381,27 +2459,39 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
 
     const customerIds = [...new Set(contacts.map((c) => c.customerId).filter(Boolean))] as string[];
     if (customerIds.length > 0) {
-      const { data: links } = await supabaseAdmin
+      const { data: linksRaw } = await supabaseAdmin
         .from("customer_introducer_links")
-        .select("customer_id, introducer_id")
+        .select("customer_id, introducer_id, tenant_id")
         .in("customer_id", customerIds);
-      const introIds = [...new Set((links ?? []).map((l) => l.introducer_id))];
-      const introMap = new Map<string, { code: string | null; name: string | null }>();
+      const allLinks = (linksRaw ?? []) as Array<{
+        customer_id: string;
+        introducer_id: string;
+        tenant_id: string | null;
+      }>;
+      const introIds = [...new Set(allLinks.map((l) => l.introducer_id))];
+      const introMap = new Map<
+        string,
+        { code: string | null; name: string | null; tenantId: string | null }
+      >();
       if (introIds.length > 0) {
         const { data: intros } = await supabaseAdmin
           .from("introducers")
-          .select("id, company_code, company_name")
+          .select("id, company_code, company_name, tenant_id")
           .in("id", introIds);
         for (const i of intros ?? []) {
           introMap.set(i.id, {
             code: (i as { company_code?: string | null }).company_code ?? null,
             name: (i as { company_name?: string | null }).company_name ?? null,
+            tenantId: (i as { tenant_id?: string | null }).tenant_id ?? null,
           });
         }
       }
-      const linkByCustomer = new Map(
-        (links ?? []).map((l) => [l.customer_id, l.introducer_id as string]),
-      );
+      const links = allLinks.filter((l) => {
+        const introTenant = introMap.get(l.introducer_id)?.tenantId ?? null;
+        if (l.tenant_id && introTenant && l.tenant_id !== introTenant) return false;
+        return (l.tenant_id ?? introTenant) === tenantId;
+      });
+      const linkByCustomer = new Map(links.map((l) => [l.customer_id, l.introducer_id]));
       for (const c of contacts) {
         if (!c.customerId) continue;
         const introId = linkByCustomer.get(c.customerId);
@@ -2418,14 +2508,21 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
       );
       const { STAFF_TASK_LABELS } = await import("@/lib/staff-contact-tasks");
       const taskSessionFilter =
-        isAdvisor && !isStaffAdmin ? [...allocatedSessionIds] : undefined;
+        isAdvisor && !isStaffAdmin ? [...allocatedSessionIds] : tenantSessionIds;
       // Ensure booked appointments have a welcome-call contact task (idempotent).
       try {
-        await backfillWelcomeCallsFromAppointments(supabaseAdmin, taskSessionFilter);
+        await selectInChunks(taskSessionFilter, async (chunk) => {
+          await backfillWelcomeCallsFromAppointments(supabaseAdmin, chunk, { tenantId });
+          return [];
+        });
       } catch (e) {
         console.error("welcome call backfill failed", e);
       }
-      const tasks = await listOpenStaffContactTasks(supabaseAdmin, taskSessionFilter);
+      const tasks = (
+        await selectInChunks(taskSessionFilter, (chunk) =>
+          listOpenStaffContactTasks(supabaseAdmin, chunk),
+        )
+      ).sort((a, b) => String(a.due_at).localeCompare(String(b.due_at)));
       const sessionIds = [...new Set(tasks.map((t) => t.session_id))];
       const sessionMeta = new Map<
         string,

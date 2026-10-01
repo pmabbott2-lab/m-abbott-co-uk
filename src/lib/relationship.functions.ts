@@ -1,7 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { resolveAdminAccess } from "@/lib/admin.functions";
 import { canViewRelationship } from "@/lib/admin-access";
 import { journeyStageFromMilestones, JOURNEY_MILESTONE_KEYS } from "@/lib/sessions.functions";
 import {
@@ -44,24 +43,49 @@ export const listRelationshipPipeline = createServerFn({ method: "GET" })
       .parse(d ?? {}),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canViewRelationship(access)) throw new Error("Forbidden");
+    const { resolveActingTenantForList, listTenantSessionIds, selectInChunks } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, {
+      mutate: false,
+      allocation: "none",
+      allow: (v) => canViewRelationship(v.adminAccess),
+    });
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdmin, supabaseAdminUntyped } =
+      await import("@/integrations/supabase/client.server");
 
-    const { data: details, error } = await supabaseAdmin
-      .from("case_mortgage_details")
-      .select(
-        "session_id, current_lender, product_expiry_date, actionable_from_date, actionable_note, monthly_payment_pence",
-      )
-      .not("product_expiry_date", "is", null)
-      .order("product_expiry_date", { ascending: true })
-      .limit(500);
-    if (error) {
-      if (isMissingTable(error)) return { rows: [] as RelationshipPipelineRow[], migrationRequired: true };
-      throw new Error(error.message);
+    type DetailRow = {
+      session_id: string;
+      current_lender: string | null;
+      product_expiry_date: string | null;
+      actionable_from_date: string | null;
+      actionable_note: string | null;
+      monthly_payment_pence: number | null;
+    };
+    const tenantCaseIds = await listTenantSessionIds(tenantId, { caseOnly: true });
+    let details: DetailRow[];
+    try {
+      details = await selectInChunks(tenantCaseIds, async (chunk) => {
+        const { data: part, error } = await supabaseAdminUntyped
+          .from("case_mortgage_details")
+          .select(
+            "session_id, current_lender, product_expiry_date, actionable_from_date, actionable_note, monthly_payment_pence",
+          )
+          .in("session_id", chunk)
+          .not("product_expiry_date", "is", null);
+        if (error) throw error;
+        return (part ?? []) as DetailRow[];
+      });
+    } catch (e) {
+      const err = e as { code?: string; message?: string };
+      if (isMissingTable(err)) {
+        return { rows: [] as RelationshipPipelineRow[], migrationRequired: true };
+      }
+      throw new Error(err.message ?? "Request failed.");
     }
+    details = details
+      .sort((a, b) => String(a.product_expiry_date).localeCompare(String(b.product_expiry_date)))
+      .slice(0, 500);
 
     const sessionIds = (details ?? []).map((d) => d.session_id);
     if (!sessionIds.length) return { rows: [], migrationRequired: false };
@@ -179,19 +203,38 @@ export const listRelationshipPipeline = createServerFn({ method: "GET" })
 export const refreshRelationshipActionableDates = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canViewRelationship(access)) throw new Error("Forbidden");
+    const { resolveActingTenantForList, listTenantSessionIds, selectInChunks } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, {
+      mutate: true,
+      allocation: "none",
+      allow: (v) => canViewRelationship(v.adminAccess),
+    });
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: rows, error } = await supabaseAdmin
-      .from("case_mortgage_details")
-      .select("session_id, current_lender, product_expiry_date")
-      .not("product_expiry_date", "is", null)
-      .not("current_lender", "is", null);
-    if (error) {
-      if (isMissingTable(error)) throw new Error("Run supabase/RUN_JOURNEY_FINANCE_CASE.sql first.");
-      throw new Error(error.message);
+    const { supabaseAdmin, supabaseAdminUntyped } =
+      await import("@/integrations/supabase/client.server");
+    type RefreshRow = {
+      session_id: string;
+      current_lender: string | null;
+      product_expiry_date: string | null;
+    };
+    const tenantSessionIds = await listTenantSessionIds(tenantId);
+    let rows: RefreshRow[];
+    try {
+      rows = await selectInChunks(tenantSessionIds, async (chunk) => {
+        const { data: part, error } = await supabaseAdminUntyped
+          .from("case_mortgage_details")
+          .select("session_id, current_lender, product_expiry_date")
+          .in("session_id", chunk)
+          .not("product_expiry_date", "is", null)
+          .not("current_lender", "is", null);
+        if (error) throw error;
+        return (part ?? []) as RefreshRow[];
+      });
+    } catch (e) {
+      const err = e as { code?: string; message?: string };
+      if (isMissingTable(err)) throw new Error("Run supabase/RUN_JOURNEY_FINANCE_CASE.sql first.");
+      throw new Error(err.message ?? "Request failed.");
     }
 
     const now = new Date().toISOString();
@@ -223,7 +266,7 @@ export const refreshRelationshipActionableDates = createServerFn({ method: "POST
       );
 
       const actionableFrom = computeActionableFromDate(expiry, leadDays);
-      await supabaseAdmin
+      await supabaseAdminUntyped
         .from("case_mortgage_details")
         .update({
           actionable_from_date: actionableFrom,

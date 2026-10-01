@@ -1,7 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { resolveAdminAccess } from "@/lib/admin.functions";
-
 export type JourneyAnalyticsGenerator =
   | "direct"
   | "raf"
@@ -109,13 +107,15 @@ function journeyFromSources(opts: {
 export const listJourneyAnalyticsLeads = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<{ leads: JourneyAnalyticsLead[]; live: boolean }> => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!access.isAdmin && !access.isOwner && !access.isSupervisor) {
-      throw new Error("Forbidden");
-    }
+    const { resolveActingTenantForList } = await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, {
+      mutate: false,
+      allocation: "none",
+      allow: (v) => v.adminAccess.isAdmin || v.adminAccess.isOwner || v.adminAccess.isSupervisor,
+    });
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
     const since = new Date();
     since.setDate(since.getDate() - 90);
 
@@ -139,6 +139,7 @@ export const listJourneyAnalyticsLeads = createServerFn({ method: "GET" })
         .select(
           "id, customer_id, status, started_at, updated_at, submitted_at, channel, current_section, current_question_index, case_ref, deleted_at",
         )
+        .eq("tenant_id", tenantId)
         .gte("started_at", since.toISOString())
         .order("started_at", { ascending: false })
         .limit(800);
@@ -147,11 +148,12 @@ export const listJourneyAnalyticsLeads = createServerFn({ method: "GET" })
           const basic = await supabaseAdmin
             .from("interview_sessions")
             .select("id, customer_id, status, started_at, updated_at, submitted_at")
+            .eq("tenant_id", tenantId)
             .gte("started_at", since.toISOString())
             .order("started_at", { ascending: false })
             .limit(800);
           if (basic.error) throw new Error(basic.error.message);
-          sessions = (basic.data ?? []).map((s) => ({
+          sessions = ((basic.data ?? []) as typeof sessions).map((s) => ({
             ...s,
             channel: null,
             current_section: null,
@@ -215,13 +217,34 @@ export const listJourneyAnalyticsLeads = createServerFn({ method: "GET" })
     {
       const { data: refs, error } = await supabaseAdmin
         .from("referrals")
-        .select("referred_user_id, status")
+        .select("referred_user_id, status, tenant_id, referral_code_id")
         .in("referred_user_id", customerIds);
       if (error && !isMissingTable(error)) {
         /* referrals table shape may vary — ignore */
       } else {
-        for (const r of refs ?? []) {
-          if (r.referred_user_id) rafCustomers.add(r.referred_user_id);
+        type RefRow = {
+          referred_user_id: string | null;
+          tenant_id: string | null;
+          referral_code_id: string | null;
+        };
+        const refRows = (refs ?? []) as RefRow[];
+        const codeIds = [
+          ...new Set(refRows.map((r) => r.referral_code_id).filter((id): id is string => !!id)),
+        ];
+        const codeTenant = new Map<string, string | null>();
+        if (codeIds.length) {
+          const { data: codes } = await supabaseAdmin
+            .from("referral_codes")
+            .select("id, tenant_id")
+            .in("id", codeIds);
+          for (const c of (codes ?? []) as Array<{ id: string; tenant_id: string | null }>) {
+            codeTenant.set(c.id, c.tenant_id);
+          }
+        }
+        for (const r of refRows) {
+          const effective =
+            r.tenant_id ?? (r.referral_code_id ? codeTenant.get(r.referral_code_id) : null);
+          if (r.referred_user_id && effective === tenantId) rafCustomers.add(r.referred_user_id);
         }
       }
     }
@@ -230,13 +253,34 @@ export const listJourneyAnalyticsLeads = createServerFn({ method: "GET" })
     {
       const { data: links, error } = await supabaseAdmin
         .from("customer_introducer_links")
-        .select("customer_id")
+        .select("customer_id, tenant_id, introducer_id")
         .in("customer_id", customerIds);
       if (error && !isMissingTable(error)) {
         /* ignore missing links table */
       } else {
-        for (const l of links ?? []) {
-          if (l.customer_id) introducerCustomers.add(l.customer_id);
+        type LinkRow = {
+          customer_id: string | null;
+          tenant_id: string | null;
+          introducer_id: string | null;
+        };
+        const linkRows = (links ?? []) as LinkRow[];
+        const introIds = [
+          ...new Set(linkRows.map((l) => l.introducer_id).filter((id): id is string => !!id)),
+        ];
+        const introTenant = new Map<string, string | null>();
+        if (introIds.length) {
+          const { data: intros } = await supabaseAdmin
+            .from("introducers")
+            .select("id, tenant_id")
+            .in("id", introIds);
+          for (const i of (intros ?? []) as Array<{ id: string; tenant_id: string | null }>) {
+            introTenant.set(i.id, i.tenant_id);
+          }
+        }
+        for (const l of linkRows) {
+          const effective =
+            l.tenant_id ?? (l.introducer_id ? introTenant.get(l.introducer_id) : null);
+          if (l.customer_id && effective === tenantId) introducerCustomers.add(l.customer_id);
         }
       }
     }

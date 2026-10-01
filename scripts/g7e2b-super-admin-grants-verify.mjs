@@ -299,9 +299,17 @@ ok(
   "contact_update_for_mutation",
   sessions.includes("forMutation: true") && sessions.includes("updateCustomerContact"),
 );
+// G7F-4S4C2: platform read access is part of the staff customer capability used by
+// assertStaffCanAccessCustomer (previously a local `platformDataAccess` flag).
+const staffCustomerCap =
+  sessions.split("function staffCustomerCapability(")[1]?.split("\n}\n")[0] ?? "";
+const assertStaffFn =
+  sessions.split("export async function assertStaffCanAccessCustomer(")[1]?.split("\n}\n")[0] ?? "";
 ok(
   "assert_staff_platform_data_access",
-  sessions.includes("platformDataAccess") && sessions.includes("platformAccessMayRead"),
+  (sessions.includes("platformDataAccess") && sessions.includes("platformAccessMayRead")) ||
+    (staffCustomerCap.includes("platformAccessMayRead(v)") &&
+      assertStaffFn.includes("staffCustomerCapability(")),
 );
 ok(
   "get_session_platform_may_read",
