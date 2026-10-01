@@ -34,6 +34,8 @@ for (const k of [
 }
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Last commit before S4B (G7F-4S3 closure): the pre-S4B control and the S3 byte-identity check.
+const PRE_S4B_REF = "93c5b4c";
 const failures = [];
 let total = 0;
 function ok(name, cond, detail = "") {
@@ -651,10 +653,14 @@ ok(
   "TEST_1i jwtPayloadUsable removed",
   !/jwtPayloadUsable/.test(fallbackSrc) && usersOf(/jwtPayloadUsable/).length === 0,
 );
-const headMw = execFileSync("git", ["show", "HEAD:src/integrations/supabase/auth-middleware.ts"], {
-  cwd: root,
-  encoding: "utf8",
-});
+const headMw = execFileSync(
+  "git",
+  ["show", `${PRE_S4B_REF}:src/integrations/supabase/auth-middleware.ts`],
+  {
+    cwd: root,
+    encoding: "utf8",
+  },
+);
 ok(
   "TEST_1j control: the pre-S4B middleware admitted fallback!.sub from an unverified decode",
   /decodeJwtPayload\(token\)/.test(headMw) && /userId: fallback!\.sub/.test(headMw),
@@ -1296,14 +1302,14 @@ const S3_FILES = [
 ];
 const changedS3 = S3_FILES.filter((f) => {
   try {
-    execFileSync("git", ["diff", "--quiet", "HEAD", "--", f], { cwd: root });
+    execFileSync("git", ["diff", "--quiet", PRE_S4B_REF, "--", f], { cwd: root });
     return false;
   } catch {
     return true;
   }
 });
 ok(
-  "TEST_14 S3 invite/introducer/referral/commission modules and the S3B migration are byte-identical to HEAD",
+  "TEST_14 S3 invite/introducer/referral/commission modules and the S3B migration are byte-identical to the pre-S4B commit",
   changedS3.length === 0,
   changedS3.join(","),
 );
