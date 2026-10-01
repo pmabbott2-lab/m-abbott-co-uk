@@ -342,7 +342,7 @@ ok(
 
 // --- apply the migration verbatim, twice -----------------------------------------------------
 const MIGRATION_REL =
-  "supabase/migrations/20260930160000_gate_g7f4s3b_staff_invite_identity_binding.sql";
+  "supabase/migrations/20260930210201_gate_g7f4s3b_staff_invite_identity_binding.sql";
 const migration = readFileSync(resolve(root, MIGRATION_REL), "utf8");
 const mig1 = await outcome(() => pg.exec(migration));
 const mig2 = await outcome(() => pg.exec(migration));
