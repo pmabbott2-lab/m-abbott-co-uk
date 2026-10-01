@@ -8,14 +8,14 @@ import {
   processPhoneCallRecording,
   syncRecordingFromTwilioCall,
 } from "@/lib/phone-call-recording.server";
+import { withTwilioSignature } from "@/lib/twilio-webhook.server";
 
 export const Route = createFileRoute("/api/twilio/voice/recording")({
   server: {
     handlers: {
-      POST: async ({ request }) => {
+      POST: withTwilioSignature(async ({ request, params: form }) => {
         const url = new URL(request.url);
         const callIdFromQuery = url.searchParams.get("callId");
-        const form = await request.formData();
         const recordingSid = String(form.get("RecordingSid") ?? "");
         const recordingUrl = String(form.get("RecordingUrl") ?? "");
         const callSid = String(form.get("CallSid") ?? "");
@@ -75,7 +75,7 @@ export const Route = createFileRoute("/api/twilio/voice/recording")({
         }
 
         return new Response("ok");
-      },
+      }),
     },
   },
 });

@@ -2,6 +2,7 @@
 
 import { processCallRecording } from "@/lib/call-ai.server";
 import { getTwilioConfig } from "@/lib/sms.server";
+import { isTwilioCallSid, isTwilioRecordingSid } from "@/lib/twilio-recording-url.server";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -57,7 +58,7 @@ export async function syncRecordingFromTwilioCall(
   callSid: string,
   callIdHint?: string | null,
 ): Promise<boolean> {
-  if (!callSid) return false;
+  if (!isTwilioCallSid(callSid)) return false;
 
   const callId =
     (await findPhoneCallId({ callId: callIdHint, callSid })) ??
@@ -75,7 +76,7 @@ export async function syncRecordingFromTwilioCall(
 
   const list = await twilioGet(`/Calls/${callSid}/Recordings.json`);
   const recording = (list.recordings ?? []).find((r) => r.status === "completed") ?? list.recordings?.[0];
-  if (!recording?.sid) return false;
+  if (!isTwilioRecordingSid(recording?.sid)) return false;
 
   const recordingUrl = `https://api.twilio.com/2010-04-01/Accounts/${getTwilioConfig().accountSid}/Recordings/${recording.sid}`;
   await processPhoneCallRecording(callId, recordingUrl, recording.sid);

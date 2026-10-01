@@ -3,23 +3,20 @@
 import { chatCompletion } from "@/lib/ai-gateway.server";
 import { getTwilioConfig } from "@/lib/sms.server";
 import { transcribeAudio } from "@/lib/openai.server";
+import {
+  fetchWithTwilioCredentials,
+  trustedTwilioRecordingDownloadUrls,
+} from "@/lib/twilio-recording-url.server";
 
 export async function downloadTwilioRecording(recordingUrl: string, recordingSid?: string): Promise<Blob> {
   const { accountSid, authToken } = getTwilioConfig();
-  const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
-  const candidates = [
-    recordingUrl.endsWith(".mp3") ? recordingUrl : `${recordingUrl}.mp3`,
-    recordingSid
-      ? `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Recordings/${recordingSid}.mp3`
-      : null,
-    recordingSid
-      ? `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Recordings/${recordingSid}.mp3?RequestedChannels=dual`
-      : null,
-  ].filter(Boolean) as string[];
+  const candidates = trustedTwilioRecordingDownloadUrls({ recordingUrl, recordingSid, accountSid });
+  if (!candidates) throw new Error("Recording URL rejected.");
 
+  const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
   for (const url of candidates) {
-    const res = await fetch(url, { headers: { Authorization: `Basic ${auth}` } });
-    if (res.ok) return res.blob();
+    const res = await fetchWithTwilioCredentials(url, `Basic ${auth}`);
+    if (res?.ok) return res.blob();
   }
   throw new Error(`Failed to download recording (${candidates.length} URLs tried)`);
 }

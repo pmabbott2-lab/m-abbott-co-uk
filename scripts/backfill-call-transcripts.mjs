@@ -5,6 +5,7 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+import twilio from "twilio";
 
 function loadEnv() {
   const envPath = resolve(process.cwd(), ".env");
@@ -70,20 +71,22 @@ for (const row of rows) {
   const recordingUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Recordings/${recording.sid}`;
   console.log(`Processing ${row.id} (${row.ai_status})…`);
 
-  const hookRes = await fetch(
-    `${appBaseUrl}/api/twilio/voice/recording?callId=${encodeURIComponent(row.id)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        RecordingSid: recording.sid,
-        RecordingUrl: recordingUrl,
-        CallSid: row.twilio_call_sid,
-        From: "client:backfill",
-        RecordingStatus: "completed",
-      }),
+  const hookUrl = `${appBaseUrl}/api/twilio/voice/recording?callId=${encodeURIComponent(row.id)}`;
+  const hookParams = {
+    RecordingSid: recording.sid,
+    RecordingUrl: recordingUrl,
+    CallSid: row.twilio_call_sid,
+    From: "client:backfill",
+    RecordingStatus: "completed",
+  };
+  const hookRes = await fetch(hookUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-Twilio-Signature": twilio.getExpectedTwilioSignature(authToken, hookUrl, hookParams),
     },
-  );
+    body: new URLSearchParams(hookParams),
+  });
   if (!hookRes.ok) {
     console.error(`  ✗ webhook ${hookRes.status}`);
     continue;

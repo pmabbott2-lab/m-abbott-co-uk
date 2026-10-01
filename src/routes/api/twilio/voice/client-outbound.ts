@@ -2,18 +2,19 @@ import { createFileRoute } from "@tanstack/react-router";
 import { clientDialCustomerTwiml, getVoiceConfig, voiceWebhookUrl } from "@/lib/voice.server";
 import { normaliseUkPhone } from "@/lib/sms.server";
 import { isTwilioLiveDeliveryAllowed } from "@/lib/app-environment.server";
+import { withTwilioSignature, type TwilioWebhookContext } from "@/lib/twilio-webhook.server";
 
 /** Twilio fetches this when the browser softphone places an outbound call. */
 export const Route = createFileRoute("/api/twilio/voice/client-outbound")({
   server: {
     handlers: {
-      GET: async ({ request }) => twimlForRequest(request),
-      POST: async ({ request }) => twimlForRequest(request),
+      GET: withTwilioSignature(twimlForRequest),
+      POST: withTwilioSignature(twimlForRequest),
     },
   },
 });
 
-async function twimlForRequest(request: Request): Promise<Response> {
+async function twimlForRequest({ request, params }: TwilioWebhookContext): Promise<Response> {
   if (!isTwilioLiveDeliveryAllowed()) {
     return twiml(
       "<Response><Say>Outbound calling is disabled in this environment.</Say></Response>",
@@ -21,16 +22,7 @@ async function twimlForRequest(request: Request): Promise<Response> {
   }
 
   const url = new URL(request.url);
-  let form: FormData | null = null;
-  if (request.method === "POST") {
-    try {
-      form = await request.formData();
-    } catch {
-      form = null;
-    }
-  }
-
-  const get = (key: string) => String(form?.get(key) ?? url.searchParams.get(key) ?? "");
+  const get = (key: string) => String(params.get(key) ?? url.searchParams.get(key) ?? "");
 
   let customerPhone = get("To");
   const callId = get("CallId") || get("callId");

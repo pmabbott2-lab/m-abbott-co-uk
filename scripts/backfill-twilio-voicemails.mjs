@@ -5,6 +5,7 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+import twilio from "twilio";
 
 function loadEnv() {
   const envPath = resolve(process.cwd(), ".env");
@@ -66,15 +67,20 @@ for (const call of calls.calls ?? []) {
 
   console.log(`Backfill ${call.sid} from ${call.from} (${call.start_time})`);
 
-  const res = await fetch(`${appBaseUrl}/api/twilio/voice/voicemail-done`, {
+  const hookUrl = `${appBaseUrl}/api/twilio/voice/voicemail-done`;
+  const hookParams = {
+    CallSid: call.sid,
+    From: call.from,
+    RecordingUrl: recordingUrl,
+    RecordingSid: recording?.sid ?? "",
+  };
+  const res = await fetch(hookUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      CallSid: call.sid,
-      From: call.from,
-      RecordingUrl: recordingUrl,
-      RecordingSid: recording?.sid ?? "",
-    }),
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-Twilio-Signature": twilio.getExpectedTwilioSignature(authToken, hookUrl, hookParams),
+    },
+    body: new URLSearchParams(hookParams),
   });
   if (!res.ok) {
     console.error(`  webhook failed (${res.status})`);

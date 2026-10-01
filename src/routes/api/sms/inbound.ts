@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { isTwilioConfigured } from "@/lib/sms.server";
+import { withTwilioSignature } from "@/lib/twilio-webhook.server";
 
 export const Route = createFileRoute("/api/sms/inbound")({
   server: {
     handlers: {
-      POST: async ({ request }) => {
-        const form = await request.formData();
+      POST: withTwilioSignature(async ({ params: form }) => {
         const from = String(form.get("From") ?? "");
         const to = String(form.get("To") ?? "");
         const body = String(form.get("Body") ?? "").trim();
@@ -36,7 +36,7 @@ export const Route = createFileRoute("/api/sms/inbound")({
           `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(reply)}</Message></Response>`,
           { headers: { "Content-Type": "text/xml" } },
         );
-      },
+      }),
     },
   },
 });

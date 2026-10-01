@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { syncRecordingFromTwilioCall } from "@/lib/phone-call-recording.server";
+import { withTwilioSignature } from "@/lib/twilio-webhook.server";
 
 const STATUS_MAP: Record<string, string> = {
   queued: "initiated",
@@ -16,9 +17,8 @@ const STATUS_MAP: Record<string, string> = {
 export const Route = createFileRoute("/api/twilio/voice/status")({
   server: {
     handlers: {
-      POST: async ({ request }) => {
+      POST: withTwilioSignature(async ({ request, params: form }) => {
         const url = new URL(request.url);
-        const form = await request.formData();
         const callSid = String(form.get("CallSid") ?? "");
         const dialCallSid = String(form.get("DialCallSid") ?? "");
         const dialStatus = String(form.get("DialCallStatus") ?? "");
@@ -59,7 +59,7 @@ export const Route = createFileRoute("/api/twilio/voice/status")({
         }
 
         return new Response("ok");
-      },
+      }),
     },
   },
 });
