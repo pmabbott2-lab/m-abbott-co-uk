@@ -137,9 +137,9 @@ export function TestAccountsCard() {
         <div className="space-y-1 min-w-0">
           <h3 className="font-medium">Test accounts</h3>
           <p className="text-sm text-muted-foreground break-words">
-            Owner-only. Provisions {TEST_ACCOUNTS.length} accounts: 1–3 introducers, 4–5 advisors,
-            6–12 customers, and             <strong>13@test.co.uk</strong> (general admin). Shared phone{" "}
-            <span className="font-mono">{TEST_ACCOUNT_PHONE}</span>, password{" "}
+            Platform Super Owner only. Provisions {TEST_ACCOUNTS.length} accounts: 1–3 introducers,
+            4–5 advisors, 6–12 customers, and <strong>13@test.co.uk</strong> (general admin). Shared
+            phone <span className="font-mono">{TEST_ACCOUNT_PHONE}</span>, password{" "}
             <span className="font-mono break-all">{TEST_ACCOUNT_PASSWORD}</span>. Use{" "}
             <strong>Reset</strong> on a row to wipe that account&apos;s Hub activity and start again.
             <strong> Revoke</strong> permanently deletes all test accounts and their Hub data for a
@@ -166,6 +166,13 @@ export function TestAccountsCard() {
 
       {statusQ.isLoading && (
         <p className="text-sm text-muted-foreground">Loading test account status…</p>
+      )}
+      {statusQ.isError && (
+        <p className="text-sm text-muted-foreground">
+          {statusQ.error instanceof Error
+            ? statusQ.error.message
+            : "Test accounts are managed by a platform Super Owner."}
+        </p>
       )}
 
       {/* Mobile / tablet: stacked cards — no sideways scroll, Reset always visible */}

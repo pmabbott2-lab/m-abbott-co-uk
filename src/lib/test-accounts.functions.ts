@@ -10,10 +10,10 @@ import {
 } from "@/lib/test-accounts";
 import { DEFAULT_GENERAL_PERMISSIONS, PERMISSION_KEYS } from "@/lib/admin-access";
 
-async function requireOwner(userId: string, email?: string): Promise<void> {
-  const { resolveAdminAccess } = await import("@/lib/admin.functions");
-  const access = await resolveAdminAccess(userId, email);
-  if (!access.isOwner) throw new Error("Owner only");
+// Test accounts are global Auth identities, so no tenant role (including tenant Owner) may manage them.
+async function requireTestAccountAuthority(userId: string): Promise<void> {
+  const { requireSuperOwner } = await import("@/lib/platform-authority.server");
+  await requireSuperOwner(userId);
 }
 
 async function listAllAuthUsers() {
@@ -428,8 +428,7 @@ async function upsertTestUser(
 export const provisionTestAccounts = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const email = (context.claims as { email?: string }).email;
-    await requireOwner(context.userId, email);
+    await requireTestAccountAuthority(context.userId);
 
     const users = await listAllAuthUsers();
     const results = [];
@@ -461,8 +460,7 @@ export const provisionTestAccounts = createServerFn({ method: "POST" })
 export const revokeTestAccounts = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const email = (context.claims as { email?: string }).email;
-    await requireOwner(context.userId, email);
+    await requireTestAccountAuthority(context.userId);
 
     const revoked: string[] = [];
     const errors: { email: string; error: string }[] = [];
@@ -500,8 +498,7 @@ export const resetTestAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ email: z.string().email() }).parse(d))
   .handler(async ({ data, context }) => {
-    const ownerEmail = (context.claims as { email?: string }).email;
-    await requireOwner(context.userId, ownerEmail);
+    await requireTestAccountAuthority(context.userId);
 
     const email = data.email.trim().toLowerCase();
     const spec = TEST_ACCOUNTS.find((a) => a.email === email);
@@ -524,8 +521,7 @@ export const resetTestAccount = createServerFn({ method: "POST" })
 export const listTestAccountStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const email = (context.claims as { email?: string }).email;
-    await requireOwner(context.userId, email);
+    await requireTestAccountAuthority(context.userId);
 
     const allUsers = await listAllAuthUsers();
     const byEmail = new Map(allUsers.map((u) => [u.email?.toLowerCase() ?? "", u]));

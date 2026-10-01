@@ -1426,8 +1426,9 @@ function slugifyName(value: string): string {
 
 // Grant the introducer role to a user and ensure their introducer profile
 // exists, resolving the chosen company linkage (create a fresh 4-digit code or
-// join an existing company by code). Shared by setIntroducerRole, the invite
-// consume flow and restore. Returns the resolved company code.
+// join an existing company by code). Only test-account provisioning (platform
+// Super Owner) uses this; tenant introducers are added by staff invite.
+// Returns the resolved company code.
 async function grantIntroducerRole(
   userId: string,
   companyMode: "new" | "join" | undefined,
@@ -1536,6 +1537,33 @@ export async function grantIntroducerRoleForTestAccount(userId: string): Promise
   await grantIntroducerRole(userId, "new", undefined);
 }
 
+// Legacy user_roles rows are global, so a tenant admin may only touch them for a target who
+// holds `targetRole` in the caller's acting tenant and has no staff standing in any other tenant.
+async function requireLegacyRoleTargetInActingTenant(
+  callerId: string,
+  targetUserId: string,
+  targetRole: "adviser" | "introducer",
+): Promise<{ tenantId: string }> {
+  const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
+  const { assertTenantViewMayMutate } = await import("@/lib/tenant-role");
+  const view = await resolveActingTenantRole(callerId);
+  if (!view.isMainAdmin || !view.tenantId) throw new Error("Forbidden");
+  assertTenantViewMayMutate(view);
+  const { supabaseAdminUntyped: supabaseAdmin } =
+    await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin
+    .from("tenant_memberships")
+    .select("tenant_id, role")
+    .eq("user_id", targetUserId)
+    .eq("active", true);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as Array<{ tenant_id: string; role: string }>;
+  const holdsRoleHere = rows.some((r) => r.tenant_id === view.tenantId && r.role === targetRole);
+  const staffElsewhere = rows.some((r) => r.tenant_id !== view.tenantId && r.role !== "customer");
+  if (!holdsRoleHere || staffElsewhere) throw new Error("Forbidden");
+  return { tenantId: view.tenantId };
+}
+
 export const setIntroducerRole = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
@@ -1543,34 +1571,37 @@ export const setIntroducerRole = createServerFn({ method: "POST" })
       .object({
         userId: z.string().uuid(),
         makeIntroducer: z.boolean(),
-        // "new" (default) → auto-generate a fresh 4-digit company code.
-        // "join" → link this introducer to an existing company by its code.
         companyMode: z.enum(["new", "join"]).optional(),
         companyCode: z.string().regex(/^\d{4}$/).optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
-    const view = await resolveActingTenantRole(context.userId);
-    if (!view.isAdvisor && !view.isMainAdmin) throw new Error("Forbidden");
-
     if (data.makeIntroducer) {
-      const companyCode = await grantIntroducerRole(data.userId, data.companyMode, data.companyCode);
-      return { ok: true, companyCode };
+      throw new Error("Introducers are added with a staff invite link.");
     }
+    const { tenantId } = await requireLegacyRoleTargetInActingTenant(
+      context.userId,
+      data.userId,
+      "introducer",
+    );
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
+    // Keep their data and company linkage but deactivate this tenant's referral links.
+    const { error: introErr } = await supabaseAdmin
+      .from("introducers")
+      .update({ active: false })
+      .eq("user_id", data.userId)
+      .eq("tenant_id", tenantId);
+    if (introErr) throw new Error(introErr.message);
     const { error } = await supabaseAdmin
       .from("user_roles")
       .delete()
       .eq("user_id", data.userId)
       .eq("role", "introducer");
     if (error) throw new Error(error.message);
-    // Keep their data but deactivate referral links.
-    await supabaseAdmin.from("introducers").update({ active: false }).eq("user_id", data.userId);
     return { ok: true };
   });
 
@@ -1580,38 +1611,22 @@ export const setAdvisorRole = createServerFn({ method: "POST" })
     z.object({ userId: z.string().uuid(), makeAdvisor: z.boolean() }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
-    const view = await resolveActingTenantRole(context.userId);
-    if (!view.isAdvisor && !view.isMainAdmin) throw new Error("Forbidden");
-    // Guard against an advisor locking themselves out of the dashboard.
-    if (!data.makeAdvisor && data.userId === context.userId) {
+    if (data.makeAdvisor) {
+      throw new Error("Advisers are added with a staff invite link.");
+    }
+    if (data.userId === context.userId) {
       throw new Error("You can't remove your own advisor access.");
     }
+    await requireLegacyRoleTargetInActingTenant(context.userId, data.userId, "adviser");
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    if (data.makeAdvisor) {
-      const { error } = await supabaseAdmin
-        .from("user_roles")
-        .upsert({ user_id: data.userId, role: "advisor" }, { onConflict: "user_id,role" });
-      if (error) throw new Error(error.message);
-      // Mint a unique advisor code on grant (no-op if the table isn't there yet).
-      try {
-        await ensureAdvisorCode(data.userId);
-      } catch (e) {
-        console.error("ensure advisor code failed", e);
-      }
-      // Clear any bin state so re-granting via "Make advisor" can't leave them
-      // showing in both the active list and the Recently-deleted bin.
-      await setAdvisorDeletedAt(data.userId, null);
-    } else {
-      const { error } = await supabaseAdmin
-        .from("user_roles")
-        .delete()
-        .eq("user_id", data.userId)
-        .eq("role", "advisor");
-      if (error) throw new Error(error.message);
-    }
+    const { error } = await supabaseAdmin
+      .from("user_roles")
+      .delete()
+      .eq("user_id", data.userId)
+      .eq("role", "advisor");
+    if (error) throw new Error(error.message);
     return { ok: true };
   });
 

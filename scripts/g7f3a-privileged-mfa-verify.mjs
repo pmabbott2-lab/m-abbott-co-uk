@@ -345,8 +345,8 @@ ok("TEST_20_privileged_mutations_have_hooks", missingHooks.length === 0 && hookB
   });
   const mwOk =
     /fromVerifiedSupabaseClaims\(data\.claims/.test(mw) &&
-    /unverifiedAuthContext\(fallback!\.sub/.test(mw) &&
-    (mw.match(/runWithRequestAuthAssurance\(/g) || []).length === 2;
+    !/fallback!?\.sub/.test(mw) &&
+    (mw.match(/runWithRequestAuthAssurance\(/g) || []).length === 1;
   const onlyMiddlewareMints = readdirSync(resolve(root, "src"), { recursive: true })
     .filter((f) => /\.(ts|tsx)$/.test(String(f)))
     .filter((f) => read(`src/${f}`).includes("fromVerifiedSupabaseClaims("))

@@ -133,17 +133,19 @@ export const updateCommunicationTemplateFn = createServerFn({ method: "POST" })
       .maybeSingle();
     if (readErr) throw new Error(readErr.message);
     if (!existing) throw new Error("Template not found");
+    // tenant_id IS NULL templates are platform-wide fallbacks shared by every tenant.
+    if (existing.tenant_id !== authorised.tenant.id) {
+      throw new Error("Platform templates can't be edited from a company account.");
+    }
 
-    let lastVersionQuery = supabaseAdmin
+    const { data: lastVer } = await supabaseAdmin
       .from("communication_template_versions")
       .select("version")
       .eq("template_id", data.templateId)
+      .eq("tenant_id", authorised.tenant.id)
       .order("version", { ascending: false })
-      .limit(1);
-    lastVersionQuery = existing.tenant_id
-      ? lastVersionQuery.eq("tenant_id", authorised.tenant.id)
-      : lastVersionQuery.is("tenant_id", null);
-    const { data: lastVer } = await lastVersionQuery.maybeSingle();
+      .limit(1)
+      .maybeSingle();
     const nextVersion = (lastVer?.version ?? 0) + 1;
 
     const versionPayload = {
@@ -156,9 +158,7 @@ export const updateCommunicationTemplateFn = createServerFn({ method: "POST" })
     };
     await supabaseAdmin
       .from("communication_template_versions")
-      .insert(existing.tenant_id
-        ? withForcedTenantId(versionPayload, authorised.tenant.id)
-        : versionPayload);
+      .insert(withForcedTenantId(versionPayload, authorised.tenant.id));
 
     const patch: Record<string, unknown> = {
       body: data.body,
@@ -168,14 +168,11 @@ export const updateCommunicationTemplateFn = createServerFn({ method: "POST" })
     if (data.subject !== undefined) patch.subject = data.subject;
     if (data.active !== undefined) patch.active = data.active;
 
-    let updateQuery = supabaseAdmin
+    const { error } = await supabaseAdmin
       .from("communication_templates")
       .update(patch)
-      .eq("id", data.templateId);
-    updateQuery = existing.tenant_id
-      ? updateQuery.eq("tenant_id", authorised.tenant.id)
-      : updateQuery.is("tenant_id", null);
-    const { error } = await updateQuery;
+      .eq("id", data.templateId)
+      .eq("tenant_id", authorised.tenant.id);
     if (error) throw new Error(error.message);
     return { ok: true, version: nextVersion };
   });

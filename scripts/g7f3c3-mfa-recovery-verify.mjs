@@ -558,8 +558,8 @@ ok("BND_5_unexpected_state_fails_closed", !oddView.canAccessPlatform && !oddView
 const mwSrc = code("src/integrations/supabase/auth-middleware.ts");
 const guardIdx = [...mwSrc.matchAll(/await assertAuthContextNotSuperseded\(authAssurance\);\s*return runWithRequestAuthAssurance\(authAssurance/g)];
 ok(
-  "BND_6_middleware_guards_verified_and_fallback_contexts_before_handlers",
-  guardIdx.length === 2 && (mwSrc.match(/runWithRequestAuthAssurance\(/g) ?? []).length === 2,
+  "BND_6_middleware_guards_verified_context_before_handlers",
+  guardIdx.length === 1 && (mwSrc.match(/runWithRequestAuthAssurance\(/g) ?? []).length === 1,
 );
 const boundaryMigrationFile = readdirSync(resolve(root, "supabase/migrations")).find((f) => /_gate_g7f3c3a_recovery_auth_boundary\.sql$/.test(f));
 const boundaryMigration = boundaryMigrationFile ? read(`supabase/migrations/${boundaryMigrationFile}`) : "";

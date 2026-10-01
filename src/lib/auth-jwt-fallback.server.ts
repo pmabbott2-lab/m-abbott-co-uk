@@ -1,4 +1,7 @@
-/** Decode Supabase JWT payload when getClaims() cannot reach Supabase (DNS/network). */
+/**
+ * Decodes a JWT payload WITHOUT verifying its signature. Never use the result as identity or
+ * authority; requireSupabaseAuth only admits tokens verified by getClaims().
+ */
 export function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const part = token.split(".")[1];
@@ -10,13 +13,6 @@ export function decodeJwtPayload(token: string): Record<string, unknown> | null 
   } catch {
     return null;
   }
-}
-
-export function jwtPayloadUsable(payload: Record<string, unknown> | null): boolean {
-  if (!payload?.sub || typeof payload.sub !== "string") return false;
-  const exp = payload.exp;
-  if (typeof exp !== "number") return false;
-  return exp * 1000 > Date.now() - 60_000;
 }
 
 export function isNetworkAuthError(error: unknown): boolean {

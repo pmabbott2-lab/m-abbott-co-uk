@@ -3,11 +3,7 @@ import { createMiddleware } from '@tanstack/react-start'
 import { getRequest } from '@tanstack/react-start/server'
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from './types'
-import {
-  decodeJwtPayload,
-  isNetworkAuthError,
-  jwtPayloadUsable,
-} from '@/lib/auth-jwt-fallback.server'
+import { isNetworkAuthError } from '@/lib/auth-jwt-fallback.server'
 import { fromVerifiedSupabaseClaims, unverifiedAuthContext } from '@/lib/privileged-mfa'
 import { runWithRequestAuthAssurance } from '@/lib/request-auth-context.server'
 
@@ -119,7 +115,7 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
       }
     }
 
-    if (data?.claims?.sub) {
+    if (!lastError && data?.claims?.sub) {
       const authAssurance =
         fromVerifiedSupabaseClaims(data.claims as unknown as Record<string, unknown>) ??
         unverifiedAuthContext(data.claims.sub);
@@ -138,26 +134,8 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
       );
     }
 
+    // A token whose signature could not be verified never establishes an identity.
     if (lastError && isNetworkAuthError(lastError)) {
-      const fallback = decodeJwtPayload(token);
-      if (jwtPayloadUsable(fallback)) {
-        console.warn('[Supabase] getClaims unreachable — using JWT payload fallback for', fallback!.sub);
-        // Signature NOT verified: may identify the user for ordinary flows only.
-        // Never satisfies AAL2 / fresh privileged auth / platform, BG or G7D MFA.
-        const authAssurance = unverifiedAuthContext(fallback!.sub as string);
-        const { assertAuthContextNotSuperseded } = await import('@/lib/platform-authority.server');
-        await assertAuthContextNotSuperseded(authAssurance);
-        return runWithRequestAuthAssurance(authAssurance, () =>
-          next({
-            context: {
-              supabase,
-              userId: fallback!.sub as string,
-              claims: fallback!,
-              authAssurance,
-            },
-          }),
-        );
-      }
       throw new Error('Auth service unavailable — check your internet connection and try again.');
     }
 
