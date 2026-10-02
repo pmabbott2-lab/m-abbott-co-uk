@@ -44,7 +44,19 @@ The site calls `https://mymortgagehub.uk/api/calculator/market-rates`,
 `/api/calculator/estimate-rate` and `/api/introducer/calculator-lead`. These will be blocked by
 CORS from the preview origin until the Hub allows it. Local calculator maths works without them.
 
-## 3. Pre-live compliance/content review (required before mortgageeasy.uk)
+## 3. Video hosting
+
+Cloudflare Pages ignores HTTP Range requests (always `200`, never `206`), so seeking fails and
+Safari/iOS may refuse to play MP4s served from Pages. The four homepage videos are therefore
+served from R2 bucket `mortgageeasy-media` (objects under `video/`) via its public development
+URL `https://pub-bbf66d76b2174310ab869054303b2ebb.r2.dev`. Captions (`.vtt`) stay on Pages.
+
+Before live: `r2.dev` is rate-limited and not intended for production. Attach a custom domain to
+the bucket (e.g. a `media.` subdomain of mortgageeasy.uk), switch the `<source>` URLs in
+`index.html` to it, then disable the `r2.dev` URL. The MP4 copies under `assets/video/` are no
+longer referenced and can be removed from the published folder at that point.
+
+## 4. Pre-live compliance/content review (required before mortgageeasy.uk)
 
 Legal entity: Mortgage Easy is a trading name of Mortgage Easy Group Limited, registered in
 England and Wales, company number 17490711. FCA Firm Reference Number: pending.
