@@ -67,9 +67,15 @@ ok("list_service_role_select", listFn.includes("supabaseAdmin") && listFn.includ
 ok("list_scoped_session_and_tenant", listFn.includes('.eq("session_id", sess.sessionId)') && listFn.includes('.eq("tenant_id", sess.tenantId)'));
 ok("list_no_context_supabase_select", !/context\.supabase[\s\S]{0,80}\.from\("advisor_notes"\)/.test(listFn));
 
+// G7F-4S4C3: the role view comes from the canonical tenant-assert layer, which also gates mutation.
+const tenantAssert = read("src/lib/tenant-assert.server.ts");
 ok(
   "assert_uses_load_tenant_role",
-  sessions.includes("loadTenantRoleForTenantId") && sessions.includes("assertTenantViewMayMutate"),
+  (sessions.includes("loadTenantRoleForTenantId") &&
+    sessions.includes("assertTenantViewMayMutate")) ||
+    (sessions.includes("authoriseTenantResource({") &&
+      sessions.includes("assertTenantViewMayMutate") &&
+      tenantAssert.includes("assertTenantViewMayMutate(acting.view)")),
 );
 ok(
   "load_tenant_validates_g7d",

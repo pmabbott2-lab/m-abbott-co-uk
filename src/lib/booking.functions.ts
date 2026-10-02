@@ -11,8 +11,9 @@ import {
   sendSms,
   textChannelInviteMessage,
 } from "@/lib/sms.server";
-import { clearSessionAttention, assertStaffCanAccessCustomer } from "@/lib/sessions.functions";
+import { clearSessionAttention, staffCustomerCapability } from "@/lib/sessions.functions";
 import type { BookableAdvisor } from "@/lib/booking-availability.server";
+import type { ResourceCapability } from "@/lib/tenant-assert.server";
 import { publicAppointmentInput } from "@/lib/public-booking-contract";
 
 export { emailForCustomerAccount } from "@/lib/customer-account-email";
@@ -189,23 +190,14 @@ async function resolveBookingTenantId(opts: {
   );
 }
 
+/**
+ * The booking adviser must hold an active bookable staff membership in the booking tenant.
+ * Customer / introducer memberships and other tenants' advisers fail with "Not found.".
+ */
 async function assertAdvisorInTenant(advisorId: string, tenantId: string): Promise<void> {
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-  const { TenantContextError } = await import("@/lib/tenant-assert.server");
-  const { data, error } = await supabaseAdmin
-    .from("tenant_memberships")
-    .select("id")
-    .eq("user_id", advisorId)
-    .eq("tenant_id", tenantId)
-    .eq("active", true)
-    .limit(1)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data) {
-    throw new TenantContextError("TENANT_DATA_ACCESS_DENIED", "Advisor not available for this firm.");
-  }
+  const { requireTargetMemberInTenant } = await import("@/lib/tenant-assert.server");
+  const { POOL_MEMBERSHIP_ROLES } = await import("@/lib/booking-availability.server");
+  await requireTargetMemberInTenant(advisorId, tenantId, POOL_MEMBERSHIP_ROLES);
 }
 
 async function countAdvisorAppointmentsOnDay(
@@ -428,11 +420,14 @@ async function pickLeastLoadedAdvisorForSlot(
   return scored[0]!.advisor.id;
 }
 
-async function resolveBookingAdvisorId(staffUserId?: string, tenantId?: string | null): Promise<string> {
-  if (!staffUserId) return getPrimaryAdvisorId();
+async function resolveBookingAdvisorId(
+  staffUserId?: string,
+  tenantId?: string | null,
+): Promise<string> {
+  if (!staffUserId) return getPrimaryAdvisorId(tenantId);
   const flags = await actingTenantStaffFlags(staffUserId, tenantId);
   if (flags.isAdvisor) return staffUserId;
-  return getPrimaryAdvisorId();
+  return getPrimaryAdvisorId(flags.view.tenantId);
 }
 
 // Resolve a display name for the assigned advisor (used in confirmation SMS).
@@ -900,32 +895,96 @@ async function sendBookingConfirmations(opts: {
   }
 }
 
+const BOOKING_ATTRIBUTION_LOCKED_MESSAGE =
+  "This booking can't be completed from this company account yet.";
+
 /**
- * Trusted booking implementation. customerId / sessionId are written without further checks, so
- * callers must have established ownership or staff / introducer authority first. Client-shaped
- * input must go through bookAppointmentPublic instead.
+ * Introducer attribution is still one global first-wins row per customer (S4C4). A booking may
+ * create that row only when the customer is provably tied to the booking tenant alone. An
+ * existing row is never modified by a booking, so it does not block one.
+ */
+async function assertBookingMayAttributeCustomer(
+  customerId: string,
+  tenantId: string,
+): Promise<void> {
+  const { supabaseAdminUntyped: supabaseAdmin } =
+    await import("@/integrations/supabase/client.server");
+  const { data: links, error } = await supabaseAdmin
+    .from("customer_introducer_links")
+    .select("customer_id")
+    .eq("customer_id", customerId)
+    .limit(1);
+  if (error) {
+    if (isMissingContactTable(error)) return;
+    throw new Error(error.message);
+  }
+  if ((links ?? []).length > 0) return;
+  const { customerTenantFootprint } = await import("@/lib/tenant-assert.server");
+  const footprint = await customerTenantFootprint(customerId);
+  const onlyBookingTenant =
+    !footprint.indeterminate && [...footprint.tenantIds].every((t) => t === tenantId);
+  if (!onlyBookingTenant) throw new Error(BOOKING_ATTRIBUTION_LOCKED_MESSAGE);
+}
+
+/**
+ * Trusted booking implementation. Callers must have established ownership or staff / introducer
+ * authority first; client-shaped input must go through bookAppointmentPublic instead.
+ * `trusted.tenantId` is the caller's verified acting / session tenant. Without it the tenant
+ * comes from the route slug, referral introducer or the caller's sole membership — never from
+ * the chosen adviser. A supplied sessionId must belong to that tenant (and to customerId when
+ * given); everything is checked before the first write.
  */
 async function bookAppointmentTrusted(
   data: z.infer<typeof appointmentInput>,
   actingUserId?: string,
+  trusted?: { tenantId: string },
 ) {
-  const { withForcedTenantId, rejectMismatchedClientTenantId } = await import(
-    "@/lib/tenant-assert.server"
-  );
+  const { withForcedTenantId, rejectMismatchedClientTenantId, RESOURCE_NOT_FOUND_MESSAGE } =
+    await import("@/lib/tenant-assert.server");
 
   // Resolve introducer early so tenant can come from introducer.tenant_id.
   const introducer = await resolveIntroducer(data.slug);
 
-  const tenantId = await resolveBookingTenantId({
-    tenantSlug: data.tenantSlug,
-    introducerId: introducer?.id ?? null,
-    actingUserId: actingUserId ?? null,
-    advisorId: data.advisorId ?? null,
-  });
+  const tenantId =
+    trusted?.tenantId ??
+    (await resolveBookingTenantId({
+      tenantSlug: data.tenantSlug,
+      introducerId: introducer?.id ?? null,
+      actingUserId: actingUserId ?? null,
+    }));
   rejectMismatchedClientTenantId(tenantId, data.tenant_id);
 
   const { requireTenantFeature } = await import("@/lib/tenant-features.server");
   await requireTenantFeature(tenantId, "appointment_booking");
+
+  const { supabaseAdminUntyped: supabaseAdmin } =
+    await import("@/integrations/supabase/client.server");
+
+  // Session link: same tenant as the booking, never tenantless, binned or another customer's.
+  let sessionCustomerId: string | null = null;
+  if (data.sessionId) {
+    const { data: sess, error: sessErr } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("id, tenant_id, customer_id, deleted_at")
+      .eq("id", data.sessionId)
+      .maybeSingle();
+    if (sessErr) throw new Error(sessErr.message);
+    const row = sess as {
+      tenant_id: string | null;
+      customer_id: string | null;
+      deleted_at: string | null;
+    } | null;
+    if (
+      !row ||
+      !row.tenant_id ||
+      row.tenant_id !== tenantId ||
+      row.deleted_at ||
+      (data.customerId && row.customer_id !== data.customerId)
+    ) {
+      throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+    }
+    sessionCustomerId = row.customer_id;
+  }
 
   let advisorId = data.advisorId ?? null;
   if (data.preferAnyAdvisor) {
@@ -957,10 +1016,8 @@ async function bookAppointmentTrusted(
   let introducerId: string | null = introducer?.id ?? null;
   const leadId: string | null = data.leadId ?? null;
 
+  let creditActingStaff = false;
   if (actingUserId) {
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
     const flags = await actingTenantStaffFlags(actingUserId, tenantId);
     if (flags.isIntroducer) {
       leadSource = "introducer_portal";
@@ -978,7 +1035,7 @@ async function bookAppointmentTrusted(
       // Staff booking: credit the acting advisor/admin as introducer on the case.
       leadSource = "introducer_portal";
       referralChannel = "manual";
-      introducerId = await ensureStaffIntroducerRecord(actingUserId);
+      creditActingStaff = true;
     }
   }
 
@@ -988,14 +1045,11 @@ async function bookAppointmentTrusted(
   }
 
   // Introducer must belong to the same tenant when present.
-  if (introducerId) {
-    const { supabaseAdmin: adminForIntro } = await import(
-      "@/integrations/supabase/client.server"
-    );
-    const { data: introRow } = await adminForIntro
+  const assertIntroducerInBookingTenant = async (id: string) => {
+    const { data: introRow } = await supabaseAdmin
       .from("introducers")
       .select("id, tenant_id")
-      .eq("id", introducerId)
+      .eq("id", id)
       .maybeSingle();
     if (!introRow || introRow.tenant_id !== tenantId) {
       const { TenantContextError } = await import("@/lib/tenant-assert.server");
@@ -1004,7 +1058,8 @@ async function bookAppointmentTrusted(
         "Resource not found.",
       );
     }
-  }
+  };
+  if (introducerId && !creditActingStaff) await assertIntroducerInBookingTenant(introducerId);
 
   if (leadId) {
     const { assertRowBelongsToTenant } = await import("@/lib/tenant-assert.server");
@@ -1016,9 +1071,15 @@ async function bookAppointmentTrusted(
     });
   }
 
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
+  const targetCustomerId = data.customerId ?? actingUserId ?? null;
+  const customerIdForIntro = targetCustomerId ?? sessionCustomerId;
+  if (customerIdForIntro && (introducerId || creditActingStaff)) {
+    await assertBookingMayAttributeCustomer(customerIdForIntro, tenantId);
+  }
+  if (creditActingStaff && actingUserId) {
+    introducerId = await ensureStaffIntroducerRecord(actingUserId);
+    await assertIntroducerInBookingTenant(introducerId);
+  }
 
   const { data: conflict } = await supabaseAdmin
     .from("appointments")
@@ -1056,13 +1117,13 @@ async function bookAppointmentTrusted(
     .single();
   if (error) throw new Error(error.message);
 
-  // A fresh appointment (no linked session) opens a new case for the customer.
+  // A fresh appointment (no linked session) opens a new case for the customer in the booking
+  // tenant. Not transactional: if this fails the appointment stays confirmed without a case.
   let linkedSessionId = data.sessionId ?? null;
-  const targetCustomerId = data.customerId ?? actingUserId ?? null;
   if (!linkedSessionId && targetCustomerId) {
     try {
       const { createCaseSessionForCustomer } = await import("@/lib/sessions.functions");
-      const newCase = await createCaseSessionForCustomer(targetCustomerId);
+      const newCase = await createCaseSessionForCustomer(targetCustomerId, tenantId);
       linkedSessionId = newCase.id;
       await supabaseAdmin
         .from("appointments")
@@ -1086,18 +1147,23 @@ async function bookAppointmentTrusted(
       console.error("promote session to case failed", e);
     }
     try {
-      await supabaseAdmin
-        .from("session_advisors")
-        .upsert(
-          { session_id: sessionForAlloc, advisor_id: advisorId, assigned_by: actingUserId ?? null },
-          { onConflict: "session_id,advisor_id" },
-        );
+      await supabaseAdmin.from("session_advisors").upsert(
+        {
+          session_id: sessionForAlloc,
+          advisor_id: advisorId,
+          assigned_by: actingUserId ?? null,
+          tenant_id: tenantId,
+        },
+        { onConflict: "session_id,advisor_id" },
+      );
     } catch (e) {
       console.error("auto-allocate session failed", e);
     }
     try {
       const { ensureWelcomeCallTask } = await import("@/lib/staff-contact-tasks.server");
-      await ensureWelcomeCallTask(supabaseAdmin, sessionForAlloc, actingUserId ?? advisorId);
+      await ensureWelcomeCallTask(supabaseAdmin, sessionForAlloc, actingUserId ?? advisorId, {
+        tenantId,
+      });
     } catch (e) {
       console.error("welcome call task on booking failed", e);
     }
@@ -1112,15 +1178,6 @@ async function bookAppointmentTrusted(
       .is("appointment_id", null);
   }
 
-  let customerIdForIntro = targetCustomerId;
-  if (!customerIdForIntro && sessionForAlloc) {
-    const { data: sess } = await supabaseAdmin
-      .from("interview_sessions")
-      .select("customer_id")
-      .eq("id", sessionForAlloc)
-      .maybeSingle();
-    customerIdForIntro = sess?.customer_id ?? null;
-  }
   if (customerIdForIntro && introducerId) {
     const { ensureCustomerIntroducerLink } = await import("@/lib/introducer-attribution");
     await ensureCustomerIntroducerLink(
@@ -1241,13 +1298,25 @@ export const bookSessionAppointment = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: session, error } = await context.supabase
+    // Customer's own session; the booking tenant is that session's tenant. Unknown, other
+    // people's and tenantless sessions all fail the same way.
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    const { RESOURCE_NOT_FOUND_MESSAGE } = await import("@/lib/tenant-assert.server");
+    const { data: session, error } = await supabaseAdmin
       .from("interview_sessions")
-      .select("id, customer_id")
+      .select("id, customer_id, tenant_id, deleted_at")
       .eq("id", data.sessionId)
-      .single();
+      .maybeSingle();
     if (error) throw new Error(error.message);
-    if (session.customer_id !== context.userId) throw new Error("Forbidden");
+    if (
+      !session ||
+      session.customer_id !== context.userId ||
+      !session.tenant_id ||
+      session.deleted_at
+    ) {
+      throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+    }
 
     return bookAppointmentTrusted(
       {
@@ -1262,6 +1331,7 @@ export const bookSessionAppointment = createServerFn({ method: "POST" })
         slug: data.slug,
       },
       context.userId,
+      { tenantId: session.tenant_id as string },
     );
   });
 
@@ -1290,23 +1360,29 @@ export const bookCustomerAppointmentAsStaff = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    await assertStaffCanAccessCustomer(context.userId, data.customerId, { forMutation: true });
+    // Verified acting tenant → customer relationship there (allocation-bound for advisers) →
+    // session in that tenant. Relationships the customer has with other tenants are irrelevant.
+    const { authoriseTenantCustomer, authoriseTenantResource, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    const capability = staffCustomerCapability(true);
+    const { tenantId } = await authoriseTenantCustomer({
+      userId: context.userId,
+      customerId: data.customerId,
+      capability,
+    });
 
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
     let sessionId = data.sessionId ?? null;
 
     if (sessionId) {
-      const { data: session, error } = await supabaseAdmin
-        .from("interview_sessions")
-        .select("id, customer_id, case_ref")
-        .eq("id", sessionId)
-        .maybeSingle();
-      if (error) throw new Error(error.message);
-      if (!session || session.customer_id !== data.customerId) {
-        throw new Error("That fact-find does not belong to this customer.");
-      }
+      const { row: session } = await authoriseTenantResource({
+        userId: context.userId,
+        kind: "session",
+        id: sessionId,
+        capability: { ...capability, allocation: "none" },
+      });
+      if (session.customer_id !== data.customerId) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
       if (session.case_ref) {
         throw new Error("This record is already a case — open it from the cases list.");
       }
@@ -1322,10 +1398,12 @@ export const bookCustomerAppointmentAsStaff = createServerFn({ method: "POST" })
         );
       }
     } else {
+      // Latest unbooked fact-find of this customer in the acting tenant only.
       const { data: sessions } = await supabaseAdmin
         .from("interview_sessions")
         .select("id")
         .eq("customer_id", data.customerId)
+        .eq("tenant_id", tenantId)
         .is("deleted_at", null)
         .is("case_ref", null)
         .order("started_at", { ascending: false });
@@ -1356,6 +1434,7 @@ export const bookCustomerAppointmentAsStaff = createServerFn({ method: "POST" })
         sendSms: data.sendSms ?? true,
       },
       context.userId,
+      { tenantId },
     );
   });
 
@@ -1379,44 +1458,47 @@ export const bookCaseFollowUpAppointment = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    // Every path (staff and relationship viewers alike): verified acting tenant → role → the
+    // case in that tenant (session.tenant_id) → it belongs to this customer → allocation.
+    // Unknown, other-tenant and tenantless cases all fail with the same "Not found.".
+    const { authoriseTenantCustomer, authoriseTenantResource, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
     const { canViewRelationship } = await import("@/lib/admin-access");
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canViewRelationship(access)) {
-      await assertStaffCanAccessCustomer(context.userId, data.customerId, { forMutation: true });
-    } else {
-      const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
-      const { assertTenantViewMayMutate } = await import("@/lib/tenant-role");
-      const view = await resolveActingTenantRole(context.userId);
-      assertTenantViewMayMutate(view);
-    }
-
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-    const { data: session, error } = await supabaseAdmin
-      .from("interview_sessions")
-      .select("id, customer_id, case_ref")
-      .eq("id", data.sessionId)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!session || session.customer_id !== data.customerId) {
-      throw new Error("That case does not belong to this customer.");
-    }
+    const staff = staffCustomerCapability(true);
+    const capability = {
+      ...staff,
+      allow: (v: Parameters<typeof staff.allow>[0]) =>
+        staff.allow(v) || canViewRelationship(v.adminAccess),
+    };
+    const { row: session, tenantId } = await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: { ...capability, allocation: "none" },
+    });
+    if (session.customer_id !== data.customerId) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+    await authoriseTenantCustomer({
+      userId: context.userId,
+      customerId: data.customerId,
+      capability,
+    });
     if (!session.case_ref) {
       throw new Error("Open a case before booking a relationship follow-up.");
     }
 
+    // Default adviser: one already allocated to this case who is still bookable in its tenant.
     let advisorId = data.advisorId ?? null;
     if (!data.preferAnyAdvisor && !advisorId) {
-      const { data: alloc } = await supabaseAdmin
+      const { supabaseAdminUntyped: supabaseAdmin } =
+        await import("@/integrations/supabase/client.server");
+      const { filterAdvisorIdsToTenant } = await import("@/lib/booking-availability.server");
+      const { data: allocs } = await supabaseAdmin
         .from("session_advisors")
         .select("advisor_id")
-        .eq("session_id", data.sessionId)
-        .limit(1)
-        .maybeSingle();
-      advisorId = alloc?.advisor_id ?? null;
+        .eq("session_id", data.sessionId);
+      const allocated = ((allocs ?? []) as Array<{ advisor_id: string }>).map((a) => a.advisor_id);
+      const inTenant = await filterAdvisorIdsToTenant(allocated, tenantId);
+      advisorId = allocated.find((id) => inTenant.has(id)) ?? null;
     }
 
     return bookAppointmentTrusted(
@@ -1434,26 +1516,61 @@ export const bookCaseFollowUpAppointment = createServerFn({ method: "POST" })
         sendSms: data.sendSms ?? true,
       },
       context.userId,
+      { tenantId },
     );
   });
+
+/** Staff booking / call-back surfaces: advisers (allocation-bound) and main admins. */
+function bookingStaffCapability(mutate: boolean): ResourceCapability {
+  return {
+    mutate,
+    allocation: "adviser_must_be_allocated",
+    allow: (v) => v.isAdvisor || v.isMainAdmin,
+  };
+}
+
+/**
+ * One session's booking picture: the customer who owns it, or staff of the verified acting
+ * tenant that session belongs to (advisers must be allocated to the customer there). For staff,
+ * unknown, other-tenant and tenantless sessions all fail with the same "Not found.".
+ */
+async function authoriseSessionOwnerOrStaff(
+  userId: string,
+  sessionId: string,
+): Promise<{ owner: boolean; tenantId: string | null }> {
+  const { supabaseAdminUntyped: supabaseAdmin } =
+    await import("@/integrations/supabase/client.server");
+  const { data: own, error } = await supabaseAdmin
+    .from("interview_sessions")
+    .select("id, customer_id, tenant_id")
+    .eq("id", sessionId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (own && own.customer_id === userId) {
+    return { owner: true, tenantId: (own.tenant_id as string | null) ?? null };
+  }
+  const { authoriseTenantResource, authoriseTenantCustomer } =
+    await import("@/lib/tenant-assert.server");
+  const capability = bookingStaffCapability(false);
+  const { row } = await authoriseTenantResource({
+    userId,
+    kind: "session",
+    id: sessionId,
+    capability: { ...capability, allocation: "none" },
+  });
+  if (row.customer_id) {
+    await authoriseTenantCustomer({ userId, customerId: row.customer_id, capability });
+  } else {
+    await authoriseTenantResource({ userId, kind: "session", id: sessionId, capability });
+  }
+  return { owner: false, tenantId: row.tenant_id };
+}
 
 export const getAppointmentForSession = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { data: session, error: sErr } = await context.supabase
-      .from("interview_sessions")
-      .select("id, customer_id, tenant_id")
-      .eq("id", data.sessionId)
-      .single();
-    if (sErr) throw new Error(sErr.message);
-
-    const flags = await actingTenantStaffFlags(
-      context.userId,
-      (session as { tenant_id?: string | null }).tenant_id,
-    );
-    const isAdvisor = flags.isAdvisor;
-    if (!isAdvisor && session.customer_id !== context.userId) throw new Error("Forbidden");
+    await authoriseSessionOwnerOrStaff(context.userId, data.sessionId);
 
     const { data: appointment, error } = await context.supabase
       .from("appointments")
@@ -1492,22 +1609,15 @@ export const getSessionBooking = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<SessionBookingDetails> => {
-    const flags = await actingTenantStaffFlags(context.userId);
-    const isStaff = flags.isStaff;
-
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
+    // Customers may view booking/call-back status for their own session; staff only within the
+    // verified acting tenant that owns the session.
+    const { tenantId: sessionTenantId } = await authoriseSessionOwnerOrStaff(
+      context.userId,
+      data.sessionId,
     );
 
-    // Customers may view booking/call-back status for their own session.
-    if (!isStaff) {
-      const { data: session } = await supabaseAdmin
-        .from("interview_sessions")
-        .select("customer_id")
-        .eq("id", data.sessionId)
-        .maybeSingle();
-      if (!session || session.customer_id !== context.userId) throw new Error("Forbidden");
-    }
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
 
     type ApptRow = {
       id: string;
@@ -1522,10 +1632,10 @@ export const getSessionBooking = createServerFn({ method: "GET" })
 
     let appointment: SessionBookingDetails["appointment"] = null;
     {
-      // Prefer a session-linked appointment; otherwise fall back to one owned by
-      // this customer (booked via the direct "/booking" link with no session
-      // link) matched on phone/email, and backfill its session_id so it stays
-      // linked and shows in History from then on. Mirrors the call-back fix.
+      // Prefer a session-linked appointment; otherwise fall back to an unlinked one in the
+      // session's own tenant (booked via the direct "/booking" link with no session link)
+      // matched on phone/email, and backfill its session_id so it stays linked and shows in
+      // History from then on. Tenantless sessions never fall back.
       let appt: ApptRow | null = null;
       {
         const { data: bySession, error } = await supabaseAdmin
@@ -1539,7 +1649,7 @@ export const getSessionBooking = createServerFn({ method: "GET" })
         appt = (bySession as ApptRow | null) ?? null;
       }
 
-      if (!appt) {
+      if (!appt && sessionTenantId) {
         const { data: session } = await supabaseAdmin
           .from("interview_sessions")
           .select("customer_id")
@@ -1560,6 +1670,8 @@ export const getSessionBooking = createServerFn({ method: "GET" })
             const { data: byPhone, error } = await supabaseAdmin
               .from("appointments")
               .select(apptColumns)
+              .eq("tenant_id", sessionTenantId)
+              .is("session_id", null)
               .in("customer_phone", variants);
             if (error && !isMissingContactTable(error)) throw new Error(error.message);
             for (const a of (byPhone as ApptRow[] | null) ?? []) byId.set(a.id, a);
@@ -1568,6 +1680,8 @@ export const getSessionBooking = createServerFn({ method: "GET" })
             const { data: byEmail, error } = await supabaseAdmin
               .from("appointments")
               .select(apptColumns)
+              .eq("tenant_id", sessionTenantId)
+              .is("session_id", null)
               .eq("customer_email", email);
             if (error && !isMissingContactTable(error)) throw new Error(error.message);
             for (const a of (byEmail as ApptRow[] | null) ?? []) byId.set(a.id, a);
@@ -1585,7 +1699,9 @@ export const getSessionBooking = createServerFn({ method: "GET" })
               await supabaseAdmin
                 .from("appointments")
                 .update({ session_id: data.sessionId })
-                .eq("id", appt.id);
+                .eq("id", appt.id)
+                .eq("tenant_id", sessionTenantId)
+                .is("session_id", null);
             } catch (e) {
               console.error("backfill appointment session_id failed", e);
             }
@@ -1629,6 +1745,56 @@ export const getSessionBooking = createServerFn({ method: "GET" })
     return { appointment, callback };
   });
 
+/** Call-back / contact handling: advisers and main admins of the acting tenant. */
+function contactStaffCapability(mutate: boolean): ResourceCapability {
+  return { mutate, allocation: "none", allow: (v) => v.isAdvisor || v.isMainAdmin };
+}
+
+type TenantCallbackRow = {
+  id: string;
+  tenant_id: string | null;
+  session_id: string | null;
+  advisor_id: string | null;
+  customer_id: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  phone_call_id: string | null;
+  notes: string | null;
+};
+
+/**
+ * A call-back in the verified acting tenant. Its tenant is its own tenant_id, else its session's;
+ * unknown, other-tenant, conflicting and tenantless (unowned inbound) call-backs all fail with
+ * the same "Not found.".
+ */
+async function authoriseTenantCallback(
+  userId: string,
+  callbackId: string,
+  capability: ResourceCapability,
+) {
+  const { resolveActingTenantForList, scopeRowsToTenant, RESOURCE_NOT_FOUND_MESSAGE } =
+    await import("@/lib/tenant-assert.server");
+  const acting = await resolveActingTenantForList(userId, capability);
+  const { supabaseAdminUntyped: supabaseAdmin } =
+    await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin
+    .from("callback_requests")
+    .select(
+      "id, tenant_id, session_id, advisor_id, customer_id, customer_name, customer_phone, phone_call_id, notes",
+    )
+    .eq("id", callbackId)
+    .maybeSingle();
+  if (error && !isMissingContactTable(error)) throw new Error(error.message);
+  const [callback] = data
+    ? await scopeRowsToTenant([data as TenantCallbackRow], acting.tenantId, {
+        tenantOf: (r) => r.tenant_id,
+        sessionOf: (r) => r.session_id,
+      })
+    : [];
+  if (!callback) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+  return { ...acting, callback };
+}
+
 export const updateCallbackStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
@@ -1640,13 +1806,10 @@ export const updateCallbackStatus = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const flags = await actingTenantStaffFlags(context.userId);
-    const isStaff = flags.isStaff;
-    if (!isStaff) throw new Error("Forbidden");
+    await authoriseTenantCallback(context.userId, data.callbackId, contactStaffCapability(true));
 
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin
       .from("callback_requests")
       .update({ status: data.status })
@@ -1664,9 +1827,13 @@ export const logCallbackAttempt = createServerFn({ method: "POST" })
     z.object({ sessionId: z.string().uuid(), note: z.string().max(200).optional() }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const flags = await actingTenantStaffFlags(context.userId);
-    const isStaff = flags.isStaff;
-    if (!isStaff) throw new Error("Forbidden");
+    const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+    await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: contactStaffCapability(true),
+    });
 
     await appendContactLog(
       data.sessionId,
@@ -1694,13 +1861,22 @@ export const resolveCallback = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const flags = await actingTenantStaffFlags(context.userId);
-    const isStaff = flags.isStaff;
-    if (!isStaff) throw new Error("Forbidden");
+    const capability = contactStaffCapability(true);
+    const { callback } = await authoriseTenantCallback(context.userId, data.callbackId, capability);
+    const { authoriseTenantResource, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability,
+    });
+    if (callback.session_id && callback.session_id !== data.sessionId) {
+      throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+    }
 
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin
       .from("callback_requests")
       .update({ status: "closed" })
@@ -1766,7 +1942,7 @@ async function createCallbackRequest(
 
   // Attach the request to a fact-find so it surfaces against the customer's
   // record in the advisor portal. The direct "/booking" path doesn't pass a
-  // sessionId, so fall back to the customer's most recent fact-find.
+  // sessionId, so fall back to the customer's most recent fact-find in this tenant.
   let sessionId = data.sessionId ?? null;
   if (!sessionId && data.customerId) {
     try {
@@ -1774,6 +1950,8 @@ async function createCallbackRequest(
         .from("interview_sessions")
         .select("id")
         .eq("customer_id", data.customerId)
+        .eq("tenant_id", tenantId)
+        .is("deleted_at", null)
         .order("started_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -1810,12 +1988,15 @@ async function createCallbackRequest(
   // customer_contact_log row here — that double-logged it in History.
   if (sessionId) {
     try {
-      await supabaseAdmin
-        .from("session_advisors")
-        .upsert(
-          { session_id: sessionId, advisor_id: advisorId, assigned_by: data.customerId ?? null },
-          { onConflict: "session_id,advisor_id" },
-        );
+      await supabaseAdmin.from("session_advisors").upsert(
+        {
+          session_id: sessionId,
+          advisor_id: advisorId,
+          assigned_by: data.customerId ?? null,
+          tenant_id: tenantId,
+        },
+        { onConflict: "session_id,advisor_id" },
+      );
     } catch (e) {
       console.error("auto-allocate session (callback) failed", e);
     }
@@ -1860,13 +2041,25 @@ export const requestSessionCallback = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: session, error } = await context.supabase
+    // Customer's own session; the call-back belongs to that session's tenant. Tenantless
+    // sessions cannot originate a call-back (no tenant would own it).
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    const { RESOURCE_NOT_FOUND_MESSAGE } = await import("@/lib/tenant-assert.server");
+    const { data: session, error } = await supabaseAdmin
       .from("interview_sessions")
-      .select("id, customer_id, tenant_id")
+      .select("id, customer_id, tenant_id, deleted_at")
       .eq("id", data.sessionId)
-      .single();
+      .maybeSingle();
     if (error) throw new Error(error.message);
-    if (session.customer_id !== context.userId) throw new Error("Forbidden");
+    if (
+      !session ||
+      session.customer_id !== context.userId ||
+      !session.tenant_id ||
+      session.deleted_at
+    ) {
+      throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+    }
 
     return createCallbackRequest({
       sessionId: data.sessionId,
@@ -2679,13 +2872,16 @@ export const listSessionCrmContacts = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<SessionCrmContactItem[]> => {
-    const flags = await actingTenantStaffFlags(context.userId);
-    const isStaff = flags.isStaff;
-    if (!isStaff) throw new Error("Forbidden");
+    const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+    await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: contactStaffCapability(false),
+    });
 
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
     const contactedAtByKey = new Map<string, string>();
     {
       const { data: views, error } = await supabaseAdmin
@@ -2778,18 +2974,72 @@ export const markAdvisorContactHandled = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const flags = await actingTenantStaffFlags(context.userId);
-    const isStaff = flags.isStaff;
-    if (!isStaff) {
-      const adminAccess = flags.view.adminAccess;
-      if (!adminAccess.isOwner && !adminAccess.isSupervisor && !adminAccess.isAdmin) {
-        throw new Error("Forbidden");
+    // The contact (and any session it is logged against) must belong to the acting tenant
+    // before anything is written. Tenantless contacts fail with "Not found.".
+    const {
+      resolveActingTenantForList,
+      scopeRowsToTenant,
+      authoriseTenantResource,
+      RESOURCE_NOT_FOUND_MESSAGE,
+    } = await import("@/lib/tenant-assert.server");
+    const capability: ResourceCapability = {
+      mutate: true,
+      allocation: "none",
+      allow: (v) =>
+        v.isAdvisor ||
+        v.isMainAdmin ||
+        v.adminAccess.isOwner ||
+        v.adminAccess.isSupervisor ||
+        v.adminAccess.isAdmin,
+    };
+    const { tenantId } = await resolveActingTenantForList(context.userId, capability);
+
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    type ContactRow = { tenant_id: string | null; session_id: string | null };
+    let contactSessionId: string | null = null;
+    if (data.contactType === "abandoned") {
+      await authoriseTenantResource({
+        userId: context.userId,
+        kind: "session",
+        id: data.contactId,
+        capability,
+      });
+      contactSessionId = data.contactId;
+    } else {
+      const table =
+        data.contactType === "appointment"
+          ? "appointments"
+          : data.contactType === "callback"
+            ? "callback_requests"
+            : "phone_calls";
+      const { data: row, error: rowErr } = await supabaseAdmin
+        .from(table)
+        .select("tenant_id, session_id")
+        .eq("id", data.contactId)
+        .maybeSingle();
+      if (rowErr && !isMissingContactTable(rowErr)) throw new Error(rowErr.message);
+      const [inTenant] = row
+        ? await scopeRowsToTenant([row as ContactRow], tenantId, {
+            tenantOf: (r) => r.tenant_id,
+            sessionOf: (r) => r.session_id,
+          })
+        : [];
+      if (!inTenant) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+      contactSessionId = inTenant.session_id;
+    }
+    if (data.sessionId) {
+      if (contactSessionId && contactSessionId !== data.sessionId) {
+        throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
       }
+      await authoriseTenantResource({
+        userId: context.userId,
+        kind: "session",
+        id: data.sessionId,
+        capability,
+      });
     }
 
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
     const now = new Date().toISOString();
 
     const viewRow: Record<string, unknown> = {
@@ -2906,26 +3156,25 @@ export const assignUnallocatedVoicemail = createServerFn({ method: "POST" })
     z.object({ callbackId: z.string().uuid(), advisorId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const adminAccess = await resolveAdminAccess(context.userId, email);
-    if (!adminAccess.isOwner && !adminAccess.isSupervisor && !adminAccess.isAdmin) {
-      throw new Error("Forbidden");
-    }
-
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
+    // Call-back owned by the acting tenant (tenantless inbound voicemails stay unassignable
+    // until inbound ownership exists), adviser of that tenant, same-tenant case link only.
+    const { callback: cb, tenantId } = await authoriseTenantCallback(
+      context.userId,
+      data.callbackId,
+      {
+        mutate: true,
+        allocation: "none",
+        allow: (v) => v.adminAccess.isOwner || v.adminAccess.isSupervisor || v.adminAccess.isAdmin,
+      },
     );
-    const { findSessionForCallerPhone } = await import("@/lib/phone-lookup.server");
-
-    const { data: cb, error: cbErr } = await supabaseAdmin
-      .from("callback_requests")
-      .select("id, customer_phone, customer_name, customer_id, session_id, advisor_id, phone_call_id, notes")
-      .eq("id", data.callbackId)
-      .maybeSingle();
-    if (cbErr) throw new Error(cbErr.message);
-    if (!cb) throw new Error("Call-back not found");
     if (cb.advisor_id) throw new Error("This call-back is already assigned to an advisor.");
+    const { requireTargetMemberInTenant, loadSessionTenantMap } =
+      await import("@/lib/tenant-assert.server");
+    await requireTargetMemberInTenant(data.advisorId, tenantId, ["adviser"]);
+
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    const { findSessionForCallerPhone } = await import("@/lib/phone-lookup.server");
 
     const { data: advisor } = await supabaseAdmin
       .from("profiles")
@@ -2934,12 +3183,18 @@ export const assignUnallocatedVoicemail = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!advisor) throw new Error("Advisor not found");
 
-    const match = cb.session_id
+    let match = cb.session_id
       ? {
           sessionId: cb.session_id as string,
           customerId: (cb.customer_id as string | null) ?? null,
         }
-      : await findSessionForCallerPhone(cb.customer_phone);
+      : cb.customer_phone
+        ? await findSessionForCallerPhone(cb.customer_phone)
+        : null;
+    if (match?.sessionId) {
+      const tenants = await loadSessionTenantMap([match.sessionId]);
+      if (tenants.get(match.sessionId) !== tenantId) match = null;
+    }
 
     const callbackPatch: Record<string, unknown> = {
       advisor_id: data.advisorId,
@@ -2976,7 +3231,12 @@ export const assignUnallocatedVoicemail = createServerFn({ method: "POST" })
     if (match?.sessionId) {
       try {
         await supabaseAdmin.from("session_advisors").upsert(
-          { session_id: match.sessionId, advisor_id: data.advisorId, assigned_by: context.userId },
+          {
+            session_id: match.sessionId,
+            advisor_id: data.advisorId,
+            assigned_by: context.userId,
+            tenant_id: tenantId,
+          },
           { onConflict: "session_id,advisor_id" },
         );
       } catch (e) {
@@ -2984,7 +3244,7 @@ export const assignUnallocatedVoicemail = createServerFn({ method: "POST" })
       }
       try {
         const { ensureWelcomeCallTask } = await import("@/lib/staff-contact-tasks.server");
-        await ensureWelcomeCallTask(supabaseAdmin, match.sessionId, context.userId);
+        await ensureWelcomeCallTask(supabaseAdmin, match.sessionId, context.userId, { tenantId });
       } catch (e) {
         console.error("welcome call on allocate callback failed", e);
       }
@@ -2996,6 +3256,18 @@ export const assignUnallocatedVoicemail = createServerFn({ method: "POST" })
       advisorName: advisor.full_name,
     };
   });
+
+/** A browser-chosen view-as adviser must be bookable staff of the caller's acting tenant. */
+async function assertViewAsAdviserInActingTenant(
+  adviserId: string,
+  actingTenantId: string | null,
+): Promise<void> {
+  const { requireTargetMemberInTenant, RESOURCE_NOT_FOUND_MESSAGE } =
+    await import("@/lib/tenant-assert.server");
+  if (!actingTenantId) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+  const { POOL_MEMBERSHIP_ROLES } = await import("@/lib/booking-availability.server");
+  await requireTargetMemberInTenant(adviserId, actingTenantId, POOL_MEMBERSHIP_ROLES);
+}
 
 export const markContactOpened = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -3016,6 +3288,7 @@ export const markContactOpened = createServerFn({ method: "POST" })
     let viewAsMode = false;
     if (data.viewAsAdvisorId) {
       if (!adminAccess.isOwner && !adminAccess.isSupervisor) throw new Error("Forbidden");
+      await assertViewAsAdviserInActingTenant(data.viewAsAdvisorId, flags.view.tenantId);
       advisorId = data.viewAsAdvisorId;
       viewAsMode = true;
     } else if (!flags.isAdvisor && !adminAccess.isAdmin) {
@@ -3069,6 +3342,7 @@ export const listAdvisorAppointments = createServerFn({ method: "POST" })
         canView(access, "advisors") ||
         canView(access, "appointments");
       if (!canViewAdvisorDiary) throw new Error("Forbidden");
+      await assertViewAsAdviserInActingTenant(data.viewAsAdvisorId, flags.view.tenantId);
       advisorId = data.viewAsAdvisorId;
     } else if (!flags.isAdvisor && !access.isAdmin && !platformMayRead) {
       throw new Error("Forbidden");
@@ -3076,22 +3350,19 @@ export const listAdvisorAppointments = createServerFn({ method: "POST" })
       // Platform read without advisor filter needs an advisor id — require filter.
       throw new Error("Select an advisor to view their diary");
     }
+    if (!flags.view.tenantId) return [];
 
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-    let query = supabaseAdmin
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    const { data: appts, error } = await supabaseAdmin
       .from("appointments")
       .select("*")
       .eq("advisor_id", advisorId)
+      .eq("tenant_id", flags.view.tenantId)
       .gte("starts_at", new Date().toISOString())
       .eq("status", "confirmed")
       .order("starts_at", { ascending: true })
       .limit(50);
-    if (flags.view.tenantId) {
-      query = query.eq("tenant_id", flags.view.tenantId);
-    }
-    const { data: appts, error } = await query;
     if (error) throw new Error(error.message);
     return appts ?? [];
   });
@@ -3667,28 +3938,43 @@ export const rescheduleAppointment = createServerFn({ method: "POST" })
       .eq("id", data.appointmentId)
       .maybeSingle();
     if (apptErr) throw new Error(apptErr.message);
-    if (!appt || appt.status !== "confirmed") throw new Error("Appointment not found");
+    const { resolveActingTenant, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    if (!appt || appt.status !== "confirmed") throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
 
-    const flags = await actingTenantStaffFlags(
-      context.userId,
-      (appt as { tenant_id?: string | null }).tenant_id,
-    );
-    const { assertTenantViewMayMutate } = await import("@/lib/tenant-role");
-    assertTenantViewMayMutate(flags.view);
-    const access = flags.view.adminAccess;
-    const isAdvisor = flags.isAdvisor;
-    const isStaff = flags.isStaff;
-
-    let allowed = isStaff && appt.advisor_id === context.userId;
-    if (!allowed && access.isOwner) allowed = true;
-    if (!allowed && access.isSupervisor) allowed = true;
-    if (!allowed && appt.session_id) {
+    // The customer who owns the linked session may move their own appointment.
+    let allowed = false;
+    if (appt.session_id) {
       const { data: session } = await supabaseAdmin
         .from("interview_sessions")
         .select("customer_id")
         .eq("id", appt.session_id)
         .maybeSingle();
       if (session?.customer_id === context.userId) allowed = true;
+    }
+    if (!allowed) {
+      // Staff: the verified acting tenant must own the appointment. Unknown, other-tenant and
+      // tenantless appointments all fail with "Not found."; only same-tenant staff see "Forbidden".
+      const apptTenantId = (appt as { tenant_id?: string | null }).tenant_id ?? null;
+      const acting = await resolveActingTenant(context.userId).catch(() => null);
+      const view = acting?.view;
+      const access = view?.adminAccess;
+      const isStaff = Boolean(view && (view.isAdvisor || view.isMainAdmin));
+      if (
+        !acting ||
+        !view ||
+        !apptTenantId ||
+        apptTenantId !== acting.tenantId ||
+        !(isStaff || access?.isOwner || access?.isSupervisor)
+      ) {
+        throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+      }
+      const { assertTenantViewMayMutate } = await import("@/lib/tenant-role");
+      assertTenantViewMayMutate(view);
+      allowed =
+        (isStaff && appt.advisor_id === context.userId) ||
+        Boolean(access?.isOwner) ||
+        Boolean(access?.isSupervisor);
     }
     if (!allowed) throw new Error("Forbidden");
 

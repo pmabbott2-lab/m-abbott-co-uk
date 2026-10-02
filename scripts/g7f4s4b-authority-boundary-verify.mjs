@@ -1332,6 +1332,23 @@ const S3_WRITERS = {
     "bookNewCustomerAsIntroducer",
   ],
 };
+// G7F-4S4C3 rebinds bookAppointmentTrusted's tenant / session / adviser checks; for that writer
+// only its attribution statements must stay identical (whitespace-normalised) to pre-S4B.
+const S3_WRITER_STATEMENTS = {
+  "src/lib/booking.functions.ts#bookAppointmentTrusted": [
+    /introducerId = await ensureStaffIntroducerRecord\(actingUserId\);/g,
+    /if \(customerIdForIntro && introducerId\) \{[\s\S]*?\n {2}\}/g,
+    /\.from\("introducer_leads"\)\s*\.update\(\{ status: "booked"[\s\S]*?\.is\("appointment_id", null\);/g,
+  ],
+};
+function sameStatements(a, b, patterns) {
+  const norm = (s) => s.replace(/\s+/g, " ").trim();
+  return patterns.every((p) => {
+    const x = a.match(p) ?? [];
+    const y = b.match(p) ?? [];
+    return x.length === 1 && y.length === 1 && norm(x[0]) === norm(y[0]);
+  });
+}
 function gitDiffers(args) {
   try {
     execFileSync("git", ["diff", "--quiet", ...args], { cwd: root });
@@ -1369,7 +1386,11 @@ for (const f of S3_FILES) {
   for (const name of writers) {
     const a = topLevelDeclaration(before, name);
     const b = topLevelDeclaration(now, name);
-    if (a === null || a !== b) changedS3.push(`${f}#${name}`);
+    const statements = S3_WRITER_STATEMENTS[`${f}#${name}`];
+    const same = statements
+      ? a !== null && b !== null && sameStatements(a, b, statements)
+      : a !== null && a === b;
+    if (!same) changedS3.push(`${f}#${name}`);
   }
 }
 ok(

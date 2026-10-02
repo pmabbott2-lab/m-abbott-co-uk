@@ -1089,7 +1089,7 @@ async function publicBook(extra) {
   );
   ok(
     "22 non-owner session booking refused",
-    !r.ok && /Forbidden/.test(r.message) && noWrites(),
+    !r.ok && (/Forbidden/.test(r.message) || r.message === "Not found.") && noWrites(),
     r.ok ? "accepted" : r.message,
   );
 }

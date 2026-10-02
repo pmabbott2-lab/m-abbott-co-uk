@@ -78,23 +78,6 @@ export async function ensureAdvisorCode(userId: string): Promise<string | null> 
   return null;
 }
 
-// Resolve an advisor code (case-insensitive) to its advisor user_id.
-async function resolveAdvisorIdByCode(code: string): Promise<string | null> {
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-  const { data, error } = await supabaseAdmin
-    .from("advisor_profiles")
-    .select("user_id")
-    .eq("code", code.trim().toUpperCase())
-    .maybeSingle();
-  if (error) {
-    if (isMissingTableError(error)) return null;
-    throw new Error(error.message);
-  }
-  return data?.user_id ?? null;
-}
-
 // The session_advisors table / 'admin' enum value only exist once the allocation
 // migration has been applied. Treat "table missing" errors as "no allocations"
 // so the dashboard keeps working before the user runs APPLY_NEW_FEATURES.sql.
@@ -122,7 +105,7 @@ async function getRolesForUser(userId: string, tenantId?: string | null): Promis
 }
 
 /** Staff customer surfaces: admins, advisers (allocation-bound) and platform entry. */
-function staffCustomerCapability(mutate: boolean): ResourceCapability {
+export function staffCustomerCapability(mutate: boolean): ResourceCapability {
   return {
     mutate,
     allocation: "adviser_must_be_allocated",
@@ -146,6 +129,49 @@ function customersAmendCapability(): ResourceCapability {
   };
 }
 
+/** Allocation management: main admins (Owner / Supervisor / General admin) of the acting tenant. */
+function allocationAdminCapability(): ResourceCapability {
+  return { mutate: true, allocation: "none", allow: (v) => v.isMainAdmin };
+}
+
+/**
+ * Allocation target: an active adviser membership in the resource tenant. An unknown code and a
+ * code belonging to another tenant's adviser fail with the same message.
+ */
+async function resolveAllocationTargetAdviser(
+  tenantId: string,
+  opts: { advisorId?: string | null; advisorCode?: string | null },
+): Promise<string> {
+  const { requireTargetMemberInTenant } = await import("@/lib/tenant-assert.server");
+  if (opts.advisorId) {
+    await requireTargetMemberInTenant(opts.advisorId, tenantId, ["adviser"]);
+    return opts.advisorId;
+  }
+  const code = opts.advisorCode ?? "";
+  if (!code.trim()) throw new Error("Provide an advisor or an advisor code.");
+  const codeNotFound = () => new Error(`No advisor found with code ${code.toUpperCase()}.`);
+  const { supabaseAdminUntyped: supabaseAdmin } =
+    await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin
+    .from("advisor_profiles")
+    .select("user_id")
+    .eq("code", code.trim().toUpperCase());
+  if (error) {
+    if (isMissingTableError(error)) throw codeNotFound();
+    throw new Error(error.message);
+  }
+  for (const row of (data ?? []) as Array<{ user_id: string | null }>) {
+    if (!row.user_id) continue;
+    try {
+      await requireTargetMemberInTenant(row.user_id, tenantId, ["adviser"]);
+      return row.user_id;
+    } catch {
+      // Not an adviser of this tenant: indistinguishable from an unknown code.
+    }
+  }
+  throw codeNotFound();
+}
+
 /** Owner / Admin Supervisor only (restore, view-as). */
 function ownerSupervisorCapability(mutate: boolean): ResourceCapability {
   return {
@@ -160,8 +186,8 @@ function ownerSupervisorCapability(mutate: boolean): ResourceCapability {
  *
  * With `sessionId` the operation is tenant-specific: the session must belong to the acting tenant
  * and to this customer, and relationships the customer has with other tenants are irrelevant.
- * Without it the caller still writes customer-keyed shared rows (staff booking, browser calls),
- * so a customer tied to any other tenant is refused until S4C3/S4C4 scope those writes.
+ * Without it the caller still writes customer-keyed shared rows (browser calls), so a customer
+ * tied to any other tenant is refused until S4C4 scopes those writes.
  */
 export async function assertStaffCanAccessCustomer(
   staffUserId: string,
@@ -536,17 +562,27 @@ export const promoteSessionToCaseAsStaff = createServerFn({ method: "POST" })
     return { caseRef, alreadyCase: false };
   });
 
-/** Creates a new case (session + ref) when booking without an existing fact-find. */
+/**
+ * Creates a new case (session + ref) when booking without an existing fact-find.
+ * `tenantId` must be the verified booking tenant; a case is never created tenantless.
+ */
 export async function createCaseSessionForCustomer(
   customerId: string,
+  tenantId: string,
 ): Promise<{ id: string; case_ref: string | null }> {
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
+  if (!tenantId) throw new Error("Tenant required.");
+  const { supabaseAdminUntyped: supabaseAdmin } =
+    await import("@/integrations/supabase/client.server");
+  const { withForcedTenantId } = await import("@/lib/tenant-assert.server");
   const caseRef = await allocateNextCaseRef(supabaseAdmin);
   const { data, error } = await supabaseAdmin
     .from("interview_sessions")
-    .insert({ customer_id: customerId, case_ref: caseRef, status: "in_progress" })
+    .insert(
+      withForcedTenantId(
+        { customer_id: customerId, case_ref: caseRef, status: "in_progress" },
+        tenantId,
+      ),
+    )
     .select("id, case_ref")
     .single();
   if (error) {
@@ -1031,44 +1067,41 @@ export const getSession = createServerFn({ method: "POST" })
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const { loadTenantRoleForTenantId } = await import("@/lib/tenant-role.server");
     const { platformAccessMayRead, tenantViewMayReadOperational } = await import(
       "@/lib/tenant-role"
     );
 
     // Load by id via service role, then assert actor authority + tenant match.
     // Do not return data without the gates below (customer hub pattern).
-    const { data: session, error } = await supabaseAdmin
+    const { data: loaded, error } = await supabaseAdmin
       .from("interview_sessions")
       .select("*")
       .eq("id", data.sessionId)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    if (!session) throw new Error("Session not found");
 
-    const deletedAt = (session as { deleted_at?: string | null }).deleted_at;
-    const isCustomerOwner = session.customer_id === context.userId;
-    const sessionTenantId = (session as { tenant_id?: string | null }).tenant_id ?? null;
-
-    let staffMayRead = false;
-    let isMainAdmin = false;
-    let isAdvisor = false;
+    const isCustomerOwner = Boolean(loaded) && loaded.customer_id === context.userId;
 
     if (!isCustomerOwner) {
-      if (!sessionTenantId) throw new Error("Forbidden");
-      const view = await loadTenantRoleForTenantId(context.userId, sessionTenantId);
-      // Tenant mismatch / no acting authority for this tenant → deny (covers 002 with no grant).
-      if (view.tenantId !== sessionTenantId) throw new Error("Forbidden");
-      if (!tenantViewMayReadOperational(view) && !platformAccessMayRead(view)) {
-        throw new Error("Forbidden");
-      }
-      staffMayRead = true;
-      isMainAdmin = view.isMainAdmin || platformAccessMayRead(view);
-      isAdvisor = view.isAdvisor;
+      // Staff: role in the verified acting tenant first, then the session's own tenant_id.
+      // Unknown, other-tenant and tenantless sessions all fail with the same "Not found.".
+      const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+      const { view } = await authoriseTenantResource({
+        userId: context.userId,
+        kind: "session",
+        id: data.sessionId,
+        capability: {
+          mutate: false,
+          allocation: "none",
+          allow: (v) => tenantViewMayReadOperational(v) || platformAccessMayRead(v),
+        },
+        includeDeleted: true,
+      });
+      const isMainAdmin = view.isMainAdmin || platformAccessMayRead(view);
 
-      if (!isMainAdmin && !platformAccessMayRead(view)) {
+      if (!isMainAdmin) {
         // Regular advisor: allocation or appointment only.
-        if (!isAdvisor) throw new Error("Forbidden");
+        if (!view.isAdvisor) throw new Error("Forbidden");
         let allowed = false;
         const { data: alloc, error: allocErr } = await supabaseAdmin
           .from("session_advisors")
@@ -1090,21 +1123,23 @@ export const getSession = createServerFn({ method: "POST" })
         }
         if (!allowed) throw new Error("This fact-find is not allocated to you.");
       }
-    }
 
-    if (deletedAt && !isCustomerOwner) {
-      // Soft-deleted: owner/supervisor membership or platform read may still inspect.
-      if (!staffMayRead) throw new Error("This fact-find has been deleted.");
-      if (!sessionTenantId) throw new Error("This fact-find has been deleted.");
-      const view = await loadTenantRoleForTenantId(context.userId, sessionTenantId);
-      const maySeeDeleted =
-        platformAccessMayRead(view) ||
-        view.isMainAdmin ||
-        view.adminAccess.isOwner ||
-        view.adminAccess.isSupervisor;
-      if (!maySeeDeleted) throw new Error("This fact-find has been deleted.");
+      if (loaded?.deleted_at) {
+        // Soft-deleted: owner/supervisor membership or platform read may still inspect.
+        const maySeeDeleted =
+          platformAccessMayRead(view) ||
+          view.isMainAdmin ||
+          view.adminAccess.isOwner ||
+          view.adminAccess.isSupervisor;
+        if (!maySeeDeleted) throw new Error("This fact-find has been deleted.");
+      }
     }
-    if (deletedAt && isCustomerOwner) {
+    if (!loaded) {
+      const { RESOURCE_NOT_FOUND_MESSAGE } = await import("@/lib/tenant-assert.server");
+      throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+    }
+    const session = loaded;
+    if (session.deleted_at && isCustomerOwner) {
       throw new Error("This fact-find has been removed.");
     }
 
@@ -2107,18 +2142,18 @@ export const allocateSession = createServerFn({ method: "POST" })
     z.object({ sessionId: z.string().uuid(), advisorId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("admin")) throw new Error("Forbidden");
+    const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+    const { tenantId } = await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: allocationAdminCapability(),
+    });
+    // Only advisers of the session's own tenant can be allocated.
+    await resolveAllocationTargetAdviser(tenantId, { advisorId: data.advisorId });
 
-    // Only users that actually hold the advisor role can be allocated.
-    const targetRoles = await getRolesForUser(data.advisorId);
-    if (!targetRoles.includes("advisor")) {
-      throw new Error("That user is not an advisor.");
-    }
-
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
 
     // Hard cap: at most MAX_ADVISORS_PER_SESSION advisors per customer file.
     const { data: current, error: currentErr } = await supabaseAdmin
@@ -2136,16 +2171,19 @@ export const allocateSession = createServerFn({ method: "POST" })
       );
     }
 
-    const { error } = await supabaseAdmin
-      .from("session_advisors")
-      .upsert(
-        { session_id: data.sessionId, advisor_id: data.advisorId, assigned_by: context.userId },
-        { onConflict: "session_id,advisor_id" },
-      );
+    const { error } = await supabaseAdmin.from("session_advisors").upsert(
+      {
+        session_id: data.sessionId,
+        advisor_id: data.advisorId,
+        assigned_by: context.userId,
+        tenant_id: tenantId,
+      },
+      { onConflict: "session_id,advisor_id" },
+    );
     if (error && !isMissingTableError(error)) throw new Error(error.message);
 
     const { ensureWelcomeCallTask } = await import("@/lib/staff-contact-tasks.server");
-    await ensureWelcomeCallTask(supabaseAdmin, data.sessionId, context.userId);
+    await ensureWelcomeCallTask(supabaseAdmin, data.sessionId, context.userId, { tenantId });
 
     return { ok: true };
   });
@@ -2165,23 +2203,22 @@ export const bulkAllocateSessions = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("admin")) throw new Error("Forbidden");
+    // Every session must be in the acting tenant before anything is written.
+    const { authoriseTenantResources } = await import("@/lib/tenant-assert.server");
+    const { tenantId } = await authoriseTenantResources({
+      userId: context.userId,
+      kind: "session",
+      ids: data.sessionIds,
+      capability: allocationAdminCapability(),
+    });
+    // Resolve the advisor (by id, otherwise by code) within that tenant only.
+    const advisorId = await resolveAllocationTargetAdviser(tenantId, {
+      advisorId: data.advisorId,
+      advisorCode: data.advisorCode,
+    });
 
-    // Resolve the advisor (by id, otherwise by code).
-    let advisorId = data.advisorId ?? null;
-    if (!advisorId && data.advisorCode) {
-      advisorId = await resolveAdvisorIdByCode(data.advisorCode);
-      if (!advisorId) throw new Error(`No advisor found with code ${data.advisorCode.toUpperCase()}.`);
-    }
-    if (!advisorId) throw new Error("Provide an advisor or an advisor code.");
-
-    const targetRoles = await getRolesForUser(advisorId);
-    if (!targetRoles.includes("advisor")) throw new Error("That user is not an advisor.");
-
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
 
     // Current allocations across the selected sessions (one query).
     const { data: existing, error: existingErr } = await supabaseAdmin
@@ -2196,7 +2233,12 @@ export const bulkAllocateSessions = createServerFn({ method: "POST" })
 
     const allocated: string[] = [];
     const skipped: Array<{ sessionId: string; reason: string }> = [];
-    const toInsert: Array<{ session_id: string; advisor_id: string; assigned_by: string }> = [];
+    const toInsert: Array<{
+      session_id: string;
+      advisor_id: string;
+      assigned_by: string;
+      tenant_id: string;
+    }> = [];
 
     for (const sessionId of data.sessionIds) {
       const advisors = bySession.get(sessionId) ?? [];
@@ -2208,7 +2250,12 @@ export const bulkAllocateSessions = createServerFn({ method: "POST" })
         skipped.push({ sessionId, reason: "max-advisors" });
         continue;
       }
-      toInsert.push({ session_id: sessionId, advisor_id: advisorId, assigned_by: context.userId });
+      toInsert.push({
+        session_id: sessionId,
+        advisor_id: advisorId,
+        assigned_by: context.userId,
+        tenant_id: tenantId,
+      });
       allocated.push(sessionId);
     }
 
@@ -2220,7 +2267,7 @@ export const bulkAllocateSessions = createServerFn({ method: "POST" })
 
       const { ensureWelcomeCallTask } = await import("@/lib/staff-contact-tasks.server");
       for (const row of toInsert) {
-        await ensureWelcomeCallTask(supabaseAdmin, row.session_id, context.userId);
+        await ensureWelcomeCallTask(supabaseAdmin, row.session_id, context.userId, { tenantId });
       }
     }
 
@@ -2233,12 +2280,16 @@ export const unallocateSession = createServerFn({ method: "POST" })
     z.object({ sessionId: z.string().uuid(), advisorId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("admin")) throw new Error("Forbidden");
+    const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+    await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: allocationAdminCapability(),
+    });
 
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin
       .from("session_advisors")
       .delete()
@@ -2260,18 +2311,20 @@ export const transferSession = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("admin")) throw new Error("Forbidden");
+    const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+    const { tenantId } = await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: allocationAdminCapability(),
+    });
     if (data.fromAdvisorId === data.toAdvisorId) {
       throw new Error("Choose a different advisor to transfer to.");
     }
+    await resolveAllocationTargetAdviser(tenantId, { advisorId: data.toAdvisorId });
 
-    const targetRoles = await getRolesForUser(data.toAdvisorId);
-    if (!targetRoles.includes("advisor")) throw new Error("Target user is not an advisor.");
-
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
 
     const { data: current, error: currentErr } = await supabaseAdmin
       .from("session_advisors")
@@ -2304,6 +2357,7 @@ export const transferSession = createServerFn({ method: "POST" })
           session_id: data.sessionId,
           advisor_id: data.toAdvisorId,
           assigned_by: context.userId,
+          tenant_id: tenantId,
         },
         { onConflict: "session_id,advisor_id" },
       );
@@ -2329,23 +2383,20 @@ export const bulkTransferSessions = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("admin")) throw new Error("Forbidden");
-
-    let toAdvisorId = data.toAdvisorId ?? null;
-    if (!toAdvisorId && data.toAdvisorCode) {
-      toAdvisorId = await resolveAdvisorIdByCode(data.toAdvisorCode);
-      if (!toAdvisorId) {
-        throw new Error(`No advisor found with code ${data.toAdvisorCode.toUpperCase()}.`);
-      }
-    }
-    if (!toAdvisorId) throw new Error("Provide a target advisor.");
+    const { authoriseTenantResources } = await import("@/lib/tenant-assert.server");
+    const { tenantId } = await authoriseTenantResources({
+      userId: context.userId,
+      kind: "session",
+      ids: data.sessionIds,
+      capability: allocationAdminCapability(),
+    });
+    const toAdvisorId = await resolveAllocationTargetAdviser(tenantId, {
+      advisorId: data.toAdvisorId,
+      advisorCode: data.toAdvisorCode,
+    });
     if (data.fromAdvisorId === toAdvisorId) {
       throw new Error("Choose a different advisor to transfer to.");
     }
-
-    const targetRoles = await getRolesForUser(toAdvisorId);
-    if (!targetRoles.includes("advisor")) throw new Error("Target user is not an advisor.");
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
@@ -2395,6 +2446,7 @@ export const bulkTransferSessions = createServerFn({ method: "POST" })
           session_id: sessionId,
           advisor_id: toAdvisorId,
           assigned_by: context.userId,
+          tenant_id: tenantId,
         },
         { onConflict: "session_id,advisor_id" },
       );

@@ -311,11 +311,18 @@ ok(
     (staffCustomerCap.includes("platformAccessMayRead(v)") &&
       assertStaffFn.includes("staffCustomerCapability(")),
 );
+// G7F-4S4C3: getSession authorises staff through the canonical resource helper, whose capability
+// admits platform read access (previously a direct loadTenantRoleForTenantId call).
+const getSessionFn =
+  sessions.split("export const getSession = createServerFn")[1]?.split("\n  });\n")[0] ?? "";
 ok(
   "get_session_platform_may_read",
-  sessions.includes("export const getSession") &&
+  (sessions.includes("export const getSession") &&
     sessions.includes("platformAccessMayRead") &&
-    sessions.includes("loadTenantRoleForTenantId"),
+    sessions.includes("loadTenantRoleForTenantId")) ||
+    (getSessionFn.includes("authoriseTenantResource({") &&
+      getSessionFn.includes("platformAccessMayRead(v)") &&
+      getSessionFn.includes("platformAccessMayRead(view)")),
 );
 ok(
   "get_session_no_synthetic_only_gate",
@@ -338,7 +345,16 @@ ok("dash_no_is_main_admin_for_ro", staffDash.includes("listAsMainAdmin = isMainA
 const booking = read("src/lib/booking.functions.ts");
 ok("diary_list_platform_may_read", booking.includes("platformAccessMayRead(view)"));
 ok("diary_list_tenant_scoped", booking.includes('.eq("tenant_id", view.tenantId)'));
-ok("reschedule_assert_mutate", booking.includes("assertTenantViewMayMutate(flags.view)"));
+// G7F-4S4C3: staff rescheduling resolves the verified acting tenant view first.
+const rescheduleFn =
+  booking.split("export const rescheduleAppointment = createServerFn")[1]?.split("\n  });\n")[0] ??
+  "";
+ok(
+  "reschedule_assert_mutate",
+  booking.includes("assertTenantViewMayMutate(flags.view)") ||
+    (rescheduleFn.includes("resolveActingTenant(") &&
+      rescheduleFn.includes("assertTenantViewMayMutate(view)")),
+);
 
 const customersUi = read("src/routes/_authenticated/customers.$customerId.tsx");
 ok(

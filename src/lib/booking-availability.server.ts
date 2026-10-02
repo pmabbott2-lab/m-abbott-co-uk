@@ -2,6 +2,7 @@
  * Tenant context and adviser pool for public availability discovery.
  * The pool is always scoped to one server-resolved tenant; no tenant means no pool.
  */
+import type { TenantMemberRole } from "@/lib/tenant-role";
 
 export type BookableAdvisor = {
   id: string;
@@ -16,7 +17,12 @@ export type AvailabilityTenantContext =
   | { kind: "none" }
   | { kind: "denied" };
 
-const POOL_MEMBERSHIP_ROLES = ["adviser", "owner", "supervisor", "general"];
+export const POOL_MEMBERSHIP_ROLES: TenantMemberRole[] = [
+  "adviser",
+  "owner",
+  "supervisor",
+  "general",
+];
 
 export type ActiveIntroducer = {
   id: string;
