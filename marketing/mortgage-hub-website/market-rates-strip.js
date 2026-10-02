@@ -11,7 +11,7 @@
     if (window.MORTGAGE_HUB_PATH) {
       return window.MORTGAGE_HUB_PATH("/").replace(/\/$/, "");
     }
-    return "http://127.0.0.1:8080";
+    return "https://mymortgagehub.uk";
   }
 
   function formatPct(n) {
@@ -63,10 +63,7 @@
 
     if (status) status.textContent = "Loading Bank Rate…";
 
-    fetch(api, {
-      method: "GET",
-      headers: { "ngrok-skip-browser-warning": "1" },
-    })
+    fetch(api, { method: "GET" })
       .then(function (res) {
         return res.json();
       })

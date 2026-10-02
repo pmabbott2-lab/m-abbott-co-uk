@@ -1,8 +1,9 @@
 /**
- * Wire mock-up links to the live Mortgage Hub app and propagate introducer ?ref= attribution.
+ * Wire site links to the Mortgage Hub app and propagate introducer ?ref= attribution.
  */
 (function () {
-  var HUB_PUBLIC_ORIGIN = "https://another-selector-ranged.ngrok-free.dev";
+  var HUB_PUBLIC_ORIGIN = "https://mymortgagehub.uk";
+  var HUB_LOCAL_ORIGIN = "http://127.0.0.1:8080";
   var INTRODUCER_REF_KEY = "mortgageeasy_introducer_ref";
 
   function resolveHubOrigin() {
@@ -11,20 +12,14 @@
       return configured.replace(/\/auth\/?$/, "");
     }
 
+    // Local development only: a locally served site talks to a local Hub unless ?hub=public.
     var host = window.location.hostname;
-    if (host.indexOf("ngrok") !== -1) {
-      return window.location.origin.replace(/\/$/, "");
-    }
-
     if (host === "localhost" || host === "127.0.0.1") {
       var params = new URLSearchParams(window.location.search);
-      if (params.get("hub") === "public") {
-        return HUB_PUBLIC_ORIGIN;
-      }
-      return "http://127.0.0.1:8080";
+      return params.get("hub") === "public" ? HUB_PUBLIC_ORIGIN : HUB_LOCAL_ORIGIN;
     }
 
-    return window.location.origin;
+    return HUB_PUBLIC_ORIGIN;
   }
 
   function readRefFromUrl() {
@@ -82,7 +77,7 @@
   window.MORTGAGEEASY_WITH_REF = withRef;
 
   function hubPath(path) {
-    var p = path || "/auth?from=broker&join=1";
+    var p = path || "/mortgageeasy/login?join=1";
     if (!p.startsWith("/")) p = "/" + p;
     p = appendRefToHubPath(p);
     return origin ? origin + p : p;
@@ -92,7 +87,7 @@
 
   function wire() {
     document.querySelectorAll("[data-hub-auth]").forEach(function (el) {
-      var path = el.getAttribute("data-hub-path") || "/auth?from=broker&join=1";
+      var path = el.getAttribute("data-hub-path") || "/mortgageeasy/login?join=1";
       el.setAttribute("href", hubPath(path));
     });
     document.querySelectorAll("[data-hub-path]:not([data-hub-auth])").forEach(function (el) {

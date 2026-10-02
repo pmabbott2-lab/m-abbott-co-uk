@@ -38,13 +38,12 @@
     if (window.MORTGAGE_HUB_PATH) {
       return window.MORTGAGE_HUB_PATH("/").replace(/\/$/, "");
     }
-    return "http://127.0.0.1:8080";
+    return "https://mymortgagehub.uk";
   }
 
   function apiHeaders() {
     return {
       "Content-Type": "application/json",
-      "ngrok-skip-browser-warning": "1",
     };
   }
 

@@ -1,13 +1,7 @@
 <!doctype html>
 <html lang="en-GB">
 <head>
-  <base href="/mortgageeasy/" />
-  <script>
-    (function () {
-      var el = document.querySelector("base");
-      if (el && location.pathname.indexOf("/mortgageeasy") !== 0) el.setAttribute("href", "/");
-    })();
-  </script>
+  <base href="/" />
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MortgageEasy — Advisor-led mortgage advice</title>
@@ -27,7 +21,7 @@
         <img class="logo-img" src="assets/logo.png" width="480" height="104" alt="MortgageEasy" />
       </a>
       <div class="header-actions">
-        <a class="btn btn-outline btn-sm" href="/auth" data-hub-auth data-hub-path="/auth">Sign in</a>
+        <a class="btn btn-outline btn-sm" href="https://mymortgagehub.uk/mortgageeasy/login" data-hub-auth data-hub-path="/mortgageeasy/login">Sign in</a>
         <button
           type="button"
           class="nav-toggle"
@@ -105,7 +99,7 @@
             <p>Three clear paths — start with Susan, book time with your advisor, or arrange a callback.</p>
           </div>
           <div class="journey-grid journey-grid-pro journey-grid-three">
-            <a class="journey-card journey-card-pro journey-card-susan journey-card-featured" href="/auth?from=broker&amp;join=1" data-hub-auth data-hub-path="/auth?from=broker&join=1">
+            <a class="journey-card journey-card-pro journey-card-susan journey-card-featured" href="https://mymortgagehub.uk/mortgageeasy/login?join=1&amp;start=voice" data-hub-auth data-hub-path="/mortgageeasy/login?join=1&start=voice">
               <span class="journey-susan-media" aria-hidden="true">
                 <img src="assets/susan.png" width="72" height="72" alt="" class="journey-susan-photo" />
                 <img src="assets/icon.svg" width="22" height="22" alt="" class="journey-susan-badge" />
@@ -118,7 +112,7 @@
               </p>
               <span class="journey-cta">Meet Susan →</span>
             </a>
-            <a class="journey-card journey-card-pro" href="/auth?from=broker&amp;join=1&amp;start=book" data-hub-auth data-hub-path="/auth?from=broker&join=1&start=book">
+            <a class="journey-card journey-card-pro" href="https://mymortgagehub.uk/mortgageeasy/login?join=1&amp;start=book" data-hub-auth data-hub-path="/mortgageeasy/login?join=1&start=book">
               <span class="journey-icon" aria-hidden="true">📅</span>
               <h3>Book an appointment</h3>
               <p>Pick a time with your advisor first. We'll confirm by text.</p>
@@ -308,7 +302,7 @@
               width="1280"
               height="720"
             >
-              <source src="assets/video/protect-draft-v9.mp4?v=1" type="video/mp4" />
+              <source src="assets/video/protect-draft-v9.mp4?v=2" type="video/mp4" />
             </video>
             <div class="ftb-captions" data-ftb-captions hidden></div>
             <button type="button" class="ftb-mute" data-ftb-mute aria-pressed="true">Unmute</button>
@@ -370,8 +364,8 @@
 
   <div class="reg-strip reg-strip-footer">
     <div class="container">
-      <span><strong>MortgageEasy</strong> is a trading name of [Legal entity name Ltd].</span>
-      <span>Authorised &amp; regulated by the <strong>Financial Conduct Authority</strong> (FRN: [000000]). See <a href="disclosures.html" data-ref-link>Disclosures</a>.</span>
+      <span><strong>Mortgage Easy</strong> is a trading name of Mortgage Easy Group Limited.</span>
+      <span>Registered in England and Wales, company number 17490711. FCA Firm Reference Number: pending. See <a href="disclosures.html" data-ref-link>Disclosures</a>.</span>
     </div>
   </div>
 
@@ -407,8 +401,8 @@
       </div>
       <div class="reg-block">
         <p><strong>Regulatory warning:</strong> Your home may be repossessed if you do not keep up repayments on your mortgage or other loans secured on it.</p>
-        <p>MortgageEasy is a trading name of [Legal entity name Ltd], registered in England &amp; Wales (Company No. [00000000]). Authorised and regulated by the Financial Conduct Authority (FRN: [000000]).</p>
-        <p>© <span id="y"></span> MortgageEasy. Replace bracketed placeholders before go-live. Not financial advice.</p>
+        <p>Mortgage Easy is a trading name of Mortgage Easy Group Limited. Mortgage Easy Group Limited is registered in England and Wales, company number 17490711. FCA Firm Reference Number: pending.</p>
+        <p>© <span id="y"></span> Mortgage Easy Group Limited. Not financial advice.</p>
       </div>
     </div>
   </footer>
