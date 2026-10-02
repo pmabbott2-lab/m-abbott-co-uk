@@ -2037,8 +2037,17 @@ export const listAdvisorCustomers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ advisorId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<AdvisorCustomerRow[]> => {
-    const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("admin")) throw new Error("Forbidden");
+    // Verified acting tenant → main admin there → the adviser is an adviser of that tenant → only
+    // that tenant's sessions. Unknown and other-tenant advisers both get "Not found."; the
+    // supplied adviser never selects the tenant.
+    const { resolveActingTenantForList, requireTargetMemberInTenant } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, {
+      mutate: false,
+      allocation: "none",
+      allow: (v) => v.isMainAdmin,
+    });
+    await requireTargetMemberInTenant(data.advisorId, tenantId, ["adviser"]);
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
@@ -2072,8 +2081,9 @@ export const listAdvisorCustomers = createServerFn({ method: "GET" })
     const allIds = Array.from(new Set([...allocatedIds, ...appointmentIds]));
     if (allIds.length === 0) return [];
 
-    // Fetch the sessions. The `channel` column only exists post-migration —
-    // fall back to a channel-less select and default to "voice".
+    // Fetch the sessions (acting tenant only — other-tenant and tenantless rows never match).
+    // The `channel` column only exists post-migration — fall back to a channel-less select
+    // and default to "voice".
     type SessionRow = {
       id: string;
       customer_id: string;
@@ -2089,12 +2099,14 @@ export const listAdvisorCustomers = createServerFn({ method: "GET" })
         .from("interview_sessions")
         .select("id, customer_id, status, started_at, channel, case_ref, deleted_at")
         .in("id", allIds)
+        .eq("tenant_id", tenantId)
         .order("started_at", { ascending: false });
       if (withChannel.error) {
         const { data: basic, error } = await supabaseAdmin
           .from("interview_sessions")
           .select("id, customer_id, status, started_at, case_ref, deleted_at")
           .in("id", allIds)
+          .eq("tenant_id", tenantId)
           .order("started_at", { ascending: false });
         if (error) throw new Error(error.message);
         sessions = (basic ?? []).map((s) => ({ ...s, channel: null }));
