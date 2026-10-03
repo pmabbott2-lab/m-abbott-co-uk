@@ -5,6 +5,10 @@ Internal only. Not part of the published site (`marketing/mortgage-hub-website`)
 The Cloudflare Pages deployment at this stage is a PREVIEW only. It is not approval to
 publish the website on mortgageeasy.uk.
 
+Private domain stage: the site is connected to `https://mortgageeasy.uk` but kept private behind
+Cloudflare Access (email one-time code, explicit allow-list). This is not the public launch; the
+gate stays until public launch is explicitly approved. See `TENANT-WEBSITE-ARCHITECTURE.md`.
+
 ## 1. Mortgage Hub tenant routing (separate Hub work — not implemented in `mortgageeasy-site`)
 
 Intended permanent architecture:
@@ -43,6 +47,8 @@ Do not work around these by switching the site back to generic `/auth` URLs.
 The site calls `https://mymortgagehub.uk/api/calculator/market-rates`,
 `/api/calculator/estimate-rate` and `/api/introducer/calculator-lead`. These will be blocked by
 CORS from the preview origin until the Hub allows it. Local calculator maths works without them.
+The site origin is now `https://mortgageeasy.uk` (the other domains 301 to it), so that is the
+origin the Hub needs to allow.
 
 ## 3. Video hosting
 
