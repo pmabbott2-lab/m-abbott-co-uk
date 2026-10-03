@@ -58,9 +58,8 @@ served from R2 bucket `mortgageeasy-media` (objects under `video/`) via the buck
 domain `https://media.mortgageeasy.uk` (public, not behind Cloudflare Access; range requests
 return `206`). Captions (`.vtt`) stay on Pages.
 
-Still to do: disable the bucket's `r2.dev` public development URL once the custom domain is
-confirmed in the browser. The MP4 copies under `assets/video/` are no longer referenced and can
-be removed from the published folder.
+The bucket's `r2.dev` public development URL is disabled. Still to do: the MP4 copies under
+`assets/video/` are no longer referenced and can be removed from the published folder.
 
 ## 4. Introducer and careers forms → Mortgage Hub (Hub side to be delivered later)
 
