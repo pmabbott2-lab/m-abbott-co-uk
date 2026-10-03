@@ -214,32 +214,25 @@ export const listIntroducersForAdmin = createServerFn({ method: "GET" })
       );
   });
 
-async function assertIntroducerUser(userId: string, tenantId?: string | null): Promise<void> {
-  const { resolveActingTenantRole, loadTenantRoleForTenantId } = await import(
-    "@/lib/tenant-role.server"
-  );
-  const view = tenantId
-    ? await loadTenantRoleForTenantId(userId, tenantId)
-    : await resolveActingTenantRole(userId);
-  if (!view.isIntroducer) {
-    throw new Error("Not an introducer account");
-  }
-}
-
-/** Owner/supervisor view-as introducer — returns target user id. */
+/**
+ * Owner/supervisor view-as introducer — returns target user id. The target must
+ * hold an introducer registration in the acting user's own acting tenant.
+ */
 export async function resolveViewAsIntroducer(
   actingUserId: string,
-  email: string | null,
+  _email: string | null,
   viewAsIntroducerUserId?: string,
 ): Promise<{ targetUserId: string; viewAsMode: boolean }> {
   if (!viewAsIntroducerUserId) {
     return { targetUserId: actingUserId, viewAsMode: false };
   }
-  const { resolveAdminAccess } = await import("@/lib/admin.functions");
-  const access = await resolveAdminAccess(actingUserId, email);
-  if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
-  await assertIntroducerUser(viewAsIntroducerUserId);
-  return { targetUserId: viewAsIntroducerUserId, viewAsMode: true };
+  const { requireActingIntroducerRegistration } =
+    await import("@/lib/introducer-registration.server");
+  const registration = await requireActingIntroducerRegistration({
+    actingUserId,
+    viewAsIntroducerUserId,
+  });
+  return { targetUserId: registration.userId, viewAsMode: true };
 }
 
 async function activeTenantSlugForIntroducer(
@@ -276,22 +269,14 @@ export const getIntroducerProfile = createServerFn({ method: "GET" })
   )
   .middleware([requireSupabaseAuth])
   .handler(async ({ data, context }) => {
-    const {
-      data: { user },
-    } = await context.supabase.auth.getUser();
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const access = await resolveAdminAccess(context.userId, user?.email ?? null);
-
-    let targetUserId = context.userId;
-    const viewAsMode = Boolean(data.viewAsIntroducerUserId);
-
-    if (viewAsMode) {
-      if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
-      targetUserId = data.viewAsIntroducerUserId!;
-      await assertIntroducerUser(targetUserId);
-    } else {
-      await assertIntroducerUser(context.userId);
-    }
+    const { requireActingIntroducerRegistration, INTRODUCER_REGISTRATION_MISSING_MESSAGE } =
+      await import("@/lib/introducer-registration.server");
+    const registration = await requireActingIntroducerRegistration({
+      actingUserId: context.userId,
+      viewAsIntroducerUserId: data.viewAsIntroducerUserId,
+    });
+    const targetUserId = registration.userId;
+    const viewAsMode = registration.viewAsMode;
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const client = viewAsMode ? supabaseAdmin : context.supabase;
@@ -299,8 +284,12 @@ export const getIntroducerProfile = createServerFn({ method: "GET" })
     const { data: existing } = await client
       .from("introducers")
       .select("*")
-      .eq("user_id", targetUserId)
+      .eq("id", registration.id)
       .maybeSingle();
+
+    // Registrations are created by the invite flow only; the legacy tenantless
+    // self-insert below must stay unreachable.
+    if (!existing) throw new Error(INTRODUCER_REGISTRATION_MISSING_MESSAGE);
 
     if (existing) {
       const existingCode = (existing as { company_code?: string | null }).company_code ?? null;
@@ -373,18 +362,14 @@ export const updateIntroducerProfile = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const {
-      data: { user },
-    } = await context.supabase.auth.getUser();
-    const { targetUserId, viewAsMode } = await resolveViewAsIntroducer(
-      context.userId,
-      user?.email ?? null,
-      data.viewAsIntroducerUserId,
-    );
-
-    if (!viewAsMode) {
-      await assertIntroducerUser(context.userId);
-    }
+    const { requireActingIntroducerRegistration } =
+      await import("@/lib/introducer-registration.server");
+    const registration = await requireActingIntroducerRegistration({
+      actingUserId: context.userId,
+      viewAsIntroducerUserId: data.viewAsIntroducerUserId,
+    });
+    const targetUserId = registration.userId;
+    const viewAsMode = registration.viewAsMode;
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const client = viewAsMode ? supabaseAdmin : context.supabase;
@@ -392,7 +377,7 @@ export const updateIntroducerProfile = createServerFn({ method: "POST" })
     const { data: introducer, error: fetchErr } = await client
       .from("introducers")
       .select("id, company_name, contact_email")
-      .eq("user_id", targetUserId)
+      .eq("id", registration.id)
       .single();
     if (fetchErr) throw new Error(fetchErr.message);
 
@@ -440,17 +425,16 @@ export const createManualLead = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: introducer, error: introErr } = await context.supabase
-      .from("introducers")
-      .select("id")
-      .eq("user_id", context.userId)
-      .single();
-    if (introErr) throw new Error(introErr.message);
+    const { requireActiveActingIntroducerRegistration } =
+      await import("@/lib/introducer-registration.server");
+    const registration = await requireActiveActingIntroducerRegistration({
+      actingUserId: context.userId,
+    });
 
     const { data: lead, error } = await context.supabase
       .from("introducer_leads")
       .insert({
-        introducer_id: introducer.id,
+        introducer_id: registration.id,
         lead_source: "introducer_portal",
         channel: "manual",
         customer_name: data.customerName,
@@ -492,26 +476,18 @@ export const listIntroducerReferrals = createServerFn({ method: "GET" })
   )
   .middleware([requireSupabaseAuth])
   .handler(async ({ data, context }) => {
-    const {
-      data: { user },
-    } = await context.supabase.auth.getUser();
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const access = await resolveAdminAccess(context.userId, user?.email ?? null);
-
-    let targetUserId = context.userId;
-    if (data.viewAsIntroducerUserId) {
-      if (!access.isOwner && !access.isSupervisor) throw new Error("Forbidden");
-      targetUserId = data.viewAsIntroducerUserId;
-      await assertIntroducerUser(targetUserId);
-    } else {
-      await assertIntroducerUser(context.userId);
-    }
+    const { requireActingIntroducerRegistration } =
+      await import("@/lib/introducer-registration.server");
+    const registration = await requireActingIntroducerRegistration({
+      actingUserId: context.userId,
+      viewAsIntroducerUserId: data.viewAsIntroducerUserId,
+    });
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: introducer, error: introErr } = await supabaseAdmin
       .from("introducers")
       .select("id, company_name, company_code")
-      .eq("user_id", targetUserId)
+      .eq("id", registration.id)
       .single();
     if (introErr) throw new Error(introErr.message);
 

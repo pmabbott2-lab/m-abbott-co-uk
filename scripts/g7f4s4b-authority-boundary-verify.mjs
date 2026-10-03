@@ -1331,6 +1331,16 @@ const S3_WRITERS = {
     "bookNewCustomerAsStaff",
     "bookNewCustomerAsIntroducer",
   ],
+  // Only the S3 introducer code / referral surface is pinned. Current-user portal
+  // registration resolution (G7F-4S4C4-A1) is outside the S3 invariant.
+  "src/lib/introducer.functions.ts": [
+    "isMissingColumnOrTable",
+    "generateUniqueCompanyCode",
+    "resolveReferralSlug",
+    "captureIntroducerCalculatorLead",
+    "getIntroducerProfile",
+    "updateIntroducerProfile",
+  ],
 };
 // G7F-4S4C3 rebinds bookAppointmentTrusted's tenant / session / adviser checks; for that writer
 // only its attribution statements must stay identical (whitespace-normalised) to pre-S4B.
@@ -1339,6 +1349,15 @@ const S3_WRITER_STATEMENTS = {
     /introducerId = await ensureStaffIntroducerRecord\(actingUserId\);/g,
     /if \(customerIdForIntro && introducerId\) \{[\s\S]*?\n {2}\}/g,
     /\.from\("introducer_leads"\)\s*\.update\(\{ status: "booked"[\s\S]*?\.is\("appointment_id", null\);/g,
+  ],
+  // An existing company code is never regenerated: the only code write fills a missing one.
+  "src/lib/introducer.functions.ts#getIntroducerProfile": [
+    /const existingCode = \(existing as \{ company_code\?: string \| null \}\)\.company_code \?\? null;/g,
+    /if \(!existingCode && !viewAsMode\) \{\s*const code = await generateUniqueCompanyCode\(\);\s*const \{ error: codeErr \} = await supabaseAdmin\s*\.from\("introducers"\)\s*\.update\(\{ company_code: code \}\)\s*\.eq\("id", existing\.id\);/g,
+  ],
+  // Self-service profile edit never touches the company code or referral slug.
+  "src/lib/introducer.functions.ts#updateIntroducerProfile": [
+    /\.update\(\{\s*company_name: data\.companyName,\s*contact_email: data\.contactEmail \|\| null,\s*\}\)/g,
   ],
 };
 function sameStatements(a, b, patterns) {
@@ -1392,6 +1411,19 @@ for (const f of S3_FILES) {
       : a !== null && a === b;
     if (!same) changedS3.push(`${f}#${name}`);
   }
+}
+// The introducer module never touches attribution / referral / commission tables and never
+// rewrites a company code or referral slug outside the pinned fill-if-missing statement.
+{
+  const introSrc = code("src/lib/introducer.functions.ts");
+  const updatePayloads = [...introSrc.matchAll(/\.update\(\{([^}]*)\}\)/g)].map((m) => m[1]);
+  const intact =
+    !/\.from\("(customer_introducer_links|introducer_amendment_history|referral\w*|commission\w*|finance\w*|network_\w*)"\)/.test(
+      introSrc,
+    ) &&
+    updatePayloads.filter((p) => /\bcompany_code\s*:/.test(p)).length === 1 &&
+    !updatePayloads.some((p) => /\bslug\s*:/.test(p));
+  if (!intact) changedS3.push("src/lib/introducer.functions.ts#code-referral-invariant");
 }
 ok(
   "TEST_14 S4B changed no S3 invite/introducer/referral/commission module or the S3B migration; S3 attribution/referral/commission writers are byte-identical to the pre-S4B commit",

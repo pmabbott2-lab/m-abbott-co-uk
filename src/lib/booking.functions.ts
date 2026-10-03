@@ -3451,17 +3451,16 @@ export const listAllUpcomingAppointments = createServerFn({ method: "GET" })
 export const listIntroducerAppointments = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: introducer, error: introErr } = await context.supabase
-      .from("introducers")
-      .select("id")
-      .eq("user_id", context.userId)
-      .single();
-    if (introErr) throw new Error(introErr.message);
+    const { requireActingIntroducerRegistration } =
+      await import("@/lib/introducer-registration.server");
+    const registration = await requireActingIntroducerRegistration({
+      actingUserId: context.userId,
+    });
 
     const { data, error } = await context.supabase
       .from("appointments")
       .select("*")
-      .eq("introducer_id", introducer.id)
+      .eq("introducer_id", registration.id)
       .order("starts_at", { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
@@ -3481,15 +3480,14 @@ export const sendLeadBookingSms = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     if (!isTwilioConfigured()) throw new Error("SMS is not configured yet. Add Twilio credentials to your server environment.");
 
-    const {
-      data: { user },
-    } = await context.supabase.auth.getUser();
-    const { resolveViewAsIntroducer } = await import("@/lib/introducer.functions");
-    const { targetUserId, viewAsMode } = await resolveViewAsIntroducer(
-      context.userId,
-      user?.email ?? null,
-      data.viewAsIntroducerUserId,
-    );
+    const { requireActiveActingIntroducerRegistration } =
+      await import("@/lib/introducer-registration.server");
+    const registration = await requireActiveActingIntroducerRegistration({
+      actingUserId: context.userId,
+      viewAsIntroducerUserId: data.viewAsIntroducerUserId,
+    });
+    const targetUserId = registration.userId;
+    const viewAsMode = registration.viewAsMode;
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
@@ -3499,7 +3497,7 @@ export const sendLeadBookingSms = createServerFn({ method: "POST" })
     const { data: introducer, error: introErr } = await introClient
       .from("introducers")
       .select("id, company_name, slug, tenant_id")
-      .eq("user_id", targetUserId)
+      .eq("id", registration.id)
       .single();
     if (introErr) throw new Error(introErr.message);
 
@@ -3718,29 +3716,16 @@ export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
     };
   });
 
-/**
- * Confirm introducer role + profile.
- * Prefer the signed-in user client when checking self — RLS allows reading own
- * roles/profile even if SUPABASE_SERVICE_ROLE_KEY is wrong on Azure.
- */
+/** Active introducer registration of `userId` in their acting tenant (new business). */
 async function assertIntroducerBookingAccess(
   userId: string,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   _userClient?: { from: (table: string) => any },
 ): Promise<string> {
-  const flags = await actingTenantStaffFlags(userId);
-  if (!flags.isIntroducer) {
-    throw new Error("Forbidden");
-  }
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-  let introQuery = supabaseAdmin.from("introducers").select("id").eq("user_id", userId);
-  if (flags.view.tenantId) introQuery = introQuery.eq("tenant_id", flags.view.tenantId);
-  const { data: introducer, error } = await introQuery.maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!introducer) throw new Error("Introducer profile not set up yet.");
-  return introducer.id as string;
+  const { requireActiveActingIntroducerRegistration } =
+    await import("@/lib/introducer-registration.server");
+  const registration = await requireActiveActingIntroducerRegistration({ actingUserId: userId });
+  return registration.id;
 }
 
 export const bookNewCustomerAsIntroducer = createServerFn({ method: "POST" })
@@ -3835,20 +3820,15 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const {
-      data: { user },
-    } = await context.supabase.auth.getUser();
-    const { resolveViewAsIntroducer } = await import("@/lib/introducer.functions");
-    const { targetUserId, viewAsMode } = await resolveViewAsIntroducer(
-      context.userId,
-      user?.email ?? null,
-      data.viewAsIntroducerUserId,
-    );
-
-    const introducerId = await assertIntroducerBookingAccess(
-      targetUserId,
-      viewAsMode ? undefined : context.supabase,
-    );
+    const { requireActiveActingIntroducerRegistration, INTRODUCER_REGISTRATION_INACTIVE_MESSAGE } =
+      await import("@/lib/introducer-registration.server");
+    const registration = await requireActiveActingIntroducerRegistration({
+      actingUserId: context.userId,
+      viewAsIntroducerUserId: data.viewAsIntroducerUserId,
+    });
+    const targetUserId = registration.userId;
+    const viewAsMode = registration.viewAsMode;
+    const introducerId = registration.id;
     const twilioOk = isTwilioConfigured();
     const wantSms = data.sendSms !== false;
 
@@ -3857,13 +3837,18 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
     );
     // Own introducer writes work via RLS with the user client; view-as needs admin.
     const db = viewAsMode ? supabaseAdmin : context.supabase;
+    // Only an active, non-binned registration is loaded, so the legacy
+    // reactivation branch below is unreachable; disabled registrations are never reactivated.
     const { data: introducer, error: introErr } = await db
       .from("introducers")
       .select("slug, company_name, active, tenant_id")
       .eq("id", introducerId)
-      .single();
+      .eq("active", true)
+      .is("deleted_at", null)
+      .maybeSingle();
     if (introErr) throw new Error(introErr.message);
-    if (!introducer?.slug) throw new Error("Introducer referral link is not set up yet.");
+    if (!introducer) throw new Error(INTRODUCER_REGISTRATION_INACTIVE_MESSAGE);
+    if (!introducer.slug) throw new Error("Introducer referral link is not set up yet.");
     if (introducer.active === false) {
       await db.from("introducers").update({ active: true }).eq("id", introducerId);
     }
