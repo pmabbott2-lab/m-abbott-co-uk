@@ -34,6 +34,8 @@ for (const k of [
 }
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Parent of the A1 commit: the immutable pre-A1 source for the negative control and A1-17.
+const PRE_A1_BASELINE = "52726046e1650cbdb6f7ae8db11bbba14ee87b6f";
 const failures = [];
 let total = 0;
 function ok(name, cond, detail = "") {
@@ -650,7 +652,7 @@ const resolverSrc = strip(read(RESOLVER_REL));
 {
   const headBlocks = [];
   for (const [rel, names] of Object.entries(IN_SCOPE)) {
-    const src = git("show", `HEAD:${rel}`);
+    const src = git("show", `${PRE_A1_BASELINE}:${rel}`);
     for (const name of names) {
       const block = topLevelDeclaration(src, name) ?? "";
       if (
@@ -662,7 +664,7 @@ const resolverSrc = strip(read(RESOLVER_REL));
     }
   }
   ok(
-    "A1-NC1 pre-A1 (HEAD) portal handlers resolved the registration by user_id alone",
+    "A1-NC1 pre-A1 (baseline 5272604) portal handlers resolved the registration by user_id alone",
     [
       "getIntroducerProfile",
       "updateIntroducerProfile",
@@ -1117,7 +1119,7 @@ resetDb();
 {
   const unchangedVsHead = (rel, names) =>
     names.filter((n) => {
-      const a = topLevelDeclaration(git("show", `HEAD:${rel}`), n);
+      const a = topLevelDeclaration(git("show", `${PRE_A1_BASELINE}:${rel}`), n);
       const b = topLevelDeclaration(read(rel), n);
       return !(a !== null && a === b);
     });
@@ -1148,7 +1150,7 @@ resetDb();
     "supabase/migrations",
   ).trim();
   ok(
-    "A1-17 same-tenant duplicate/invite protections unchanged: invite modules and migrations untouched; staff-introducer creation, booking writers, company-code and slug generation byte-identical to HEAD",
+    "A1-17 same-tenant duplicate/invite protections unchanged: invite modules and migrations untouched; staff-introducer creation, booking writers, company-code and slug generation byte-identical to the pre-A1 baseline",
     inviteStatus === "" && changedBooking.length === 0 && changedIntro.length === 0,
     [inviteStatus, ...changedBooking, ...changedIntro].filter(Boolean).join(",") || "unchanged",
   );
