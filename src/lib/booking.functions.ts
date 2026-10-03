@@ -3168,7 +3168,7 @@ export const assignUnallocatedVoicemail = createServerFn({ method: "POST" })
       },
     );
     if (cb.advisor_id) throw new Error("This call-back is already assigned to an advisor.");
-    const { requireTargetMemberInTenant, loadSessionTenantMap } =
+    const { requireTargetMemberInTenant, loadSessionTenantMap, scopeRowsToTenant } =
       await import("@/lib/tenant-assert.server");
     await requireTargetMemberInTenant(data.advisorId, tenantId, ["adviser"]);
 
@@ -3225,7 +3225,30 @@ export const assignUnallocatedVoicemail = createServerFn({ method: "POST" })
         callPatch.session_id = match.sessionId;
         if (match.customerId) callPatch.customer_id = match.customerId;
       }
-      await supabaseAdmin.from("phone_calls").update(callPatch).eq("id", cb.phone_call_id);
+      // callback_requests is staff-writable under RLS, so phone_call_id never proves the call's
+      // tenant. The call's own tenant_id, else its own session's tenant, must be the acting tenant
+      // (conflicting or underivable → left unchanged). tenant_id is never stamped here.
+      const { data: linkedCall } = await supabaseAdmin
+        .from("phone_calls")
+        .select("id, tenant_id, session_id")
+        .eq("id", cb.phone_call_id)
+        .maybeSingle();
+      const [ownedCall] = linkedCall
+        ? await scopeRowsToTenant(
+            [linkedCall as { id: string; tenant_id: string | null; session_id: string | null }],
+            tenantId,
+            { tenantOf: (r) => r.tenant_id, sessionOf: (r) => r.session_id },
+          )
+        : [];
+      if (ownedCall) {
+        const callUpdate = supabaseAdmin
+          .from("phone_calls")
+          .update(callPatch)
+          .eq("id", ownedCall.id);
+        await (ownedCall.tenant_id
+          ? callUpdate.eq("tenant_id", tenantId)
+          : callUpdate.is("tenant_id", null).eq("session_id", ownedCall.session_id as string));
+      }
     }
 
     if (match?.sessionId) {

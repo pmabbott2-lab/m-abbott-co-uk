@@ -11,6 +11,7 @@ import {
 } from "@/lib/sms.server";
 import { canAmend } from "@/lib/admin-access";
 import { platformAccessMayRead } from "@/lib/tenant-role";
+import type { TenantRoleView } from "@/lib/tenant-role";
 import type { ResourceCapability } from "@/lib/tenant-assert.server";
 import type { Tables } from "@/integrations/supabase/types";
 import type { OwnerCustomerExportRow } from "@/lib/report-export.types";
@@ -2885,231 +2886,248 @@ function smsHistoryLabel(direction: string, body: string | null): string {
 // that session's appointments, call-backs, sent/received SMS and fact-find
 // milestones. Read-side merge of existing sources — no extra storage. Every
 // source is defensive: a missing table / empty result never breaks the list.
+// `tenantId` must already be proven for this session (authoriseTenantResource). Session-keyed
+// rows whose own tenant_id differs are dropped; SMS matched only by phone number must carry
+// that tenant itself, so tenantless or other-tenant SMS to the same number never appear.
 export async function fetchContactHistoryEntries(
   sessionId: string,
-  opts: { userId: string; email?: string },
+  opts: { tenantId: string; view: TenantRoleView },
 ): Promise<ContactHistoryEntry[]> {
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-  const { resolveAdminAccess } = await import("@/lib/admin.functions");
+  const { supabaseAdminUntyped: supabaseAdmin } =
+    await import("@/integrations/supabase/client.server");
   const { canAmendHistory } = await import("@/lib/admin-access");
-  const isOwner = canAmendHistory(await resolveAdminAccess(opts.userId, opts.email));
+  const { RESOURCE_NOT_FOUND_MESSAGE } = await import("@/lib/tenant-assert.server");
+  const isOwner = canAmendHistory(opts.view.adminAccess);
+  const inSessionTenant = (rowTenant: string | null | undefined) =>
+    !rowTenant || rowTenant === opts.tenantId;
 
   const entries: ContactHistoryEntry[] = [];
   const data = { sessionId };
 
-    // Fact-find milestones + the customer's phone (used to link SMS below).
-    let customerPhone: string | null = null;
-    {
-      const { data: session, error } = await supabaseAdmin
-        .from("interview_sessions")
-        .select("started_at, submitted_at, customer_id")
-        .eq("id", data.sessionId)
-        .maybeSingle();
-      if (error && !isMissingTableError(error)) throw new Error(error.message);
-      if (session) {
-        if (session.started_at) {
-          entries.push({
-            id: `ff-start-${data.sessionId}`,
-            type: "fact_find",
-            body: "Fact-find started",
-            occurredAt: session.started_at,
-          });
-        }
-        const submittedAt = (session as { submitted_at?: string | null }).submitted_at;
-        if (submittedAt) {
-          entries.push({
-            id: `ff-submit-${data.sessionId}`,
-            type: "fact_find",
-            body: "Fact-find submitted to advisor",
-            occurredAt: submittedAt,
-          });
-        }
-        if (session.customer_id) {
-          const { data: profile } = await supabaseAdmin
-            .from("profiles")
-            .select("phone")
-            .eq("id", session.customer_id)
-            .maybeSingle();
-          customerPhone = (profile as { phone?: string | null } | null)?.phone ?? null;
-        }
+  // Fact-find milestones + the customer's phone (used to link SMS below).
+  let customerPhone: string | null = null;
+  {
+    const { data: session, error } = await supabaseAdmin
+      .from("interview_sessions")
+      .select("started_at, submitted_at, customer_id, tenant_id")
+      .eq("id", data.sessionId)
+      .maybeSingle();
+    if (error && !isMissingTableError(error)) throw new Error(error.message);
+    if (!session || session.tenant_id !== opts.tenantId)
+      throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+    if (session) {
+      if (session.started_at) {
+        entries.push({
+          id: `ff-start-${data.sessionId}`,
+          type: "fact_find",
+          body: "Fact-find started",
+          occurredAt: session.started_at,
+        });
+      }
+      const submittedAt = (session as { submitted_at?: string | null }).submitted_at;
+      if (submittedAt) {
+        entries.push({
+          id: `ff-submit-${data.sessionId}`,
+          type: "fact_find",
+          body: "Fact-find submitted to advisor",
+          occurredAt: submittedAt,
+        });
+      }
+      if (session.customer_id) {
+        const { data: profile } = await supabaseAdmin
+          .from("profiles")
+          .select("phone")
+          .eq("id", session.customer_id)
+          .maybeSingle();
+        customerPhone = (profile as { phone?: string | null } | null)?.phone ?? null;
       }
     }
+  }
 
-    {
-      let logs: Array<{
-        id: string;
-        entry_type: string;
-        body: string | null;
-        occurred_at: string;
-        amended_at?: string | null;
-        is_deleted?: boolean;
-      }> | null = null;
-      const withAmend = await supabaseAdmin
+  {
+    let logs: Array<{
+      id: string;
+      entry_type: string;
+      body: string | null;
+      occurred_at: string;
+      amended_at?: string | null;
+      is_deleted?: boolean;
+      tenant_id?: string | null;
+    }> | null = null;
+    const withAmend = await supabaseAdmin
+      .from("customer_contact_log")
+      .select("id, entry_type, body, occurred_at, amended_at, is_deleted, tenant_id")
+      .eq("session_id", data.sessionId);
+    if (withAmend.error && isMissingTableError(withAmend.error)) {
+      const basic = await supabaseAdmin
         .from("customer_contact_log")
-        .select("id, entry_type, body, occurred_at, amended_at, is_deleted")
+        .select("id, entry_type, body, occurred_at, tenant_id")
         .eq("session_id", data.sessionId);
-      if (withAmend.error && isMissingTableError(withAmend.error)) {
-        const basic = await supabaseAdmin
-          .from("customer_contact_log")
-          .select("id, entry_type, body, occurred_at")
-          .eq("session_id", data.sessionId);
-        if (basic.error && !isMissingTableError(basic.error)) throw new Error(basic.error.message);
-        logs = basic.data;
-      } else if (withAmend.error) {
-        throw new Error(withAmend.error.message);
-      } else {
-        logs = withAmend.data;
-      }
-      for (const l of logs ?? []) {
-        // Call-backs are merged from callback_requests below; skip any legacy
-        // 'callback' contact-log rows so they aren't shown twice in History.
-        if (l.entry_type === "callback") continue;
-        const deleted = Boolean(l.is_deleted);
-        if (deleted && !isOwner) continue;
-        entries.push({
-          id: l.id,
-          type: l.entry_type as ContactHistoryEntry["type"],
-          body: l.body,
-          occurredAt: l.occurred_at,
-          amended: Boolean(l.amended_at),
-          deleted,
-          amendable: true,
-        });
-      }
+      if (basic.error && !isMissingTableError(basic.error)) throw new Error(basic.error.message);
+      logs = basic.data;
+    } else if (withAmend.error) {
+      throw new Error(withAmend.error.message);
+    } else {
+      logs = withAmend.data;
     }
-
-    const appointmentIds: string[] = [];
-    {
-      const { data: appts, error } = await supabaseAdmin
-        .from("appointments")
-        .select("id, starts_at, created_at")
-        .eq("session_id", data.sessionId);
-      if (error && !isMissingTableError(error)) throw new Error(error.message);
-      for (const a of appts ?? []) {
-        appointmentIds.push(a.id);
-        const when = new Date(a.starts_at).toLocaleString("en-GB", {
-          weekday: "short",
-          day: "numeric",
-          month: "short",
-          hour: "2-digit",
-          minute: "2-digit",
-          timeZone: "Europe/London",
-        });
-        entries.push({
-          id: `appt-${a.id}`,
-          type: "appointment",
-          body: `Appointment booked for ${when}`,
-          occurredAt: a.created_at,
-        });
-      }
+    for (const l of logs ?? []) {
+      // Call-backs are merged from callback_requests below; skip any legacy
+      // 'callback' contact-log rows so they aren't shown twice in History.
+      if (l.entry_type === "callback") continue;
+      if (!inSessionTenant(l.tenant_id)) continue;
+      const deleted = Boolean(l.is_deleted);
+      if (deleted && !isOwner) continue;
+      entries.push({
+        id: l.id,
+        type: l.entry_type as ContactHistoryEntry["type"],
+        body: l.body,
+        occurredAt: l.occurred_at,
+        amended: Boolean(l.amended_at),
+        deleted,
+        amendable: true,
+      });
     }
+  }
 
-    {
-      const { data: callbacks, error } = await supabaseAdmin
-        .from("callback_requests")
-        .select("id, preferred_window, created_at")
-        .eq("session_id", data.sessionId);
-      if (error && !isMissingTableError(error)) throw new Error(error.message);
-      for (const c of callbacks ?? []) {
-        entries.push({
-          id: `cb-${c.id}`,
-          type: "callback",
-          body: `Call-back requested (${c.preferred_window})`,
-          occurredAt: c.created_at,
-        });
-      }
+  const appointmentIds: string[] = [];
+  {
+    const { data: appts, error } = await supabaseAdmin
+      .from("appointments")
+      .select("id, starts_at, created_at, tenant_id")
+      .eq("session_id", data.sessionId);
+    if (error && !isMissingTableError(error)) throw new Error(error.message);
+    for (const a of appts ?? []) {
+      if (!inSessionTenant(a.tenant_id)) continue;
+      appointmentIds.push(a.id);
+      const when = new Date(a.starts_at).toLocaleString("en-GB", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Europe/London",
+      });
+      entries.push({
+        id: `appt-${a.id}`,
+        type: "appointment",
+        body: `Appointment booked for ${when}`,
+        occurredAt: a.created_at,
+      });
     }
+  }
 
-    // SMS: linked either by appointment (booking confirmations) or by the
-    // customer's phone number (interview-complete + call-back confirmations).
-    {
-      try {
-        const smsById = new Map<
-          string,
-          { id: string; direction: string; body: string | null; created_at: string }
-        >();
-        const collect = (
-          rows:
-            | Array<{ id: string; direction: string; body: string | null; created_at: string }>
-            | null,
-        ) => {
-          for (const r of rows ?? []) smsById.set(r.id, r);
-        };
+  {
+    const { data: callbacks, error } = await supabaseAdmin
+      .from("callback_requests")
+      .select("id, preferred_window, created_at, tenant_id")
+      .eq("session_id", data.sessionId);
+    if (error && !isMissingTableError(error)) throw new Error(error.message);
+    for (const c of callbacks ?? []) {
+      if (!inSessionTenant(c.tenant_id)) continue;
+      entries.push({
+        id: `cb-${c.id}`,
+        type: "callback",
+        body: `Call-back requested (${c.preferred_window})`,
+        occurredAt: c.created_at,
+      });
+    }
+  }
 
-        if (appointmentIds.length > 0) {
-          const { data: byAppt, error } = await supabaseAdmin
-            .from("sms_messages")
-            .select("id, direction, body, created_at")
-            .in("appointment_id", appointmentIds);
-          if (error && !isMissingTableError(error)) throw new Error(error.message);
-          collect(byAppt);
+  // SMS: linked either by appointment (booking confirmations) or by the
+  // customer's phone number (interview-complete + call-back confirmations).
+  {
+    try {
+      type SmsRow = {
+        id: string;
+        direction: string;
+        body: string | null;
+        created_at: string;
+        tenant_id?: string | null;
+      };
+      const smsById = new Map<string, SmsRow>();
+      const collect = (rows: SmsRow[] | null) => {
+        for (const r of rows ?? []) {
+          if (inSessionTenant(r.tenant_id)) smsById.set(r.id, r);
         }
+      };
 
-        const variants = ukPhoneVariants(customerPhone);
-        if (variants.length > 0) {
-          const byTo = await supabaseAdmin
-            .from("sms_messages")
-            .select("id, direction, body, created_at")
-            .in("to_number", variants);
-          if (byTo.error && !isMissingTableError(byTo.error)) throw new Error(byTo.error.message);
-          collect(byTo.data);
-          const byFrom = await supabaseAdmin
-            .from("sms_messages")
-            .select("id, direction, body, created_at")
-            .in("from_number", variants);
-          if (byFrom.error && !isMissingTableError(byFrom.error)) {
-            throw new Error(byFrom.error.message);
-          }
-          collect(byFrom.data);
-        }
-
-        for (const s of smsById.values()) {
-          entries.push({
-            id: `sms-${s.id}`,
-            type: "sms",
-            body: smsHistoryLabel(s.direction, s.body),
-            occurredAt: s.created_at,
-          });
-        }
-      } catch (e) {
-        console.error("merge sms history failed", e);
+      if (appointmentIds.length > 0) {
+        const { data: byAppt, error } = await supabaseAdmin
+          .from("sms_messages")
+          .select("id, direction, body, created_at, tenant_id")
+          .in("appointment_id", appointmentIds);
+        if (error && !isMissingTableError(error)) throw new Error(error.message);
+        collect(byAppt);
       }
-    }
 
-    {
-      const { data: calls, error } = await supabaseAdmin
-        .from("phone_calls")
-        .select("id, to_number, from_number, call_kind, status, started_at, duration_seconds, summary, ai_status")
-        .eq("session_id", data.sessionId);
-      if (error && !isMissingTableError(error)) throw new Error(error.message);
-      for (const c of calls ?? []) {
-        const dur =
-          c.duration_seconds != null && c.duration_seconds > 0
-            ? ` · ${Math.round(c.duration_seconds / 60)} min`
+      const variants = ukPhoneVariants(customerPhone);
+      if (variants.length > 0) {
+        const byTo = await supabaseAdmin
+          .from("sms_messages")
+          .select("id, direction, body, created_at, tenant_id")
+          .eq("tenant_id", opts.tenantId)
+          .in("to_number", variants);
+        if (byTo.error && !isMissingTableError(byTo.error)) throw new Error(byTo.error.message);
+        collect(byTo.data);
+        const byFrom = await supabaseAdmin
+          .from("sms_messages")
+          .select("id, direction, body, created_at, tenant_id")
+          .eq("tenant_id", opts.tenantId)
+          .in("from_number", variants);
+        if (byFrom.error && !isMissingTableError(byFrom.error)) {
+          throw new Error(byFrom.error.message);
+        }
+        collect(byFrom.data);
+      }
+
+      for (const s of smsById.values()) {
+        entries.push({
+          id: `sms-${s.id}`,
+          type: "sms",
+          body: smsHistoryLabel(s.direction, s.body),
+          occurredAt: s.created_at,
+        });
+      }
+    } catch (e) {
+      console.error("merge sms history failed", e);
+    }
+  }
+
+  {
+    const { data: calls, error } = await supabaseAdmin
+      .from("phone_calls")
+      .select(
+        "id, to_number, from_number, call_kind, status, started_at, duration_seconds, summary, ai_status, tenant_id",
+      )
+      .eq("session_id", data.sessionId);
+    if (error && !isMissingTableError(error)) throw new Error(error.message);
+    for (const c of calls ?? []) {
+      if (!inSessionTenant(c.tenant_id)) continue;
+      const dur =
+        c.duration_seconds != null && c.duration_seconds > 0
+          ? ` · ${Math.round(c.duration_seconds / 60)} min`
+          : "";
+      const ai =
+        c.ai_status === "complete"
+          ? " · summary ready"
+          : c.ai_status === "processing"
+            ? " · transcribing…"
             : "";
-        const ai =
-          c.ai_status === "complete"
-            ? " · summary ready"
-            : c.ai_status === "processing"
-              ? " · transcribing…"
-              : "";
-        const label =
-          c.call_kind === "inbound_voicemail"
-            ? `Voicemail from ${c.from_number ?? "customer"}`
-            : `Outbound call to ${c.to_number}`;
-        entries.push({
-          id: `call-${c.id}`,
-          type: "phone_call",
-          body: `${label}${dur}${ai}`,
-          occurredAt: c.started_at,
-          callId: c.id,
-          aiStatus: c.ai_status,
-          hasAttachment: true,
-        });
-      }
+      const label =
+        c.call_kind === "inbound_voicemail"
+          ? `Voicemail from ${c.from_number ?? "customer"}`
+          : `Outbound call to ${c.to_number}`;
+      entries.push({
+        id: `call-${c.id}`,
+        type: "phone_call",
+        body: `${label}${dur}${ai}`,
+        occurredAt: c.started_at,
+        callId: c.id,
+        aiStatus: c.ai_status,
+        hasAttachment: true,
+      });
     }
+  }
 
   entries.sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
   return entries;
@@ -3119,10 +3137,19 @@ export const listContactHistory = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<ContactHistoryEntry[]> => {
-    const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("advisor") && !roles.includes("admin")) throw new Error("Forbidden");
-    const email = (context.claims as { email?: string }).email;
-    return fetchContactHistoryEntries(data.sessionId, { userId: context.userId, email });
+    const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+    const { tenantId, view } = await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: {
+        mutate: false,
+        allocation: "none",
+        allow: (v) => v.isAdvisor || v.isMainAdmin,
+      },
+      includeDeleted: true,
+    });
+    return fetchContactHistoryEntries(data.sessionId, { tenantId, view });
   });
 
 export const getCustomerJourney = createServerFn({ method: "POST" })

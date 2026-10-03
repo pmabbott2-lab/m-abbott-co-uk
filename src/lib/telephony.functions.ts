@@ -5,6 +5,72 @@ import { normaliseUkPhone } from "@/lib/sms.server";
 import { isTwilioVoiceConfigured, getVoiceConfig } from "@/lib/voice.server";
 import { createVoiceAccessToken, isTwilioClientVoiceConfigured } from "@/lib/voice-token.server";
 import type { ContactHistoryEntry } from "@/lib/sessions.functions";
+import type { ResourceCapability } from "@/lib/tenant-assert.server";
+
+/** Call and voicemail reads: advisers and main admins of the verified acting tenant. */
+const TELEPHONY_READ: ResourceCapability = {
+  mutate: false,
+  allocation: "none",
+  allow: (v) => v.isAdvisor || v.isMainAdmin,
+};
+
+/** GDPR history export: as TELEPHONY_READ, and advisers must be allocated to the session. */
+const GDPR_EXPORT: ResourceCapability = {
+  mutate: false,
+  allocation: "adviser_must_be_allocated",
+  allow: (v) => v.isAdvisor || v.isMainAdmin,
+};
+
+const CALL_DETAIL_COLUMNS =
+  "id, tenant_id, session_id, to_number, from_number, direction, call_kind, status, started_at, ended_at, duration_seconds, summary, transcript, ai_status, advisor_id";
+
+type CallDetailRow = {
+  id: string;
+  tenant_id: string | null;
+  session_id: string | null;
+  to_number: string;
+  from_number: string | null;
+  direction: string;
+  call_kind: string;
+  status: string;
+  started_at: string;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  summary: string | null;
+  transcript: string | null;
+  ai_status: string;
+  advisor_id: string | null;
+};
+
+async function toPhoneCallDetail(row: CallDetailRow): Promise<PhoneCallDetail> {
+  const { supabaseAdminUntyped: supabaseAdmin } =
+    await import("@/integrations/supabase/client.server");
+  let advisorName: string | null = null;
+  if (row.advisor_id) {
+    const { data: prof } = await supabaseAdmin
+      .from("profiles")
+      .select("full_name")
+      .eq("id", row.advisor_id)
+      .maybeSingle();
+    advisorName = (prof as { full_name?: string | null } | null)?.full_name ?? null;
+  }
+  return {
+    id: row.id,
+    sessionId: row.session_id as string,
+    toNumber: row.to_number,
+    fromNumber: row.from_number,
+    direction: row.direction,
+    callKind: row.call_kind,
+    status: row.status,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    durationSeconds: row.duration_seconds,
+    summary: row.summary,
+    transcript: row.transcript,
+    aiStatus: row.ai_status,
+    advisorName,
+  };
+}
 
 async function staffRoles(userId: string): Promise<string[]> {
   const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
@@ -78,19 +144,26 @@ export const prepareBrowserCall = createServerFn({ method: "POST" })
     const roles = await staffRoles(context.userId);
     if (!isStaffRole(roles)) throw new Error("Forbidden");
     if (!isTwilioVoiceConfigured()) {
-      throw new Error("Voice calling is not configured. Check Twilio Voice env vars and APP_BASE_URL.");
+      throw new Error(
+        "Voice calling is not configured. Check Twilio Voice env vars and APP_BASE_URL.",
+      );
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { assertStaffCanAccessCustomer } = await import("@/lib/sessions.functions");
-    const { data: session } = await supabaseAdmin
-      .from("interview_sessions")
-      .select("customer_id, case_ref")
-      .eq("id", data.sessionId)
-      .maybeSingle();
-    if (!session) throw new Error("Session not found");
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    const { assertStaffCanAccessCustomer, staffCustomerCapability } =
+      await import("@/lib/sessions.functions");
+    const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+    const { row: session, tenantId } = await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: { ...staffCustomerCapability(true), allocation: "none" },
+    });
     if (!session.case_ref) {
-      throw new Error("Open the customer case before calling — calls are recorded against the case CRM tab.");
+      throw new Error(
+        "Open the customer case before calling — calls are recorded against the case CRM tab.",
+      );
     }
     if (session.customer_id) {
       await assertStaffCanAccessCustomer(context.userId, session.customer_id, {
@@ -104,6 +177,7 @@ export const prepareBrowserCall = createServerFn({ method: "POST" })
     const { data: callRow, error: insertErr } = await supabaseAdmin
       .from("phone_calls")
       .insert({
+        tenant_id: tenantId,
         session_id: data.sessionId,
         customer_id: session.customer_id,
         advisor_id: context.userId,
@@ -182,19 +256,39 @@ export const listSessionVoicemails = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<SessionVoicemail[]> => {
-    const roles = await staffRoles(context.userId);
-    if (!isStaffRole(roles)) throw new Error("Forbidden");
+    const { authoriseTenantResource, scopeRowsToTenant } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: TELEPHONY_READ,
+    });
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
     const { data: rows, error } = await supabaseAdmin
       .from("phone_calls")
-      .select("id, from_number, started_at, summary, ai_status")
+      .select("id, tenant_id, session_id, from_number, started_at, summary, ai_status")
       .eq("session_id", data.sessionId)
       .eq("call_kind", "inbound_voicemail")
       .order("started_at", { ascending: false });
     if (error) throw new Error(error.message);
+    const owned = await scopeRowsToTenant(
+      (rows ?? []) as Array<{
+        id: string;
+        tenant_id: string | null;
+        session_id: string | null;
+        from_number: string | null;
+        started_at: string;
+        summary: string | null;
+        ai_status: string;
+      }>,
+      tenantId,
+      { tenantOf: (r) => r.tenant_id, sessionOf: (r) => r.session_id },
+    );
 
-    return (rows ?? []).map((r) => ({
+    return owned.map((r) => ({
       id: r.id,
       fromNumber: r.from_number ?? "Unknown",
       startedAt: r.started_at,
@@ -207,117 +301,80 @@ export const getPhoneCall = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ callId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<PhoneCallDetail> => {
-    const roles = await staffRoles(context.userId);
-    if (!isStaffRole(roles)) throw new Error("Forbidden");
+    // Role in the acting tenant before the call is loaded; the call's tenant is its own
+    // tenant_id, else its session's. Unknown, other-tenant, conflicting and tenantless calls
+    // (unowned inbound voicemails) all fail with the same "Not found.".
+    const { resolveActingTenantForList, scopeRowsToTenant, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, TELEPHONY_READ);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
     const { data: row, error } = await supabaseAdmin
       .from("phone_calls")
-      .select(
-        "id, session_id, to_number, from_number, direction, call_kind, status, started_at, ended_at, duration_seconds, summary, transcript, ai_status, advisor_id",
-      )
+      .select(CALL_DETAIL_COLUMNS)
       .eq("id", data.callId)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    if (!row) throw new Error("Call not found");
-
-    let advisorName: string | null = null;
-    if (row.advisor_id) {
-      const { data: prof } = await supabaseAdmin
-        .from("profiles")
-        .select("full_name")
-        .eq("id", row.advisor_id)
-        .maybeSingle();
-      advisorName = prof?.full_name ?? null;
-    }
-
-    return {
-      id: row.id,
-      sessionId: row.session_id,
-      toNumber: row.to_number,
-      fromNumber: row.from_number,
-      direction: row.direction,
-      callKind: row.call_kind,
-      status: row.status,
-      startedAt: row.started_at,
-      endedAt: row.ended_at,
-      durationSeconds: row.duration_seconds,
-      summary: row.summary,
-      transcript: row.transcript,
-      aiStatus: row.ai_status,
-      advisorName,
-    };
+    const [owned] = row
+      ? await scopeRowsToTenant([row as CallDetailRow], tenantId, {
+          tenantOf: (r) => r.tenant_id,
+          sessionOf: (r) => r.session_id,
+        })
+      : [];
+    if (!owned) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+    return toPhoneCallDetail(owned);
   });
 
 export const getGdprHistoryExport = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<GdprHistoryExport> => {
-    const roles = await staffRoles(context.userId);
-    if (!isStaffRole(roles)) throw new Error("Forbidden");
-
-    const { fetchContactHistoryEntries } = await import("@/lib/sessions.functions");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const email = (context.claims as { email?: string }).email;
-    const entries = await fetchContactHistoryEntries(data.sessionId, {
+    // Export covers this one session in the acting tenant only; the customer's relationships
+    // with other tenants are neither read nor reported.
+    const { authoriseTenantResource, scopeRowsToTenant } =
+      await import("@/lib/tenant-assert.server");
+    const {
+      tenantId,
+      view,
+      row: session,
+    } = await authoriseTenantResource({
       userId: context.userId,
-      email,
+      kind: "session",
+      id: data.sessionId,
+      capability: GDPR_EXPORT,
     });
 
-    const { data: session } = await supabaseAdmin
-      .from("interview_sessions")
-      .select("customer_id")
-      .eq("id", data.sessionId)
-      .maybeSingle();
+    const { fetchContactHistoryEntries } = await import("@/lib/sessions.functions");
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    const entries = await fetchContactHistoryEntries(data.sessionId, { tenantId, view });
 
     let customerName = "Customer";
     let customerEmail: string | null = null;
-    if (session?.customer_id) {
+    if (session.customer_id) {
       const { data: prof } = await supabaseAdmin
         .from("profiles")
         .select("full_name, email")
         .eq("id", session.customer_id)
         .maybeSingle();
-      customerName = prof?.full_name || prof?.email || customerName;
-      customerEmail = prof?.email ?? null;
+      const p = prof as { full_name?: string | null; email?: string | null } | null;
+      customerName = p?.full_name || p?.email || customerName;
+      customerEmail = p?.email ?? null;
     }
 
     const { data: callRows } = await supabaseAdmin
       .from("phone_calls")
-      .select(
-        "id, session_id, to_number, from_number, direction, call_kind, status, started_at, ended_at, duration_seconds, summary, transcript, ai_status, advisor_id",
-      )
+      .select(CALL_DETAIL_COLUMNS)
       .eq("session_id", data.sessionId)
       .order("started_at", { ascending: false });
+    const ownedCalls = await scopeRowsToTenant((callRows ?? []) as CallDetailRow[], tenantId, {
+      tenantOf: (r) => r.tenant_id,
+      sessionOf: (r) => r.session_id,
+    });
 
     const calls: PhoneCallDetail[] = [];
-    for (const row of callRows ?? []) {
-      let advisorName: string | null = null;
-      if (row.advisor_id) {
-        const { data: prof } = await supabaseAdmin
-          .from("profiles")
-          .select("full_name")
-          .eq("id", row.advisor_id)
-          .maybeSingle();
-        advisorName = prof?.full_name ?? null;
-      }
-      calls.push({
-        id: row.id,
-        sessionId: row.session_id,
-        toNumber: row.to_number,
-        fromNumber: row.from_number,
-        direction: row.direction,
-        callKind: row.call_kind,
-        status: row.status,
-        startedAt: row.started_at,
-        endedAt: row.ended_at,
-        durationSeconds: row.duration_seconds,
-        summary: row.summary,
-        transcript: row.transcript,
-        aiStatus: row.ai_status,
-        advisorName,
-      });
-    }
+    for (const row of ownedCalls) calls.push(await toPhoneCallDetail(row));
 
     return {
       customerName,
