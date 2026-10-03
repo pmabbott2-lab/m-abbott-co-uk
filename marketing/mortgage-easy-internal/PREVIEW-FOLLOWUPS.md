@@ -48,13 +48,13 @@ CORS from the preview origin until the Hub allows it. Local calculator maths wor
 
 Cloudflare Pages ignores HTTP Range requests (always `200`, never `206`), so seeking fails and
 Safari/iOS may refuse to play MP4s served from Pages. The four homepage videos are therefore
-served from R2 bucket `mortgageeasy-media` (objects under `video/`) via its public development
-URL `https://pub-bbf66d76b2174310ab869054303b2ebb.r2.dev`. Captions (`.vtt`) stay on Pages.
+served from R2 bucket `mortgageeasy-media` (objects under `video/`) via the bucket's custom
+domain `https://media.mortgageeasy.uk` (public, not behind Cloudflare Access; range requests
+return `206`). Captions (`.vtt`) stay on Pages.
 
-Before live: `r2.dev` is rate-limited and not intended for production. Attach a custom domain to
-the bucket (e.g. a `media.` subdomain of mortgageeasy.uk), switch the `<source>` URLs in
-`index.html` to it, then disable the `r2.dev` URL. The MP4 copies under `assets/video/` are no
-longer referenced and can be removed from the published folder at that point.
+Still to do: disable the bucket's `r2.dev` public development URL once the custom domain is
+confirmed in the browser. The MP4 copies under `assets/video/` are no longer referenced and can
+be removed from the published folder.
 
 ## 4. Introducer and careers forms → Mortgage Hub (Hub side to be delivered later)
 
