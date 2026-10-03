@@ -576,6 +576,22 @@ section.alt { background: var(--cream); border-top: 1px solid var(--line); borde
 }
 .calc-disclaimer { font-size: 0.82rem; color: var(--muted); margin-bottom: 1.25rem; }
 
+.calc-title-row {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 0.5rem 1rem; margin-bottom: 0.35rem;
+}
+.calc-title-row h2 { margin-bottom: 0; }
+.base-rate-chip {
+  display: inline-flex; align-items: baseline; gap: 0.45rem;
+  padding: 0.3rem 0.75rem; border-radius: 999px;
+  background: var(--green-soft); border: 1px solid rgba(61, 158, 71, 0.35);
+  font-size: 0.78rem; color: var(--navy); white-space: nowrap;
+}
+.base-rate-chip-label { font-weight: 600; color: var(--muted); }
+.base-rate-chip-label abbr { text-decoration: none; }
+.base-rate-chip-value { font-size: 0.95rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.base-rate-chip-link { font-size: 0.72rem; font-weight: 600; color: var(--green); }
+
 .calc-field { margin-bottom: 1rem; }
 .calc-field label {
   display: block; font-size: 0.82rem; font-weight: 600; color: var(--navy); margin-bottom: 0.35rem;
@@ -602,6 +618,31 @@ section.alt { background: var(--cream); border-top: 1px solid var(--line); borde
 .enquiry-form-card .calc-row { grid-template-columns: 1fr; gap: 0 1rem; }
 @media (min-width: 640px) { .enquiry-form-card .calc-row { grid-template-columns: 1fr 1fr; } }
 .check-label { color: var(--navy); font-weight: 600; font-size: 0.9rem; }
+
+.calc-field .field-label {
+  display: block; font-size: 0.82rem; font-weight: 600; color: var(--navy); margin-bottom: 0.35rem;
+}
+.file-upload {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem;
+  padding: 0.6rem 0.75rem; border: 1px dashed var(--line); border-radius: 8px;
+}
+.file-upload.has-file { border-style: solid; border-color: var(--green); background: var(--green-soft); }
+.file-upload-input {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); border: 0;
+}
+.calc-field .file-upload .btn-upload {
+  display: inline-flex; margin: 0; padding: 0.45rem 0.9rem; font-size: 0.85rem; cursor: pointer;
+}
+.file-upload-input:focus-visible + .btn-upload { outline: 2px solid var(--green); outline-offset: 2px; }
+.file-upload-name { font-size: 0.85rem; color: var(--muted); overflow-wrap: anywhere; }
+.file-upload.has-file .file-upload-name { color: var(--navy); font-weight: 600; }
+.file-upload-clear {
+  margin-left: auto; background: none; border: 0; padding: 0.2rem 0;
+  font: inherit; font-size: 0.8rem; font-weight: 600; color: var(--muted);
+  text-decoration: underline; cursor: pointer;
+}
+.file-upload-clear:hover { color: var(--navy); }
 
 .job-card .job-meta { font-size: 0.82rem; font-weight: 600; color: var(--green); margin-bottom: 0.5rem; }
 .job-card p + p { margin-top: 0.5rem; }

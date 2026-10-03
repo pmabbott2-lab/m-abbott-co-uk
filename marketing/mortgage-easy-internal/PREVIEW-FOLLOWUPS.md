@@ -72,11 +72,17 @@ and `introducerRef`):
 
 - Introducer enquiry: `name`, `company`, `businessType`, `phone`, `email`, `message`, `consent`
 - Careers application: `role` (`self-employed-mortgage-protection` or `new-mortgage-advisor`),
-  `name`, `phone`, `email`, `cemapQualified` (true/false), `consent`
+  `name`, `phone`, `email`, `cemapQualified` (true/false), `consent`, plus an optional `cv` file
+
+When a CV is attached, the careers form posts `multipart/form-data` instead of JSON: the same fields
+as text parts (booleans as `"true"`/`"false"`) and the file in a `cv` part. The site only accepts
+PDF, DOC or DOCX up to 5MB; the Hub should enforce the same limits server-side.
 
 Hub work required:
 
 - Create both endpoints for Tenant 001, store the submission, and notify the Owner contact point.
+- Careers endpoint: accept both JSON and multipart, store the CV securely (private storage, not a
+  public URL) and attach or link it in the Owner notification.
 - Return `{ ok: true, message }` on success or `{ ok: false, error }` on failure.
 - Allow the Mortgage Easy site origin in CORS for these endpoints (see section 2).
 - Then set `data-live="true"` on each form to switch it on.

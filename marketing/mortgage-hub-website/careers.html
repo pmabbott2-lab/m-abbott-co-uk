@@ -7,7 +7,7 @@
   <title>Careers — Join MortgageEasy as a mortgage advisor</title>
   <meta name="description" content="Why join MortgageEasy? Warmer first meetings, less admin, and a modern advisor toolkit — recruitment for mortgage advisors." />
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=27" />
+  <link rel="stylesheet" href="styles.css?v=28" />
   <script src="site-config.js"></script>
 </head>
 <body>
@@ -57,6 +57,9 @@
           and gives you one place to manage contact, fact-finds, notes and journey milestones —
           so you spend time advising, not chasing information.
         </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="careers.html#vacancies" data-scroll-to="vacancies">Apply for current roles</a>
+        </div>
       </div>
     </section>
 
@@ -108,7 +111,7 @@
       </div>
     </section>
 
-    <section class="alt">
+    <section class="alt" id="vacancies">
       <div class="container">
         <div class="section-head">
           <div class="bar"></div>
@@ -174,6 +177,24 @@
               </div>
             </div>
 
+            <div class="calc-field">
+              <span class="field-label" id="apply-cv-label">CV <span class="calc-label-note">(optional · PDF or Word, up to 5MB)</span></span>
+              <div class="file-upload">
+                <input
+                  type="file"
+                  id="apply-cv"
+                  name="cv"
+                  class="file-upload-input"
+                  accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  data-max-mb="5"
+                  aria-labelledby="apply-cv-label apply-cv-button"
+                />
+                <label for="apply-cv" id="apply-cv-button" class="btn btn-outline btn-upload">Upload CV</label>
+                <span class="file-upload-name" data-file-name>No file chosen</span>
+                <button type="button" class="file-upload-clear" data-file-clear hidden>Remove</button>
+              </div>
+            </div>
+
             <label class="consent-label check-label">
               <input type="checkbox" name="cemapQualified" />
               <span>I hold CeMAP (or an equivalent mortgage advice qualification)</span>
@@ -198,7 +219,6 @@
     <section class="cta-band">
       <div class="container inner">
         <h2>Join a team that puts <span>advisors first</span></h2>
-        <a class="btn btn-primary" href="careers.html#apply" data-scroll-to="apply">Apply to join our team</a>
       </div>
     </section>
   </main>
@@ -213,6 +233,6 @@
   </footer>
   <script>document.getElementById("y").textContent = new Date().getFullYear();</script>
   <script src="site-menu.js"></script>
-  <script src="site-forms.js?v=1"></script>
+  <script src="site-forms.js?v=2"></script>
 </body>
 </html>

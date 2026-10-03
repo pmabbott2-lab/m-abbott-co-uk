@@ -7,7 +7,7 @@
   <title>Mortgage calculator — MortgageEasy</title>
   <meta name="description" content="Estimate your monthly mortgage payment and illustrative market rate by LTV, then request a callback or continue your advisor-led journey." />
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=27" />
+  <link rel="stylesheet" href="styles.css?v=28" />
   <script src="site-config.js"></script>
 </head>
 <body>
@@ -65,8 +65,16 @@
     <section class="calculator-section">
       <div class="container">
         <div class="calculator-card calculator-card-wide">
-          <h2>Mortgage calculator</h2>
-          <p class="calc-disclaimer">For illustration only — not a mortgage quote or recommendation.</p>
+          <div class="calc-title-row">
+            <h2>Mortgage calculator</h2>
+            <div id="rates" class="base-rate-chip" role="group" aria-label="Bank of England Bank Rate">
+              <span class="base-rate-chip-label"><abbr title="Bank of England">BoE</abbr> Bank Rate</span>
+              <strong class="base-rate-chip-value" id="rate-base-value">—</strong>
+              <span id="rate-base-source" hidden></span>
+              <a class="base-rate-chip-link" id="rate-base-source-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Source</a>
+            </div>
+          </div>
+          <p class="calc-disclaimer">For illustration only — not a mortgage quote or recommendation. Bank of England Bank Rate shown for reference only.</p>
 
           <div class="calc-mode-toggle" role="group" aria-label="Mortgage type">
             <button type="button" class="calc-mode-btn is-active" data-mode="purchase" id="mode-purchase">Purchase</button>
@@ -141,28 +149,6 @@
             <button type="button" class="btn btn-outline" id="scroll-journey">Continue journey</button>
           </div>
         </div>
-
-        <section id="rates" class="rates-strip rates-strip-compact rates-below-calc" aria-labelledby="rates-heading">
-          <div class="rates-head">
-            <div>
-              <h2 id="rates-heading">Bank of England Bank Rate</h2>
-              <p class="rates-sub" id="rates-as-of">Reference rate — updated when you load this page.</p>
-            </div>
-            <p class="rates-status" id="rates-status"></p>
-          </div>
-          <div class="rates-grid rates-grid-single">
-            <article class="rate-card rate-card-base">
-              <span class="rate-card-tag">Reference</span>
-              <p class="rate-card-label" id="rate-base-label">Bank of England Bank Rate</p>
-              <p class="rate-card-value" id="rate-base-value">—</p>
-              <p class="rate-source-micro" id="rate-base-source"></p>
-              <a class="rate-source-link" id="rate-base-source-link" href="#" target="_blank" rel="noopener noreferrer" hidden>View source</a>
-            </article>
-          </div>
-          <p class="rates-disclaimer" id="rates-disclaimer">
-            Bank of England Bank Rate for reference only — not a mortgage quote or recommendation.
-          </p>
-        </section>
 
         <div class="calculator-grid calculator-grid-below">
           <div id="callback-section" class="callback-card">
