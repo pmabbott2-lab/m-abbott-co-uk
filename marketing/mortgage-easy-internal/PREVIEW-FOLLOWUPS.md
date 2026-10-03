@@ -56,7 +56,35 @@ the bucket (e.g. a `media.` subdomain of mortgageeasy.uk), switch the `<source>`
 `index.html` to it, then disable the `r2.dev` URL. The MP4 copies under `assets/video/` are no
 longer referenced and can be removed from the published folder at that point.
 
-## 4. Pre-live compliance/content review (required before mortgageeasy.uk)
+## 4. Introducer and careers forms → Mortgage Hub (Hub side to be delivered later)
+
+The site now has two simple fill-out forms. The website templates are complete; the Hub side is
+not built yet, so both forms run in preview mode (`data-live="false"`): they validate and show a
+"not connected yet — nothing has been sent" message, and post nothing.
+
+| Form | Page | Planned Hub endpoint | Destination in Hub |
+| --- | --- | --- | --- |
+| Introducer enquiry | `partnerships.html#introducer-enquiry` | `POST /api/mortgageeasy/introducer-enquiry` | Owner contact point (partnerships) |
+| Careers application | `careers.html#apply` | `POST /api/mortgageeasy/careers-application` | Owner contact point (recruitment) |
+
+JSON payload (posted by `site-forms.js`; every payload also carries `form`, `tenant: "mortgageeasy"`
+and `introducerRef`):
+
+- Introducer enquiry: `name`, `company`, `businessType`, `phone`, `email`, `message`, `consent`
+- Careers application: `role` (`self-employed-mortgage-protection` or `new-mortgage-advisor`),
+  `name`, `phone`, `email`, `cemapQualified` (true/false), `consent`
+
+Hub work required:
+
+- Create both endpoints for Tenant 001, store the submission, and notify the Owner contact point.
+- Return `{ ok: true, message }` on success or `{ ok: false, error }` on failure.
+- Allow the Mortgage Easy site origin in CORS for these endpoints (see section 2).
+- Then set `data-live="true"` on each form to switch it on.
+
+Careers roles are also listed on the page: Self-employed Mortgage & Protection Advisor (minimum two
+years' standard residential mortgage advice) and New Mortgage Advisor (CeMAP qualified, new to role).
+
+## 5. Pre-live compliance/content review (required before mortgageeasy.uk)
 
 Legal entity: Mortgage Easy is a trading name of Mortgage Easy Group Limited, registered in
 England and Wales, company number 17490711. FCA Firm Reference Number: pending.
@@ -69,8 +97,7 @@ Information still to be supplied:
 - FCA Firm Reference Number
 - Service, product range and fee disclosure details
 - Replacement of placeholder/mockup adviser content
-- Careers email (currently `careers@mortgageeasy.example`)
-- Partnerships email (currently `partnerships@mortgageeasy.example`)
+- Partnerships email in the `partnerships.html` footer (currently `partnerships@mortgageeasy.example`)
 
 Existing wording flagged for review (left unchanged):
 

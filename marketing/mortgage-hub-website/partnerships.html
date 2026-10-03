@@ -7,7 +7,7 @@
   <title>Introducer partnerships — MortgageEasy</title>
   <meta name="description" content="Partner with MortgageEasy. Share referral links, book for customers, and track journey progress — professional introducer programme." />
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=24" />
+  <link rel="stylesheet" href="styles.css?v=27" />
   <script src="site-config.js"></script>
 </head>
 <body>
@@ -111,10 +111,70 @@
       </div>
     </section>
 
+    <section class="alt" id="introducer-enquiry">
+      <div class="container">
+        <div class="callback-card enquiry-form-card">
+          <h2>Become an introducer</h2>
+          <p>Tell us a little about you and your business and our partnerships team will be in touch to set up your access.</p>
+
+          <form class="callback-form" data-form-type="introducer-enquiry" data-hub-endpoint="/api/mortgageeasy/introducer-enquiry" data-live="false" novalidate>
+            <div class="calc-row">
+              <div class="calc-field">
+                <label for="intro-name">Your name <span class="req">*</span></label>
+                <input type="text" id="intro-name" name="name" required autocomplete="name" data-error="Please enter your name." />
+              </div>
+              <div class="calc-field">
+                <label for="intro-company">Company name <span class="req">*</span></label>
+                <input type="text" id="intro-company" name="company" required autocomplete="organization" data-error="Please enter your company name." />
+              </div>
+            </div>
+            <div class="calc-field">
+              <label for="intro-type">Type of business <span class="req">*</span></label>
+              <select id="intro-type" name="businessType" required data-error="Please choose your type of business.">
+                <option value="">Choose…</option>
+                <option value="estate-agent">Estate agent</option>
+                <option value="solicitor">Solicitor / conveyancer</option>
+                <option value="financial-planner">Financial planner / IFA</option>
+                <option value="accountant">Accountant</option>
+                <option value="housebuilder">Housebuilder / developer</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="calc-row">
+              <div class="calc-field">
+                <label for="intro-phone">Telephone <span class="req">*</span></label>
+                <input type="tel" id="intro-phone" name="phone" required autocomplete="tel" data-error="Please enter your telephone number." />
+              </div>
+              <div class="calc-field">
+                <label for="intro-email">Email <span class="req">*</span></label>
+                <input type="email" id="intro-email" name="email" required autocomplete="email" data-error="Please enter a valid email address." />
+              </div>
+            </div>
+            <div class="calc-field">
+              <label for="intro-message">Anything else we should know? <span class="calc-label-note">(optional)</span></label>
+              <textarea id="intro-message" name="message" rows="4"></textarea>
+            </div>
+
+            <label class="consent-label">
+              <input type="checkbox" name="consent" required data-error="Please confirm you're happy for us to contact you." />
+              <span>
+                I agree that MortgageEasy may store these details and contact me about an introducer arrangement, in line with the
+                <a href="disclosures.html">privacy policy</a>.
+              </span>
+            </label>
+
+            <p class="form-message" hidden></p>
+
+            <button type="submit" class="btn btn-primary btn-full">Send enquiry</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
     <section class="cta-band">
       <div class="container inner">
         <h2>Ideal for estate agents, solicitors, <span>financial planners &amp; referrers</span></h2>
-        <a class="btn btn-primary" href="mailto:partnerships@mortgageeasy.example">Ask about introducer access</a>
+        <a class="btn btn-primary" href="partnerships.html#introducer-enquiry" data-scroll-to="introducer-enquiry">Ask about introducer access</a>
       </div>
     </section>
   </main>
@@ -134,5 +194,6 @@
   </footer>
   <script>document.getElementById("y").textContent = new Date().getFullYear();</script>
   <script src="site-menu.js"></script>
+  <script src="site-forms.js?v=1"></script>
 </body>
 </html>

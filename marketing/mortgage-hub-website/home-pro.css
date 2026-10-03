@@ -76,6 +76,7 @@
 .about-prose { max-width: 44rem; font-size: 0.95rem; color: var(--muted); line-height: 1.65; }
 .about-prose p + p { margin-top: 1rem; }
 .about-team .about-role { font-size: 0.78rem; font-weight: 600; color: var(--green); margin-bottom: 0.35rem; }
+.about-team p:not(.about-role) + p { margin-top: 0.6rem; }
 @media (min-width: 900px) { .card-grid.cols-3 { grid-template-columns: repeat(3, 1fr); } }
 
 #first-time-buyers,

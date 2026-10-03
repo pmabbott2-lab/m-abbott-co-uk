@@ -7,7 +7,7 @@
   <title>Careers — Join MortgageEasy as a mortgage advisor</title>
   <meta name="description" content="Why join MortgageEasy? Warmer first meetings, less admin, and a modern advisor toolkit — recruitment for mortgage advisors." />
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=24" />
+  <link rel="stylesheet" href="styles.css?v=27" />
   <script src="site-config.js"></script>
 </head>
 <body>
@@ -113,21 +113,84 @@
         <div class="section-head">
           <div class="bar"></div>
           <h2>Current opportunities</h2>
-          <p>Mockup listings — replace with live roles and application process.</p>
+          <p>We're recruiting for two roles. Apply below with a few basic details and we'll be in touch.</p>
         </div>
         <div class="card-grid cols-2">
           <article class="card job-card">
-            <h3>Mortgage Advisor (CeMAP qualified)</h3>
-            <p>Remote/hybrid · Full-time · UK</p>
-            <p style="margin-top:0.5rem;">Advise residential customers with pre-qualified fact-finds and a modern CRM-style workspace.</p>
-            <a class="btn btn-outline" style="margin-top:1rem;" href="mailto:careers@mortgageeasy.example?subject=Mortgage%20Advisor%20application">Apply now</a>
+            <h3>Self-employed Mortgage &amp; Protection Advisor</h3>
+            <p class="job-meta">Self-employed · UK · Remote/hybrid</p>
+            <p>For established advisors with at least two years' experience advising on standard residential mortgages, who also want to look after their customers' protection needs.</p>
+            <ul>
+              <li>CeMAP (or equivalent) qualified, with competent advisor status</li>
+              <li>Minimum two years' experience in standard residential mortgage advice</li>
+              <li>Mortgage and protection advice for prepared, warmer customers</li>
+              <li>Introducer referrals and the full Mortgage Hub toolkit</li>
+            </ul>
+            <a class="btn btn-outline" href="careers.html#apply" data-scroll-to="apply" data-apply-role="self-employed-mortgage-protection">Apply now</a>
           </article>
           <article class="card job-card">
-            <h3>Senior Mortgage Advisor</h3>
-            <p>Remote/hybrid · Full-time · UK</p>
-            <p style="margin-top:0.5rem;">Lead complex cases, mentor advisers and help shape our customer journey product.</p>
-            <a class="btn btn-outline" style="margin-top:1rem;" href="mailto:careers@mortgageeasy.example?subject=Senior%20Advisor%20application">Apply now</a>
+            <h3>New Mortgage Advisor (CeMAP qualified)</h3>
+            <p class="job-meta">New to role · UK · Remote/hybrid</p>
+            <p>For newly CeMAP-qualified candidates looking to take their first steps into mortgage advice with a supportive, modern firm.</p>
+            <ul>
+              <li>CeMAP (or equivalent) qualification achieved</li>
+              <li>No previous advisor experience required</li>
+              <li>Support and supervision as you work towards competent advisor status</li>
+              <li>Learn with prepared customers and a modern advisor platform</li>
+            </ul>
+            <a class="btn btn-outline" href="careers.html#apply" data-scroll-to="apply" data-apply-role="new-mortgage-advisor">Apply now</a>
           </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="apply">
+      <div class="container">
+        <div class="callback-card enquiry-form-card">
+          <h2>Apply to join MortgageEasy</h2>
+          <p>Leave your details and our team will contact you about the role.</p>
+
+          <form class="callback-form" data-form-type="careers-application" data-hub-endpoint="/api/mortgageeasy/careers-application" data-live="false" novalidate>
+            <div class="calc-field">
+              <label for="apply-role">Role <span class="req">*</span></label>
+              <select id="apply-role" name="role" required data-error="Please choose the role you're applying for.">
+                <option value="">Choose a role…</option>
+                <option value="self-employed-mortgage-protection">Self-employed Mortgage &amp; Protection Advisor</option>
+                <option value="new-mortgage-advisor">New Mortgage Advisor (CeMAP qualified)</option>
+              </select>
+            </div>
+            <div class="calc-field">
+              <label for="apply-name">Full name <span class="req">*</span></label>
+              <input type="text" id="apply-name" name="name" required autocomplete="name" data-error="Please enter your full name." />
+            </div>
+            <div class="calc-row">
+              <div class="calc-field">
+                <label for="apply-phone">Telephone <span class="req">*</span></label>
+                <input type="tel" id="apply-phone" name="phone" required autocomplete="tel" placeholder="07…" data-error="Please enter your telephone number." />
+              </div>
+              <div class="calc-field">
+                <label for="apply-email">Email <span class="req">*</span></label>
+                <input type="email" id="apply-email" name="email" required autocomplete="email" data-error="Please enter a valid email address." />
+              </div>
+            </div>
+
+            <label class="consent-label check-label">
+              <input type="checkbox" name="cemapQualified" />
+              <span>I hold CeMAP (or an equivalent mortgage advice qualification)</span>
+            </label>
+
+            <label class="consent-label">
+              <input type="checkbox" name="consent" required data-error="Please confirm you're happy for us to store your details." />
+              <span>
+                I agree that MortgageEasy may store my details and contact me about this application, in line with the
+                <a href="disclosures.html">privacy policy</a>.
+              </span>
+            </label>
+
+            <p class="form-message" hidden></p>
+
+            <button type="submit" class="btn btn-primary btn-full">Send application</button>
+          </form>
         </div>
       </div>
     </section>
@@ -135,7 +198,7 @@
     <section class="cta-band">
       <div class="container inner">
         <h2>Join a team that puts <span>advisors first</span></h2>
-        <a class="btn btn-primary" href="mailto:careers@mortgageeasy.example">Apply to join our team</a>
+        <a class="btn btn-primary" href="careers.html#apply" data-scroll-to="apply">Apply to join our team</a>
       </div>
     </section>
   </main>
@@ -150,5 +213,6 @@
   </footer>
   <script>document.getElementById("y").textContent = new Date().getFullYear();</script>
   <script src="site-menu.js"></script>
+  <script src="site-forms.js?v=1"></script>
 </body>
 </html>
