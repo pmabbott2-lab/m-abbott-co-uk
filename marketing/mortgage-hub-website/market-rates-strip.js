@@ -57,20 +57,32 @@
     setText("rates-disclaimer", data.disclaimer);
   }
 
-  function loadMarketRatesStrip() {
-    var status = document.getElementById("rates-status");
-    var api = resolveHubApiOrigin() + "/api/calculator/market-rates";
-
-    if (status) status.textContent = "Loading Bank Rate…";
-
-    fetch(api, { method: "GET" })
+  function fetchRates(url) {
+    return fetch(url, { method: "GET" })
       .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
         return res.json();
       })
       .then(function (data) {
-        if (!data || !data.ok) {
+        if (!data || !data.ok || !data.baseRate) {
           throw new Error(data && data.error ? data.error : "Could not load rates");
         }
+        return data;
+      });
+  }
+
+  function loadMarketRatesStrip() {
+    var status = document.getElementById("rates-status");
+    var hubApi = resolveHubApiOrigin() + "/api/calculator/market-rates";
+
+    if (status) status.textContent = "Loading Bank Rate…";
+
+    // Same-origin Pages Function first (the Hub does not send CORS headers for the site origin).
+    fetchRates("/api/bank-rate")
+      .catch(function () {
+        return fetchRates(hubApi);
+      })
+      .then(function (data) {
         applyBaseRate(data);
         if (status) status.textContent = "Official Bank of England Bank Rate.";
       })
