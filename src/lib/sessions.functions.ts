@@ -1373,16 +1373,17 @@ export const listUsersWithRoles = createServerFn({ method: "GET" })
     const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
     const view = await resolveActingTenantRole(context.userId);
     if (!view.isAdvisor && !view.isMainAdmin) throw new Error("Forbidden");
+    if (!view.tenantId) throw new Error("Forbidden");
+    const tenantId = view.tenantId;
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    let memberQuery = supabaseAdmin
+    const { data: memberRows, error: memberErr } = await supabaseAdmin
       .from("tenant_memberships")
       .select("user_id, role")
-      .eq("active", true);
-    if (view.tenantId) memberQuery = memberQuery.eq("tenant_id", view.tenantId);
-    const { data: memberRows, error: memberErr } = await memberQuery;
+      .eq("active", true)
+      .eq("tenant_id", tenantId);
     if (memberErr) throw new Error(memberErr.message);
     const memberIds = [...new Set((memberRows ?? []).map((r: { user_id: string }) => r.user_id))];
     const advisorIds = new Set(
@@ -1413,22 +1414,33 @@ export const listUsersWithRoles = createServerFn({ method: "GET" })
       for (const c of codes ?? []) advisorCodeMap.set(c.user_id, c.code);
     }
 
-    // Introducer company codes (degrade gracefully if the column doesn't exist).
-    const companyMap = new Map<string, { code: string | null; name: string | null }>();
+    // This tenant's introducer registrations only (degrade gracefully if the
+    // company_code column doesn't exist).
+    const companyMap = new Map<
+      string,
+      { introducerId: string; code: string | null; name: string | null }
+    >();
     {
       const withCode = await supabaseAdmin
         .from("introducers")
-        .select("user_id, company_code, company_name");
+        .select("id, user_id, company_code, company_name")
+        .eq("tenant_id", tenantId);
       if (withCode.error && !isMissingTableError(withCode.error)) {
         throw new Error(withCode.error.message);
       }
       const rows = withCode.error
-        ? ((await supabaseAdmin.from("introducers").select("user_id, company_name")).data ?? []).map(
-            (r) => ({ ...r, company_code: null as string | null }),
-          )
+        ? (
+            (
+              await supabaseAdmin
+                .from("introducers")
+                .select("id, user_id, company_name")
+                .eq("tenant_id", tenantId)
+            ).data ?? []
+          ).map((r) => ({ ...r, company_code: null as string | null }))
         : withCode.data ?? [];
       for (const r of rows) {
         companyMap.set(r.user_id, {
+          introducerId: r.id,
           code: (r as { company_code?: string | null }).company_code ?? null,
           name: r.company_name ?? null,
         });
@@ -1443,6 +1455,7 @@ export const listUsersWithRoles = createServerFn({ method: "GET" })
       isIntroducer: introducerIds.has(p.id),
       isSelf: p.id === context.userId,
       advisorCode: advisorCodeMap.get(p.id) ?? null,
+      introducerId: companyMap.get(p.id)?.introducerId ?? null,
       companyCode: companyMap.get(p.id)?.code ?? null,
       companyName: companyMap.get(p.id)?.name ?? null,
     }));
@@ -1617,6 +1630,12 @@ export const setIntroducerRole = createServerFn({ method: "POST" })
       data.userId,
       "introducer",
     );
+    const { requireManagedIntroducerRegistration } = await import("@/lib/introducer-admin.server");
+    const reg = await requireManagedIntroducerRegistration({
+      actingUserId: context.userId,
+      introducerUserId: data.userId,
+    });
+    if (reg.tenantId !== tenantId) throw new Error("Forbidden");
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
@@ -3534,58 +3553,88 @@ export const restoreAdvisor = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-// Soft-delete (bin) an introducer: remove their `introducer` role, deactivate
-// their referral links (active=false) and stamp deleted_at so a binned
-// introducer is distinguishable from a merely-inactive one. Data is preserved.
+// The target is the introducer registration in the caller's acting tenant; the
+// ids only identify it. Either id may be given (both must match the same row).
+const managedIntroducerTargetSchema = z
+  .object({ userId: z.string().uuid().optional(), introducerId: z.string().uuid().optional() })
+  .refine((d) => Boolean(d.userId || d.introducerId), { message: "Not found." });
+
+// Soft-delete (bin) an introducer registration: deactivate this tenant's
+// registration (active=false) and stamp deleted_at so a binned introducer is
+// distinguishable from a merely-inactive one. Data is preserved. The global
+// `introducer` role is only removed when no other tenant still relies on it.
 export const softDeleteIntroducer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ userId: z.string().uuid() }).parse(d))
+  .inputValidator((d: unknown) => managedIntroducerTargetSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await requireAdmin(context.userId);
+    const { requireManagedIntroducerRegistration, introducerStandingOutsideTenant } =
+      await import("@/lib/introducer-admin.server");
+    const reg = await requireManagedIntroducerRegistration({
+      actingUserId: context.userId,
+      introducerId: data.introducerId,
+      introducerUserId: data.userId,
+    });
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const { error } = await supabaseAdmin
-      .from("user_roles")
-      .delete()
-      .eq("user_id", data.userId)
-      .eq("role", "introducer");
-    if (error) throw new Error(error.message);
     // Deactivate + stamp deleted_at. Fall back to active-only if the column
     // isn't present yet (pre-migration graceful degradation).
     const withDeleted = await supabaseAdmin
       .from("introducers")
       .update({ active: false, deleted_at: new Date().toISOString() })
-      .eq("user_id", data.userId);
+      .eq("id", reg.id)
+      .eq("tenant_id", reg.tenantId);
     if (withDeleted.error && isMissingTableError(withDeleted.error)) {
-      await supabaseAdmin.from("introducers").update({ active: false }).eq("user_id", data.userId);
+      await supabaseAdmin
+        .from("introducers")
+        .update({ active: false })
+        .eq("id", reg.id)
+        .eq("tenant_id", reg.tenantId);
     } else if (withDeleted.error) {
       throw new Error(withDeleted.error.message);
+    }
+    if (!(await introducerStandingOutsideTenant(reg.userId, reg.tenantId))) {
+      const { error } = await supabaseAdmin
+        .from("user_roles")
+        .delete()
+        .eq("user_id", reg.userId)
+        .eq("role", "introducer");
+      if (error) throw new Error(error.message);
     }
     return { ok: true };
   });
 
-// Restore a binned introducer: re-grant the `introducer` role, reactivate their
-// profile and clear deleted_at. The existing company linkage (company_code) is
-// preserved unchanged.
+// Restore a binned introducer registration: re-grant the `introducer` role,
+// reactivate this tenant's registration and clear deleted_at. The existing
+// company linkage (company_code) is preserved unchanged.
 export const restoreIntroducer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ userId: z.string().uuid() }).parse(d))
+  .inputValidator((d: unknown) => managedIntroducerTargetSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await requireAdmin(context.userId);
+    const { requireManagedIntroducerRegistration } = await import("@/lib/introducer-admin.server");
+    const reg = await requireManagedIntroducerRegistration({
+      actingUserId: context.userId,
+      introducerId: data.introducerId,
+      introducerUserId: data.userId,
+    });
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
     const { error } = await supabaseAdmin
       .from("user_roles")
-      .upsert({ user_id: data.userId, role: "introducer" }, { onConflict: "user_id,role" });
+      .upsert({ user_id: reg.userId, role: "introducer" }, { onConflict: "user_id,role" });
     if (error) throw new Error(error.message);
     const withDeleted = await supabaseAdmin
       .from("introducers")
       .update({ active: true, deleted_at: null })
-      .eq("user_id", data.userId);
+      .eq("id", reg.id)
+      .eq("tenant_id", reg.tenantId);
     if (withDeleted.error && isMissingTableError(withDeleted.error)) {
-      await supabaseAdmin.from("introducers").update({ active: true }).eq("user_id", data.userId);
+      await supabaseAdmin
+        .from("introducers")
+        .update({ active: true })
+        .eq("id", reg.id)
+        .eq("tenant_id", reg.tenantId);
     } else if (withDeleted.error) {
       throw new Error(withDeleted.error.message);
     }
@@ -3601,6 +3650,7 @@ type BinnedAdvisor = {
 };
 type BinnedIntroducer = {
   id: string;
+  introducerId: string;
   full_name: string | null;
   email: string | null;
   companyCode: string | null;
@@ -3647,7 +3697,7 @@ export const listBinnedStaff = createServerFn({ method: "GET" })
     // Binned introducers: introducers with deleted_at set.
     const introRes = await supabaseAdmin
       .from("introducers")
-      .select("user_id, company_code, company_name, deleted_at")
+      .select("id, user_id, company_code, company_name, deleted_at")
       .eq("tenant_id", tenantId)
       .not("deleted_at", "is", null);
     if (introRes.error && !isMissingTableError(introRes.error)) {
@@ -3660,6 +3710,7 @@ export const listBinnedStaff = createServerFn({ method: "GET" })
       deleted_at: string | null;
     }>;
     const introRows = (introRes.data ?? []) as Array<{
+      id: string;
       user_id: string;
       company_code: string | null;
       company_name: string | null;
@@ -3694,6 +3745,7 @@ export const listBinnedStaff = createServerFn({ method: "GET" })
       const prof = profileMap.get(r.user_id);
       binnedIntroducers.push({
         id: r.user_id,
+        introducerId: r.id,
         full_name: prof?.full_name ?? null,
         email: prof?.email ?? null,
         companyCode: r.company_code,
@@ -3868,11 +3920,14 @@ export const exportOwnerCustomerReport = createServerFn({ method: "GET" })
         const { data: intros } = await supabaseAdmin
           .from("introducers")
           .select("id, company_name")
+          .eq("tenant_id", view.tenantId)
           .in("id", introIds);
         for (const i of intros ?? []) introNameById.set(i.id, i.company_name ?? "Introducer");
       }
+      // Another tenant's introducer is never named (nor hinted at) in this tenant's report.
       for (const l of links ?? []) {
-        introNameByCustomer.set(l.customer_id, introNameById.get(l.introducer_id) ?? "Introducer");
+        const name = introNameById.get(l.introducer_id);
+        if (name) introNameByCustomer.set(l.customer_id, name);
       }
     }
 

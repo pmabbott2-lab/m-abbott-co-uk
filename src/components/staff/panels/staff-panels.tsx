@@ -1372,7 +1372,7 @@ export function IntroducerAccessCard() {
   });
 
   const bin = useMutation({
-    mutationFn: (vars: { userId: string }) => binFn({ data: vars }),
+    mutationFn: (vars: { userId: string; introducerId?: string }) => binFn({ data: vars }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["users-with-roles"] });
       qc.invalidateQueries({ queryKey: ["is-introducer"] });
@@ -1458,7 +1458,7 @@ export function IntroducerAccessCard() {
                   title="Move introducer to bin?"
                   description="This removes their introducer access and deactivates their referral links, but keeps their company linkage and lead data. You can restore them any time from Recently deleted. Their account is not deleted."
                   pending={bin.isPending && bin.variables?.userId === u.id}
-                  onConfirm={() => bin.mutate({ userId: u.id })}
+                  onConfirm={() => bin.mutate({ userId: u.id, introducerId: u.introducerId ?? undefined })}
                 />
               </>
             ) : (
@@ -1505,7 +1505,8 @@ export function RecentlyDeletedCard() {
   });
 
   const restoreIntro = useMutation({
-    mutationFn: (vars: { userId: string }) => restoreIntroducerFn({ data: vars }),
+    mutationFn: (vars: { userId: string; introducerId: string }) =>
+      restoreIntroducerFn({ data: vars }),
     onSuccess: () => {
       invalidateAll();
       toast.success("Introducer restored");
@@ -1649,7 +1650,7 @@ export function RecentlyDeletedCard() {
               variant="outline"
               size="sm"
               disabled={restoreIntro.isPending && restoreIntro.variables?.userId === i.id}
-              onClick={() => restoreIntro.mutate({ userId: i.id })}
+              onClick={() => restoreIntro.mutate({ userId: i.id, introducerId: i.introducerId })}
             >
               <RotateCcw className="w-4 h-4 mr-1.5" />
               Restore

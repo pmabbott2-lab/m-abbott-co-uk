@@ -163,6 +163,8 @@ export const checkIsIntroducer = createServerFn({ method: "GET" })
 
 export type IntroducerListItem = {
   userId: string;
+  /** This tenant's registration; null when the member has none here. */
+  introducerId: string | null;
   full_name: string | null;
   email: string | null;
   company_name: string | null;
@@ -170,7 +172,7 @@ export type IntroducerListItem = {
   company_code: string | null;
 };
 
-/** Owner/supervisor — pick an introducer for Introducer view. */
+/** Owner/supervisor — pick an introducer for Introducer view (acting tenant's registrations only). */
 export const listIntroducersForAdmin = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -181,7 +183,8 @@ export const listIntroducersForAdmin = createServerFn({ method: "GET" })
     if (!view.isOwner && !view.isSupervisor) throw new Error("Forbidden");
     if (!view.tenantId) return [] as IntroducerListItem[];
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
     const userIds = await listTenantMemberUserIds(view.tenantId, ["introducer"]);
     if (userIds.length === 0) return [] as IntroducerListItem[];
 
@@ -189,22 +192,36 @@ export const listIntroducersForAdmin = createServerFn({ method: "GET" })
       supabaseAdmin.from("profiles").select("id, full_name, email").in("id", userIds),
       supabaseAdmin
         .from("introducers")
-        .select("user_id, company_name, slug, company_code")
+        .select("id, user_id, company_name, slug, company_code")
+        .eq("tenant_id", view.tenantId)
         .in("user_id", userIds),
     ]);
 
-    const introByUser = new Map((introducers ?? []).map((i) => [i.user_id, i]));
+    const introRows = (introducers ?? []) as Array<{
+      id: string;
+      user_id: string;
+      company_name: string | null;
+      slug: string | null;
+      company_code: string | null;
+    }>;
+    const profileRows = (profiles ?? []) as Array<{
+      id: string;
+      full_name: string | null;
+      email: string | null;
+    }>;
+    const introByUser = new Map(introRows.map((i) => [i.user_id, i]));
 
-    return (profiles ?? [])
-      .map((p) => {
+    return profileRows
+      .map((p): IntroducerListItem => {
         const intro = introByUser.get(p.id);
         return {
           userId: p.id,
+          introducerId: intro?.id ?? null,
           full_name: p.full_name,
           email: p.email,
           company_name: intro?.company_name ?? p.full_name,
           slug: intro?.slug ?? null,
-          company_code: (intro as { company_code?: string | null } | undefined)?.company_code ?? null,
+          company_code: intro?.company_code ?? null,
         };
       })
       .sort((a, b) =>

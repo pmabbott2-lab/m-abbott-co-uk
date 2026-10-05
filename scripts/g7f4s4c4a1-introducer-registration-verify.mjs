@@ -1136,7 +1136,6 @@ resetDb();
     "uniqueSlug",
     "resolveReferralSlug",
     "checkIsIntroducer",
-    "listIntroducersForAdmin",
     "activeTenantSlugForIntroducer",
     "captureIntroducerCalculatorLead",
   ]);
