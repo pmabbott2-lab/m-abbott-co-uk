@@ -1155,9 +1155,11 @@ resetDb();
   );
   const s3b = "scripts/g7f4s3b-staff-invite-binding-verify.mjs";
   ok(
-    "A1-18 S3B test 27 unchanged (S3B verifier untouched; cross-tenant introducer invite still fails closed there)",
+    "A1-18 S3B test 27 unchanged (S3B verifier untouched; second-tenant introducer invite creates an independent registration there)",
     git("status", "--porcelain", "--", s3b).trim() === "" &&
-      read(s3b).includes('"27 cross-tenant introducer invite fails closed"'),
+      read(s3b).includes(
+        '"27 second-tenant introducer invite creates an independent Tenant B registration (A byte-identical; duplicate new-company refused; join reuses B)"',
+      ),
   );
   ok(
     "A1-19 no migration created or modified",

@@ -3,7 +3,7 @@
  *
  * The real server-function validators and handlers run against an in-process PostgreSQL
  * (PGlite, WASM) that holds a stub of the staging schema with the G7F-4S3B migration applied
- * verbatim. A fake PostgREST/Auth Admin layer on a non-routable host translates supabase-js
+ * verbatim (and the G7F-4S4C4-A0 and -A2 introducer migrations on top). A fake PostgREST/Auth Admin layer on a non-routable host translates supabase-js
  * calls into SQL. Synthetic fixtures only: no network, no staging, no production, no real user,
  * no real token. Raw invite tokens stay in this process and are never printed.
  *
@@ -194,6 +194,10 @@ create table public.introducers (
   company_code text check (company_code is null or company_code ~ '^[0-9]{4}$'),
   tenant_id uuid, deleted_at timestamptz, created_at timestamptz not null default now()
 );
+create table public.commission_rates (
+  id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users(id),
+  role text not null, percentage numeric(6,3) not null, tenant_id uuid, unique (user_id, role)
+);
 create table public.platform_roles (
   id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users(id),
   role public.platform_role not null, created_by uuid, created_at timestamptz not null default now(),
@@ -346,10 +350,18 @@ const MIGRATION_REL =
 const migration = readFileSync(resolve(root, MIGRATION_REL), "utf8");
 const mig1 = await outcome(() => pg.exec(migration));
 const mig2 = await outcome(() => pg.exec(migration));
+// G7F-4S4C4-A0 (introducer self-write grants) and G7F-4S4C4-A2 (tenant-specific introducer
+// registrations, replaces accept_staff_invite) on top, as on staging.
+const A0_MIGRATION_REL =
+  "supabase/migrations/20261003092928_gate_g7f4s4c4a0_introducer_self_write_boundary.sql";
+const A2_MIGRATION_REL =
+  "supabase/migrations/20261005100000_gate_g7f4s4c4a2_tenant_introducer_registrations.sql";
+const migA0 = await outcome(() => pg.exec(readFileSync(resolve(root, A0_MIGRATION_REL), "utf8")));
+const migA2 = await outcome(() => pg.exec(readFileSync(resolve(root, A2_MIGRATION_REL), "utf8")));
 ok(
-  "00b migration applies cleanly and is re-runnable",
-  mig1.ok && mig2.ok,
-  mig1.message ?? mig2.message ?? "",
+  "00b migration applies cleanly and is re-runnable (G7F-4S4C4-A0 and -A2 applied once on top)",
+  mig1.ok && mig2.ok && migA0.ok && migA2.ok,
+  mig1.message ?? mig2.message ?? migA0.message ?? migA2.message ?? "",
 );
 const cols = (
   await sql(
@@ -1684,10 +1696,6 @@ function okD(name, cond, detail = "") {
     introducer_id uuid not null references public.introducers(id),
     source text, created_at timestamptz not null default now()
   );
-  create table public.commission_rates (
-    id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users(id),
-    role text not null, percentage numeric(6,3) not null, unique (user_id, role)
-  );
   create table public.appointments (
     id uuid primary key default gen_random_uuid(), advisor_id uuid not null references auth.users(id),
     introducer_id uuid references public.introducers(id), customer_id uuid references auth.users(id),
@@ -2111,8 +2119,8 @@ function okD(name, cond, detail = "") {
   const introRow = () =>
     one(
       `select id, company_code, company_name, slug, contact_email, tenant_id, active, deleted_at
-     from public.introducers where user_id = $1`,
-      [U.existing],
+     from public.introducers where user_id = $1 and tenant_id = $2`,
+      [U.existing, T.a],
     );
   const intro0 = await introRow();
   await sql(`update public.introducers set active = false, deleted_at = now() where user_id = $1`, [
@@ -2195,25 +2203,89 @@ function okD(name, cond, detail = "") {
       (await inviteRow(inv26.token)).used_at === null,
     r26.message ?? "",
   );
+  const intro28 = await introRow();
+  okD(
+    "28 failures cause no partial mutation (Tenant A introducer row, grants and memberships unchanged)",
+    JSON.stringify(intro28) === JSON.stringify(intro21) &&
+      JSON.stringify(await grantRows(U.existing)) === JSON.stringify(grants21) &&
+      JSON.stringify(await memberships(U.existing)) === mem21,
+  );
+
+  // G7F-4S4C4-A2: introducer registrations are per tenant.
+  const fullIntro = (tenantId) =>
+    one(`select * from public.introducers where user_id = $1 and tenant_id = $2`, [
+      U.existing,
+      tenantId,
+    ]);
+  const introCount = async () =>
+    (
+      await one(`select count(*)::int as n from public.introducers where user_id = $1`, [
+        U.existing,
+      ])
+    ).n;
+  const introA27 = JSON.stringify(await fullIntro(T.a));
+  const rel27 = await relSnapshot();
   const inv27 = await create(U.ownerB, {
     role: "introducer",
     email: "existing.staff@example.test",
     companyMode: "new",
   });
   const r27 = await outcome(() => accept(U.existing, inv27.token));
-  okD(
-    "27 cross-tenant introducer invite fails closed",
-    !r27.ok &&
-      r27.code === "staff_invite_introducer_conflict" &&
-      !(await memberships(U.existing)).some((m) => m.tenant_id === T.b) &&
-      (await inviteRow(inv27.token)).used_at === null,
+  const introB27 = await fullIntro(T.b);
+  const n27 = await introCount();
+  const mem27 = await memberships(U.existing);
+  const role27 = await sql(
+    `select 1 from public.user_roles where user_id = $1 and role = 'introducer'`,
+    [U.existing],
   );
-  const intro28 = await introRow();
+  const used27 = (await inviteRow(inv27.token)).used_at;
+  const rel27after = await relSnapshot();
+  const inv27b = await create(U.ownerB, {
+    role: "introducer",
+    email: "existing.staff@example.test",
+    companyMode: "new",
+  });
+  const r27b = await outcome(() => accept(U.existing, inv27b.token));
+  const n27b = await introCount();
+  const r27c = await outcome(async () => {
+    const inv27c = await create(U.ownerB, {
+      role: "introducer",
+      email: "existing.staff@example.test",
+      companyMode: "join",
+      companyCode: introB27?.company_code,
+    });
+    return accept(U.existing, inv27c.token);
+  });
+  const activeIntroTenants = mem27
+    .filter((m) => m.role === "introducer" && m.active)
+    .map((m) => m.tenant_id)
+    .sort();
   okD(
-    "28 failures cause no partial mutation (introducer row, grants and memberships unchanged)",
-    JSON.stringify(intro28) === JSON.stringify(intro21) &&
-      JSON.stringify(await grantRows(U.existing)) === JSON.stringify(grants21) &&
-      JSON.stringify(await memberships(U.existing)) === mem21,
+    "27 second-tenant introducer invite creates an independent Tenant B registration (A byte-identical; duplicate new-company refused; join reuses B)",
+    r27.ok &&
+      n27 === 2 &&
+      introB27 !== null &&
+      introB27.id !== intro0.id &&
+      introB27.tenant_id === T.b &&
+      /^[0-9]{4}$/.test(introB27.company_code ?? "") &&
+      introB27.company_code !== intro0.company_code &&
+      introB27.slug !== intro0.slug &&
+      introB27.active === true &&
+      introB27.deleted_at === null &&
+      JSON.stringify(activeIntroTenants) === JSON.stringify([T.a, T.b].sort()) &&
+      role27.length === 1 &&
+      used27 !== null &&
+      rel27after === rel27 &&
+      !r27b.ok &&
+      r27b.code === "staff_invite_introducer_company_conflict" &&
+      n27b === 2 &&
+      (await inviteRow(inv27b.token)).used_at === null &&
+      r27c.ok &&
+      JSON.stringify(await fullIntro(T.b)) === JSON.stringify(introB27) &&
+      (await introCount()) === 2 &&
+      JSON.stringify(await fullIntro(T.a)) === introA27 &&
+      (await relSnapshot()) === rel27,
+    r27.message ?? r27b.message ?? r27c.message ?? "",
   );
 
   // adviser re-invite (same tenant) keeps the code
