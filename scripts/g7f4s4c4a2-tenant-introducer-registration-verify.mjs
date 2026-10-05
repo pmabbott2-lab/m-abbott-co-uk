@@ -19,7 +19,15 @@
  * Run: npm exec --yes --package=tsx -- tsx scripts/g7f4s4c4a2-tenant-introducer-registration-verify.mjs
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire, register } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -2241,10 +2249,118 @@ ok(
   "A2-S1 no application source changed (finance, booking/ensureStaffIntroducerRecord, sessions/grantIntroducerRole, introducer/createManualLead, test accounts, tenant-assert)",
   status("src") === "",
 );
+// Change set under supabase/ from the pinned A2 baseline to the current state: committed and
+// uncommitted tracked changes (renames split into D + A) plus untracked files as additions.
+// Valid both before the A2 commit (migration untracked) and after it (migration in HEAD).
+const A2_BASELINE = "992c6ec76d4d1f22d599062ff575783ca74a3291";
+const migrationScope = (cwd, baseline) => {
+  const g = (...args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" });
+  try {
+    g("merge-base", "--is-ancestor", baseline, "HEAD");
+  } catch {
+    return { ok: false, changes: "baseline_not_ancestor_of_head" };
+  }
+  const tracked = g("diff", "--name-status", "--no-renames", baseline, "--", "supabase")
+    .split("\n")
+    .filter(Boolean);
+  const untracked = g("ls-files", "--others", "--exclude-standard", "--", "supabase")
+    .split("\n")
+    .filter(Boolean)
+    .map((p) => `A\t${p}`);
+  const changes = [...tracked, ...untracked].sort();
+  return {
+    ok: changes.length === 1 && changes[0] === `A\t${A2_REL}`,
+    changes: changes.join(" | "),
+  };
+};
+const a2Scope = migrationScope(root, A2_BASELINE);
+const scopeControls = (() => {
+  const dir = mkdtempSync(join(tmpdir(), "g7f4s4c4a2-scope-"));
+  const g = (...args) =>
+    execFileSync(
+      "git",
+      ["-c", "user.name=a2-fixture", "-c", "user.email=a2@fixture.invalid", ...args],
+      { cwd: dir, encoding: "utf8", stdio: "pipe" },
+    ).trim();
+  const put = (rel, text) => {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    writeFileSync(join(dir, rel), text);
+  };
+  const OLD1 = "supabase/migrations/20260101000000_old_one.sql";
+  const OLD2 = "supabase/migrations/20260102000000_old_two.sql";
+  const EXTRA = "supabase/migrations/20261005100001_unexpected.sql";
+  const WRONG =
+    "supabase/migrations/20261005100001_gate_g7f4s4c4a2_tenant_introducer_registrations.sql";
+  const r = {};
+  try {
+    g("init", "-q", "-b", "main");
+    g("config", "commit.gpgsign", "false");
+    put(OLD1, "select 1;\n");
+    put(OLD2, "select 2;\n");
+    put("src/app.ts", "export {};\n");
+    g("add", "--", OLD1, OLD2, "src/app.ts");
+    g("commit", "-q", "-m", "baseline");
+    const base = g("rev-parse", "HEAD");
+    const fails = (label) => (r[label] = !migrationScope(dir, base).ok);
+    r.untrackedA2Passes = (put(A2_REL, "-- a2\n"), migrationScope(dir, base).ok);
+    r.extraUntracked = (put(EXTRA, "-- x\n"), fails("extraUntracked"));
+    unlinkSync(join(dir, EXTRA));
+    g("add", "--", A2_REL);
+    g("commit", "-q", "-m", "a2");
+    const a2 = g("rev-parse", "HEAD");
+    r.committedA2Passes = migrationScope(dir, base).ok;
+    put(EXTRA, "-- x\n");
+    g("add", "--", EXTRA);
+    g("commit", "-q", "-m", "extra");
+    fails("extraCommitted");
+    g("reset", "-q", "--hard", a2);
+    put(OLD1, "select 11;\n");
+    fails("modifiedUncommitted");
+    g("commit", "-q", "-am", "modify");
+    fails("modifiedCommitted");
+    g("reset", "-q", "--hard", a2);
+    unlinkSync(join(dir, OLD1));
+    fails("deleted");
+    g("checkout", "-q", "--", OLD1);
+    renameSync(
+      join(dir, OLD2),
+      join(dir, "supabase/migrations/20260102000000_old_two_renamed.sql"),
+    );
+    g("add", "-A", "--", "supabase");
+    g("commit", "-q", "-m", "rename");
+    fails("renamed");
+    g("reset", "-q", "--hard", a2);
+    g("rm", "-q", "--", A2_REL);
+    g("commit", "-q", "-m", "drop a2");
+    fails("a2Absent");
+    put(WRONG, "-- a2\n");
+    fails("wrongName");
+    g("reset", "-q", "--hard", a2);
+    g("clean", "-qfd");
+    r.cleanA2Passes = migrationScope(dir, base).ok;
+    r.baselineIsHead = !migrationScope(dir, a2).ok;
+    g("checkout", "-q", "--orphan", "other");
+    g("commit", "-q", "-m", "unrelated");
+    const unrelated = g("rev-parse", "HEAD");
+    g("checkout", "-q", "-f", "main");
+    r.baselineNotAncestor =
+      migrationScope(dir, unrelated).changes === "baseline_not_ancestor_of_head";
+    r.baselineUnknown = !migrationScope(dir, "0".repeat(40)).ok;
+  } catch (e) {
+    r.fixtureError = String(e?.message ?? e).slice(0, 200);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return r;
+})();
+const scopeControlsOk =
+  !("fixtureError" in scopeControls) &&
+  Object.keys(scopeControls).length === 14 &&
+  Object.values(scopeControls).every((v) => v === true);
 ok(
-  "A2-S2 exactly one new migration (the A2 migration) and no other migration changed",
-  status("supabase") === `?? ${A2_REL}`,
-  status("supabase"),
+  "A2-S2 exactly one migration change relative to the pinned A2 baseline 992c6ec (A A2 migration, committed or untracked; no other addition, modification, deletion or rename under supabase/) — guard proven against fixtures (extra untracked/committed migration, modified uncommitted/committed, deleted, renamed, A2 absent, wrong name, baseline = HEAD, unrelated or unknown baseline)",
+  a2Scope.ok && scopeControlsOk,
+  `${a2Scope.changes} ${JSON.stringify(scopeControls)}`,
 );
 ok(
   "A2-S3 accept_staff_invite: tenant-scoped lookup behind a per-(user, tenant) advisory lock; the cross-tenant refusal is gone",
