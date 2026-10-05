@@ -4,7 +4,7 @@ import { z } from "zod";
 import { isTwilioConfigured, sendSms, getAppBaseUrl, getSmsSenderLabel } from "@/lib/sms.server";
 import { rafShareMessage } from "@/lib/referral";
 import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
-import { canView } from "@/lib/admin-access";
+import { canAmend, canView } from "@/lib/admin-access";
 import type { ResourceCapability } from "@/lib/tenant-assert.server";
 
 // ============================================================================
@@ -116,6 +116,31 @@ function rafViewCapability(): ResourceCapability {
   };
 }
 
+// The isMainAdmin fallback keeps General Admin's pre-B1c RAF authority (allocation is S4D).
+function rafAmendCapability(): ResourceCapability {
+  return {
+    mutate: true,
+    allocation: "none",
+    allow: (v) =>
+      v.adminAccess.isOwner ||
+      v.adminAccess.isSupervisor ||
+      canAmend(v.adminAccess, "raf") ||
+      v.isMainAdmin,
+  };
+}
+
+function rafBonusAmendCapability(): ResourceCapability {
+  return {
+    mutate: true,
+    allocation: "none",
+    allow: (v) =>
+      canAmend(v.adminAccess, "finance_raf") ||
+      v.adminAccess.isOwner ||
+      v.adminAccess.isSupervisor ||
+      v.isMainAdmin,
+  };
+}
+
 /** People related to a tenant: active members (any role) and customers of its sessions. */
 async function tenantPeopleIds(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -181,14 +206,6 @@ async function scopeReferralRowsToTenant<
       r.tenant_id ?? (r.referral_code_id ? (codeTenant.get(r.referral_code_id) ?? null) : null);
     return effective === tenantId;
   });
-}
-
-async function requireRafAmend(userId: string, email?: string): Promise<void> {
-  const { resolveAdminAccess } = await import("@/lib/admin.functions");
-  const { canAmend } = await import("@/lib/admin-access");
-  const access = await resolveAdminAccess(userId, email);
-  if (access.isOwner || access.isSupervisor || canAmend(access, "raf")) return;
-  await requireAdmin(userId);
 }
 
 // Generate a referral code that doesn't collide with an existing one.
@@ -442,9 +459,12 @@ export const createReferralLink = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    await requireRafAmend(context.userId, email);
-    const actingUserId = context!.userId;
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE, withForcedTenantId } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId, view } = await resolveActingTenantForList(
+      context.userId,
+      rafAmendCapability(),
+    );
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
@@ -454,6 +474,8 @@ export const createReferralLink = createServerFn({ method: "POST" })
     let referrerName = data.referrerName?.trim() || null;
     let referrerPhone = data.referrerPhone?.trim() || null;
     if (data.referrerUserId) {
+      const people = await tenantPeopleIds(supabaseAdmin, tenantId);
+      if (!people.includes(data.referrerUserId)) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
       const { data: profile } = await supabaseAdmin
         .from("profiles")
         .select("full_name, email, phone")
@@ -464,11 +486,6 @@ export const createReferralLink = createServerFn({ method: "POST" })
       }
       if (!referrerPhone) referrerPhone = profile?.phone ?? null;
     }
-
-    const { resolveSoleMembershipTenant, withForcedTenantId } = await import(
-      "@/lib/tenant-assert.server"
-    );
-    const authorised = await resolveSoleMembershipTenant(actingUserId);
 
     const code = await generateUniqueReferralCode();
     const { data: created, error } = await supabaseAdmin
@@ -482,7 +499,7 @@ export const createReferralLink = createServerFn({ method: "POST" })
             referrer_phone: referrerPhone,
             created_by: context.userId,
           },
-          authorised.tenant.id,
+          tenantId,
         ),
       )
       .select("id, code, referrer_user_id, referrer_name, referrer_phone, active, created_at, tenant_id")
@@ -493,7 +510,7 @@ export const createReferralLink = createServerFn({ method: "POST" })
       }
       throw new Error(error.message);
     }
-    return { ...created, tenantSlug: authorised.tenant.slug };
+    return { ...created, tenantSlug: view.tenantSlug ?? null };
   });
 
 // ---------------------------------------------------------------------------
@@ -505,8 +522,9 @@ export const textReferralLink = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    await requireRafAmend(context.userId, email);
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, rafAmendCapability());
     if (!isTwilioConfigured()) {
       throw new Error(
         "SMS is not configured yet. Add Twilio credentials to your server environment.",
@@ -520,11 +538,13 @@ export const textReferralLink = createServerFn({ method: "POST" })
       .from("referral_codes")
       .select("id, code, referrer_name, referrer_phone, tenant_id")
       .eq("id", data.id)
-      .single();
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
     if (error) {
       if (isMissingTableError(error)) throw new Error("Run the Refer-a-friend migration first.");
       throw new Error(error.message);
     }
+    if (!link) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
     if (!link.referrer_phone) {
       throw new Error("This referrer has no phone number. Add one or copy the link instead.");
     }
@@ -570,8 +590,9 @@ export const textRafInviteToFriend = createServerFn({ method: "POST" })
     z.object({ id: z.string().uuid(), friendPhone: z.string().min(7).max(32) }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    await requireRafAmend(context.userId, email);
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, rafAmendCapability());
     if (!isTwilioConfigured()) {
       throw new Error(
         "SMS is not configured yet. Add Twilio credentials to your server environment.",
@@ -585,11 +606,13 @@ export const textRafInviteToFriend = createServerFn({ method: "POST" })
       .from("referral_codes")
       .select("id, code, referrer_name, tenant_id")
       .eq("id", data.id)
-      .single();
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
     if (error) {
       if (isMissingTableError(error)) throw new Error("Run the Refer-a-friend migration first.");
       throw new Error(error.message);
     }
+    if (!link) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
 
     const tenantSlug = await tenantSlugFromReferralRow(
       supabaseAdmin,
@@ -792,18 +815,41 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const { canAmend } = await import("@/lib/admin-access");
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canAmend(access, "finance_raf") && !access.isOwner && !access.isSupervisor) {
-      await requireAdmin(context.userId);
-    }
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(
+      context.userId,
+      rafBonusAmendCapability(),
+    );
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
     const { ensureRafCommissionLedgerEntry } = await import("@/lib/finance.functions");
+
+    const { data: referralRow, error: loadErr } = await supabaseAdmin
+      .from("referrals")
+      .select("id, tenant_id, referral_code_id")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (loadErr) {
+      if (isMissingTableError(loadErr)) throw new Error("Run the Refer-a-friend migration first.");
+      throw new Error(loadErr.message);
+    }
+    const [owned] = referralRow
+      ? await scopeReferralRowsToTenant(
+          supabaseAdmin,
+          [
+            referralRow as {
+              id: string;
+              tenant_id: string | null;
+              referral_code_id: string | null;
+            },
+          ],
+          tenantId,
+        )
+      : [];
+    if (!owned) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
 
     const patch: {
       updated_at: string;
@@ -815,7 +861,11 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
     if (data.status) patch.status = data.status;
     if (data.notes !== undefined) patch.notes = data.notes || null;
 
-    const { error } = await supabaseAdmin.from("referrals").update(patch).eq("id", data.id);
+    // Legacy tenantless referrals stay tenantless; they are matched through their owned code.
+    const scopedUpdate = supabaseAdmin.from("referrals").update(patch).eq("id", data.id);
+    const { error } = owned.tenant_id
+      ? await scopedUpdate.eq("tenant_id", tenantId)
+      : await scopedUpdate.is("tenant_id", null).eq("referral_code_id", owned.referral_code_id);
     if (error) {
       if (isMissingTableError(error)) throw new Error("Run the Refer-a-friend migration first.");
       throw new Error(error.message);
@@ -831,6 +881,7 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
         .from("finance_ledger")
         .select("id")
         .eq("referral_id", data.id)
+        .eq("tenant_id", tenantId)
         .eq("kind", "commission")
         .maybeSingle();
       if (ledgerRow) {
@@ -841,7 +892,9 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
             payout_at: new Date().toISOString(),
             payout_by: context.userId,
           })
-          .eq("id", ledgerRow.id);
+          .eq("id", ledgerRow.id)
+          .eq("referral_id", data.id)
+          .eq("tenant_id", tenantId);
       }
     }
 

@@ -1359,6 +1359,33 @@ const S3_WRITER_STATEMENTS = {
   "src/lib/introducer.functions.ts#updateIntroducerProfile": [
     /\.update\(\{\s*company_name: data\.companyName,\s*contact_email: data\.contactEmail \|\| null,\s*\}\)/g,
   ],
+  // G7F-4S4C4-B1c rebinds the RAF admin writers' authority and tenant scoping; their referral,
+  // SMS and commission write statements must stay identical.
+  "src/lib/referrals.functions.ts#createReferralLink": [
+    /if \(!referrerName\) \{[\s\S]*?\n {6}\}\s*if \(!referrerPhone\) referrerPhone = profile\?\.phone \?\? null;/g,
+    /const code = await generateUniqueReferralCode\(\);/g,
+    /\{\s*code,\s*referrer_user_id: data\.referrerUserId \?\? null,\s*referrer_name: referrerName,\s*referrer_phone: referrerPhone,\s*created_by: context\.userId,\s*\}/g,
+  ],
+  "src/lib/referrals.functions.ts#textReferralLink": [
+    /if \(!link\.referrer_phone\) \{[\s\S]*?\n {4}\}/g,
+    /const tenantSlug = await tenantSlugFromReferralRow\([\s\S]*?\);\s*if \(!tenantSlug\) \{[\s\S]*?\n {4}\}/g,
+    /const \{ buildCanonicalRafPath \}[\s\S]*?const body = `[^`]*`;/g,
+    /const \{ sid \} = await sendSms\(\{ to: link\.referrer_phone, body \}\);/g,
+    /await supabaseAdmin\.from\("sms_messages"\)\.insert\(\{[\s\S]*?\}\);/g,
+  ],
+  "src/lib/referrals.functions.ts#textRafInviteToFriend": [
+    /const tenantSlug = await tenantSlugFromReferralRow\([\s\S]*?\);\s*if \(!tenantSlug\) \{[\s\S]*?\n {4}\}/g,
+    /const body = rafShareMessage\(link\.referrer_name, link\.code, tenantSlug, getAppBaseUrl\(\)\);/g,
+    /const \{ sid \} = await sendSms\(\{ to: data\.friendPhone, body \}\);/g,
+    /await supabaseAdmin\.from\("sms_messages"\)\.insert\(\{[\s\S]*?\}\);/g,
+  ],
+  "src/lib/referrals.functions.ts#updateReferralBonusStatus": [
+    /const patch: \{[\s\S]*?if \(data\.notes !== undefined\) patch\.notes = data\.notes \|\| null;/g,
+    /\.from\("referrals"\)\.update\(patch\)\.eq\("id", data\.id\)/g,
+    /if \(data\.bonusStatus === "eligible"\) \{\s*await ensureRafCommissionLedgerEntry\(data\.id, context\.userId\);\s*\}/g,
+    /const payoutStatus = data\.bonusStatus === "paid" \? "paid" : "rejected";/g,
+    /\.update\(\{\s*payout_status: payoutStatus,\s*payout_at: new Date\(\)\.toISOString\(\),\s*payout_by: context\.userId,\s*\}\)/g,
+  ],
 };
 function sameStatements(a, b, patterns) {
   const norm = (s) => s.replace(/\s+/g, " ").trim();
