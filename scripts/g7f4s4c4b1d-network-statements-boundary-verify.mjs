@@ -1296,16 +1296,22 @@ ok(
     "src/lib/admin.functions.ts",
   ).trim();
   const changedFiles = git("diff", "--name-only", BASE_REF).trim().split("\n").filter(Boolean);
+  // The approved B1d gate intentionally touches exactly two files: the network
+  // functions (modified) and this verifier (added). Any third tracked change,
+  // or any change to migrations/authority/schema, must still fail this guard.
+  const VERIFIER_FILE = "scripts/g7f4s4c4b1d-network-statements-boundary-verify.mjs";
+  const AUTHORISED_B1D_FILES = [REF_FILE, VERIFIER_FILE];
+  const unauthorisedChanges = changedFiles.filter((f) => !AUTHORISED_B1D_FILES.includes(f));
   ok(
-    "B1D-24 no migration, RLS, grant or schema change; canonical authority modules unchanged; the only tracked change is the network-commission functions file",
+    "B1D-24 no migration, RLS, grant or schema change; canonical authority modules unchanged; tracked changes limited to exactly the two authorised B1d files (network functions + this verifier)",
     migrationDiff === "" &&
       migrationNew === "" &&
       authorityDiff === "" &&
       !/\.rpc\(|grant |policy /i.test(strip(REF_SRC)) &&
-      changedFiles.length === 1 &&
-      changedFiles[0] === REF_FILE,
-    [migrationDiff, migrationNew, authorityDiff, changedFiles.join(",")]
-      .filter(Boolean)
+      changedFiles.includes(REF_FILE) &&
+      unauthorisedChanges.length === 0,
+    [migrationDiff, migrationNew, authorityDiff, `unauthorised=${unauthorisedChanges.join(",")}`]
+      .filter((s) => s && s !== "unauthorised=")
       .join(" | "),
   );
 }
