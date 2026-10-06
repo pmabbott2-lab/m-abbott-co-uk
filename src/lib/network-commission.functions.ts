@@ -1,19 +1,31 @@
 /**
  * Network commission statements — monthly intake, AI parse, allocate to customers.
  * Server functions only; uses service role for writes.
+ *
+ * G7F-4S4C4-B1d — every entry point resolves the canonical acting tenant and
+ * scopes all reads/writes to it. A statementId / lineId / sessionId / period
+ * is never authority on its own: unknown, foreign and tenantless resources all
+ * fail closed with the same "Not found.". New rows are stamped with the acting
+ * tenant. The global UNIQUE(period_month) remains a B4 structural blocker, so
+ * same-month collisions across tenants fail closed with a generic message and
+ * never expose the other tenant's statement.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { resolveAdminAccess } from "@/lib/admin.functions";
-import {
-  canAmend,
-  canView,
-  canViewCommissionPayouts,
-  type AdminAccess,
-} from "@/lib/admin-access";
+import { canAmend, canView, canViewCommissionPayouts, type AdminAccess } from "@/lib/admin-access";
+import type { ResourceCapability } from "@/lib/tenant-assert.server";
 
 const FEE_TYPES = ["fee", "mortgage_fee", "insurance_fee", "other_fee"] as const;
+
+/**
+ * Shown when a statement cannot be opened for the acting tenant because the
+ * global UNIQUE(period_month) constraint is already occupied (by any tenant).
+ * Deliberately generic: never reveals the foreign statement id, tenant, creator
+ * or any financial data. Full per-tenant same-month support is B4.
+ */
+const PERIOD_MONTH_UNAVAILABLE_MESSAGE =
+  "This month can't be opened here yet. Please contact support if this continues.";
 
 function isMissing(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
@@ -29,6 +41,13 @@ function isMissing(error: { code?: string; message?: string } | null): boolean {
   );
 }
 
+function isUniqueViolation(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const code = error.code ?? "";
+  const msg = (error.message ?? "").toLowerCase();
+  return code === "23505" || msg.includes("duplicate key") || msg.includes("unique constraint");
+}
+
 function canViewNetwork(access: AdminAccess): boolean {
   return (
     access.isOwner ||
@@ -39,19 +58,27 @@ function canViewNetwork(access: AdminAccess): boolean {
 }
 
 function canAmendNetwork(access: AdminAccess): boolean {
-  return (
-    access.isOwner ||
-    access.isSupervisor ||
-    canAmend(access, "finance_network_statements")
-  );
+  return access.isOwner || access.isSupervisor || canAmend(access, "finance_network_statements");
 }
 
 function canValidateNetwork(access: AdminAccess): boolean {
-  return (
-    access.isOwner ||
-    access.isSupervisor ||
-    canAmend(access, "finance_network_validate")
-  );
+  return access.isOwner || access.isSupervisor || canAmend(access, "finance_network_validate");
+}
+
+// Canonical acting-tenant/ResourceCapability wrappers. The capability outcomes
+// mirror the pre-B1d role checks exactly; B1d only binds them to the acting
+// tenant (and, for mutate, to a view that may mutate — platform read-only is
+// rejected by resolveActingTenantForList before any resource is touched).
+function networkViewCapability(): ResourceCapability {
+  return { mutate: false, allocation: "none", allow: (v) => canViewNetwork(v.adminAccess) };
+}
+
+function networkAmendCapability(): ResourceCapability {
+  return { mutate: true, allocation: "none", allow: (v) => canAmendNetwork(v.adminAccess) };
+}
+
+function networkValidateCapability(): ResourceCapability {
+  return { mutate: true, allocation: "none", allow: (v) => canValidateNetwork(v.adminAccess) };
 }
 
 function monthStart(period: string): string {
@@ -70,14 +97,15 @@ function periodLabel(periodMonth: string): string {
 export const listNetworkStatementMonths = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canViewNetwork(access)) throw new Error("Forbidden");
+    const { resolveActingTenantForList } = await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, networkViewCapability());
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
     const { data, error } = await supabaseAdmin
       .from("network_commission_statements")
       .select("id, period_month, status, notes, validated_at, created_at")
+      .eq("tenant_id", tenantId)
       .order("period_month", { ascending: false });
     if (error) {
       if (isMissing(error)) return { months: [], migrationRequired: true as const };
@@ -85,8 +113,14 @@ export const listNetworkStatementMonths = createServerFn({ method: "GET" })
     }
 
     // Offer current + previous 17 months even if no row yet.
-    const options: { periodMonth: string; label: string; statementId: string | null; status: string | null }[] = [];
-    const byPeriod = new Map((data ?? []).map((r) => [String(r.period_month).slice(0, 10), r]));
+    const options: {
+      periodMonth: string;
+      label: string;
+      statementId: string | null;
+      status: string | null;
+    }[] = [];
+    const rows = (data ?? []) as Array<{ id: string; period_month: string; status: string | null }>;
+    const byPeriod = new Map(rows.map((r) => [String(r.period_month).slice(0, 10), r]));
     const now = new Date();
     for (let i = 0; i < 18; i += 1) {
       const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
@@ -106,30 +140,43 @@ export const getOrCreateNetworkStatement = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ periodMonth: z.string().min(7).max(10) }).parse(d))
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canAmendNetwork(access)) throw new Error("Forbidden");
+    const { resolveActingTenantForList, withForcedTenantId } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, networkAmendCapability());
 
     const period = monthStart(data.periodMonth);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    // Same-tenant lookup only: never read another tenant's same-month statement.
     const { data: existing } = await supabaseAdmin
       .from("network_commission_statements")
       .select("*")
+      .eq("tenant_id", tenantId)
       .eq("period_month", period)
       .maybeSingle();
     if (existing) return { statement: existing, created: false };
 
     const { data: inserted, error } = await supabaseAdmin
       .from("network_commission_statements")
-      .insert({
-        period_month: period,
-        status: "draft",
-        created_by: context.userId,
-      })
+      .insert(
+        withForcedTenantId(
+          {
+            period_month: period,
+            status: "draft",
+            created_by: context.userId,
+          },
+          tenantId,
+        ),
+      )
       .select("*")
       .single();
     if (error) {
-      if (isMissing(error)) throw new Error("Run supabase/RUN_NETWORK_COMMISSION.sql in Supabase first.");
+      if (isMissing(error))
+        throw new Error("Run supabase/RUN_NETWORK_COMMISSION.sql in Supabase first.");
+      // B4 blocker: global UNIQUE(period_month). Another tenant already holds
+      // this month. Fail closed with a generic message — do not fetch, return,
+      // reassign or reveal the other tenant's statement.
+      if (isUniqueViolation(error)) throw new Error(PERIOD_MONTH_UNAVAILABLE_MESSAGE);
       throw new Error(error.message);
     }
     return { statement: inserted, created: true };
@@ -139,23 +186,28 @@ export const getNetworkStatementDetail = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ statementId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canViewNetwork(access)) throw new Error("Forbidden");
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, networkViewCapability());
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
     const { data: statement, error } = await supabaseAdmin
       .from("network_commission_statements")
       .select("*")
       .eq("id", data.statementId)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    if (!statement) throw new Error("Statement not found");
+    // Unknown, foreign and tenantless statements are indistinguishable here.
+    if (!statement) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
 
+    // Ownership proven above; lines are additionally constrained to the tenant.
     const { data: lines, error: lineErr } = await supabaseAdmin
       .from("network_commission_lines")
       .select("*")
       .eq("statement_id", data.statementId)
+      .eq("tenant_id", tenantId)
       .order("line_no", { ascending: true });
     if (lineErr) throw new Error(lineErr.message);
 
@@ -174,17 +226,20 @@ export const parseNetworkStatementWithAi = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canAmendNetwork(access)) throw new Error("Forbidden");
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE, withForcedTenantId } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, networkAmendCapability());
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    // Prove the statement belongs to the acting tenant before any work.
     const { data: statement } = await supabaseAdmin
       .from("network_commission_statements")
-      .select("id, status")
+      .select("id, status, tenant_id")
       .eq("id", data.statementId)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
-    if (!statement) throw new Error("Statement not found");
+    if (!statement) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
     if (statement.status === "locked" || statement.status === "validated") {
       throw new Error("This statement is validated/locked — unlock before re-parsing.");
     }
@@ -229,7 +284,11 @@ Rules:
     if (!aiLines.length) throw new Error("No commission lines found in the statement text.");
 
     if (data.replaceExisting !== false) {
-      await supabaseAdmin.from("network_commission_lines").delete().eq("statement_id", data.statementId);
+      await supabaseAdmin
+        .from("network_commission_lines")
+        .delete()
+        .eq("statement_id", data.statementId)
+        .eq("tenant_id", tenantId);
     }
 
     const rows = aiLines
@@ -253,11 +312,14 @@ Rules:
           annotation: line.notes?.trim() || null,
         };
       })
-      .filter(Boolean);
+      .filter(Boolean) as Array<Record<string, unknown>>;
 
     if (!rows.length) throw new Error("AI found lines but none had a usable amount.");
 
-    const { error: insErr } = await supabaseAdmin.from("network_commission_lines").insert(rows);
+    // Every new line is stamped with the acting tenant.
+    const { error: insErr } = await supabaseAdmin
+      .from("network_commission_lines")
+      .insert(rows.map((r) => withForcedTenantId(r, tenantId)));
     if (insErr) throw new Error(insErr.message);
 
     await supabaseAdmin
@@ -267,13 +329,17 @@ Rules:
         status: "draft",
         updated_at: new Date().toISOString(),
       })
-      .eq("id", data.statementId);
+      .eq("id", data.statementId)
+      .eq("tenant_id", tenantId);
 
-    // Best-effort auto-match by email / case ref.
+    // Best-effort auto-match — candidates are restricted to the acting tenant.
+    // A global profile/case_ref match is never used as authority, and foreign
+    // customer/session rows are never attached or exposed.
     const { data: inserted } = await supabaseAdmin
       .from("network_commission_lines")
       .select("id, customer_email, case_ref, customer_name")
-      .eq("statement_id", data.statementId);
+      .eq("statement_id", data.statementId)
+      .eq("tenant_id", tenantId);
 
     for (const line of inserted ?? []) {
       let customerId: string | null = null;
@@ -285,13 +351,41 @@ Rules:
           .select("id")
           .eq("email", line.customer_email)
           .maybeSingle();
-        customerId = profile?.id ?? null;
+        const candidate = profile?.id ?? null;
+        if (candidate) {
+          // Only accept the candidate if they are related to the acting tenant
+          // (a session in this tenant, else an active membership here).
+          const { data: sess } = await supabaseAdmin
+            .from("interview_sessions")
+            .select("id")
+            .eq("customer_id", candidate)
+            .eq("tenant_id", tenantId)
+            .is("deleted_at", null)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (sess) {
+            customerId = candidate;
+            sessionId = sess.id;
+          } else {
+            const { data: mem } = await supabaseAdmin
+              .from("tenant_memberships")
+              .select("id")
+              .eq("user_id", candidate)
+              .eq("tenant_id", tenantId)
+              .eq("active", true)
+              .limit(1)
+              .maybeSingle();
+            if (mem) customerId = candidate;
+          }
+        }
       }
       if (!customerId && line.case_ref) {
         const { data: session } = await supabaseAdmin
           .from("interview_sessions")
           .select("id, customer_id")
           .eq("case_ref", line.case_ref)
+          .eq("tenant_id", tenantId)
           .maybeSingle();
         if (session?.customer_id) {
           customerId = session.customer_id;
@@ -303,6 +397,8 @@ Rules:
           .from("interview_sessions")
           .select("id")
           .eq("customer_id", customerId)
+          .eq("tenant_id", tenantId)
+          .is("deleted_at", null)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -317,7 +413,8 @@ Rules:
             allocation_status: "matched",
             updated_at: new Date().toISOString(),
           })
-          .eq("id", line.id);
+          .eq("id", line.id)
+          .eq("tenant_id", tenantId);
       }
     }
 
@@ -337,29 +434,37 @@ export const allocateNetworkLine = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canAmendNetwork(access)) throw new Error("Forbidden");
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE, withForcedTenantId } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, networkAmendCapability());
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    // Prove the line belongs to the acting tenant, and that its statement does
+    // too (line.tenant_id and statement.tenant_id must agree with acting).
     const { data: line } = await supabaseAdmin
       .from("network_commission_lines")
-      .select("*, network_commission_statements!inner(id, status)")
+      .select("*, network_commission_statements!inner(id, status, tenant_id)")
       .eq("id", data.lineId)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
-    if (!line) throw new Error("Line not found");
-    const stmtStatus = (line as { network_commission_statements?: { status?: string } })
-      .network_commission_statements?.status;
-    if (stmtStatus === "locked") throw new Error("Statement is locked.");
+    if (!line) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+    const stmt = (
+      line as { network_commission_statements?: { status?: string; tenant_id?: string | null } }
+    ).network_commission_statements;
+    if (!stmt || stmt.tenant_id !== tenantId) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+    if (stmt.status === "locked") throw new Error("Statement is locked.");
 
-    let sessionId = data.sessionId ?? (line.matched_session_id as string | null);
-    let customerId = data.customerId ?? (line.matched_customer_id as string | null);
+    let sessionId = data.sessionId ?? (line.matched_session_id as string | null) ?? null;
+    let customerId = data.customerId ?? (line.matched_customer_id as string | null) ?? null;
 
     if (!sessionId && customerId) {
       const { data: latest } = await supabaseAdmin
         .from("interview_sessions")
         .select("id")
         .eq("customer_id", customerId)
+        .eq("tenant_id", tenantId)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -367,12 +472,15 @@ export const allocateNetworkLine = createServerFn({ method: "POST" })
     }
     if (!sessionId) throw new Error("Select a customer case/session to allocate this line.");
 
+    // The session must belong to the acting tenant. A supplied foreign/unknown
+    // session id is indistinguishable: both are "Not found.".
     const { data: session } = await supabaseAdmin
       .from("interview_sessions")
-      .select("id, customer_id")
+      .select("id, customer_id, tenant_id")
       .eq("id", sessionId)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
-    if (!session) throw new Error("Session not found");
+    if (!session) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
     customerId = session.customer_id;
 
     const feeType = FEE_TYPES.includes(line.fee_type as (typeof FEE_TYPES)[number])
@@ -383,14 +491,19 @@ export const allocateNetworkLine = createServerFn({ method: "POST" })
 
     const { data: feeLine, error: feeErr } = await supabaseAdmin
       .from("finance_fee_lines")
-      .insert({
-        session_id: sessionId,
-        fee_type: feeType,
-        amount_pence: amountPence,
-        note: `Network statement ${String(line.statement_id).slice(0, 8)} · ${line.case_ref ?? line.customer_name ?? "line"}`,
-        status: "draft",
-        created_by: context.userId,
-      })
+      .insert(
+        withForcedTenantId(
+          {
+            session_id: sessionId,
+            fee_type: feeType,
+            amount_pence: amountPence,
+            note: `Network statement ${String(line.statement_id).slice(0, 8)} · ${line.case_ref ?? line.customer_name ?? "line"}`,
+            status: "draft",
+            created_by: context.userId,
+          },
+          tenantId,
+        ),
+      )
       .select("id")
       .single();
     if (feeErr) throw new Error(feeErr.message);
@@ -406,7 +519,8 @@ export const allocateNetworkLine = createServerFn({ method: "POST" })
         allocated_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq("id", data.lineId);
+      .eq("id", data.lineId)
+      .eq("tenant_id", tenantId);
 
     // Draft fee line on the customer case — submit from case finance to drive payable commissions.
     return { ok: true, feeLineId: feeLine.id, sessionId, customerId, draft: true };
@@ -418,27 +532,37 @@ export const annotateNetworkLine = createServerFn({ method: "POST" })
     z.object({ lineId: z.string().uuid(), annotation: z.string().max(2000) }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canAmendNetwork(access)) throw new Error("Forbidden");
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, networkAmendCapability());
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    // Prove line ownership through its own tenant and its owned statement.
+    const { data: line } = await supabaseAdmin
+      .from("network_commission_lines")
+      .select("id, statement_id, tenant_id, network_commission_statements!inner(id, tenant_id)")
+      .eq("id", data.lineId)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (!line) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+    const stmt = (line as { network_commission_statements?: { tenant_id?: string | null } })
+      .network_commission_statements;
+    if (!stmt || stmt.tenant_id !== tenantId) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+
     const { error } = await supabaseAdmin
       .from("network_commission_lines")
       .update({ annotation: data.annotation, updated_at: new Date().toISOString() })
-      .eq("id", data.lineId);
+      .eq("id", data.lineId)
+      .eq("tenant_id", tenantId);
     if (error) throw new Error(error.message);
 
-    const { data: line } = await supabaseAdmin
-      .from("network_commission_lines")
-      .select("statement_id")
-      .eq("id", data.lineId)
-      .maybeSingle();
-    if (line?.statement_id) {
+    if (line.statement_id) {
       await supabaseAdmin
         .from("network_commission_statements")
         .update({ status: "annotated", updated_at: new Date().toISOString() })
         .eq("id", line.statement_id)
+        .eq("tenant_id", tenantId)
         .in("status", ["draft", "annotated"]);
     }
     return { ok: true };
@@ -456,13 +580,26 @@ export const validateNetworkStatement = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canValidateNetwork(access)) throw new Error("Forbidden");
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId, view } = await resolveActingTenantForList(
+      context.userId,
+      networkValidateCapability(),
+    );
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    // Prove the statement belongs to the acting tenant before any status change.
+    const { data: statement } = await supabaseAdmin
+      .from("network_commission_statements")
+      .select("id, tenant_id")
+      .eq("id", data.statementId)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (!statement) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+
     if (data.action === "unlock") {
-      if (!access.isOwner && !access.isSupervisor) {
+      if (!view.adminAccess.isOwner && !view.adminAccess.isSupervisor) {
         throw new Error("Only owner or supervisor can unlock a validated statement.");
       }
       const { error } = await supabaseAdmin
@@ -474,7 +611,8 @@ export const validateNetworkStatement = createServerFn({ method: "POST" })
           notes: data.notes ?? null,
           updated_at: new Date().toISOString(),
         })
-        .eq("id", data.statementId);
+        .eq("id", data.statementId)
+        .eq("tenant_id", tenantId);
       if (error) throw new Error(error.message);
       return { ok: true, status: "draft" };
     }
@@ -488,7 +626,8 @@ export const validateNetworkStatement = createServerFn({ method: "POST" })
         notes: data.notes ?? null,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", data.statementId);
+      .eq("id", data.statementId)
+      .eq("tenant_id", tenantId);
     if (error) throw new Error(error.message);
     return { ok: true, status: "validated" };
   });
