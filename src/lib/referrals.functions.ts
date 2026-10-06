@@ -349,9 +349,28 @@ export async function resolveReferralCodeMeta(code: string): Promise<{
   return { id: row.id, code: row.code, referrer_name: referrerName, tenantSlug };
 }
 
-export const resolveReferralCode = createServerFn({ method: "GET" })
-  .inputValidator((d: unknown) => z.object({ code: z.string().min(1).max(16) }).parse(d))
-  .handler(async ({ data }) => resolveReferralCodeMeta(data.code));
+// PUBLIC: resolve a code → ONLY its owning tenant slug (never the referrer identity). Used by
+// the bare /raf/<code> route to bootstrap-redirect into the code's tenant. Exposing the tenant
+// is intentional (B2a allows the bootstrap redirect); the referrer name is withheld until a
+// tenant is proven.
+export async function resolveReferralCodeTenantSlug(
+  code: string,
+): Promise<{ tenantSlug: string | null }> {
+  const meta = await resolveReferralCodeMeta(code);
+  return { tenantSlug: meta?.tenantSlug ?? null };
+}
+
+// TENANT-SCOPED: resolve a code → referrer identity ONLY when the caller already presents the
+// code's owning tenant slug (the tenant-prefixed /$tenantSlug/raf/<code> route). A mismatched or
+// unknown tenant yields null, so the referrer name is never disclosed before tenant validation.
+export async function resolveReferralCodeMetaForTenant(
+  code: string,
+  tenantSlug: string,
+): Promise<{ referrer_name: string | null; tenantSlug: string } | null> {
+  const meta = await resolveReferralCodeMeta(code);
+  if (!meta?.tenantSlug || meta.tenantSlug !== tenantSlug) return null;
+  return { referrer_name: meta.referrer_name, tenantSlug: meta.tenantSlug };
+}
 
 // ---------------------------------------------------------------------------
 // FRIEND: record a referral from the 'raf_ref' cookie. Called on the friend's
@@ -362,14 +381,30 @@ export const claimReferral = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ code: z.string().min(1).max(16) }).parse(d))
   .handler(async ({ data, context }) => {
+    // B2a: the RAF code (from the untrusted 'raf_ref' cookie) is referral context, not tenant
+    // authority. Resolve the caller's canonical acting tenant first; an ambiguous or missing
+    // tenant fails closed (no claim) rather than guessing a membership or trusting the code.
+    const { resolveActingTenant, withForcedTenantId } = await import("@/lib/tenant-assert.server");
+    let tenantId: string;
+    try {
+      ({ tenantId } = await resolveActingTenant(context.userId));
+    } catch {
+      // No verified single acting tenant (0 / 2+ memberships, no verified slug): discard the
+      // referral context and let the customer's legitimate journey continue.
+      return { ok: false, reason: "invalid" as const };
+    }
+
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
 
+    // Tenant-scoped code lookup: a code that exists only in another tenant is indistinguishable
+    // from an unknown code (no cross-tenant existence leak).
     const { data: link, error: linkErr } = await supabaseAdmin
       .from("referral_codes")
-      .select("id, code, referrer_user_id, active")
+      .select("id, code, referrer_user_id, active, tenant_id")
       .eq("code", data.code)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
     if (linkErr) {
       if (isMissingTableError(linkErr)) return { ok: false, reason: "not_ready" as const };
@@ -382,25 +417,32 @@ export const claimReferral = createServerFn({ method: "POST" })
       return { ok: false, reason: "self" as const };
     }
 
-    // Already recorded for this friend + code? (idempotent)
+    // Already recorded for this friend + code in this tenant? (idempotent, tenant-bound so a
+    // referral in another tenant can never satisfy or suppress a legitimate claim here).
     const { data: existing } = await supabaseAdmin
       .from("referrals")
       .select("id")
       .eq("code", link.code)
       .eq("referred_user_id", context.userId)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
     if (existing) return { ok: true, reason: "already" as const };
 
     const email = (context.claims as { email?: string }).email ?? null;
-    const { error: insErr } = await supabaseAdmin.from("referrals").insert({
-      referral_code_id: link.id,
-      code: link.code,
-      referrer_user_id: link.referrer_user_id,
-      referred_user_id: context.userId,
-      referred_email: email,
-      status: "signed_up",
-      bonus_status: "none",
-    });
+    const { error: insErr } = await supabaseAdmin.from("referrals").insert(
+      withForcedTenantId(
+        {
+          referral_code_id: link.id,
+          code: link.code,
+          referrer_user_id: link.referrer_user_id,
+          referred_user_id: context.userId,
+          referred_email: email,
+          status: "signed_up",
+          bonus_status: "none",
+        },
+        tenantId,
+      ),
+    );
     if (insErr) {
       // 23505 = the unique guard fired in a race → treat as already recorded.
       if (insErr.code === "23505") return { ok: true, reason: "already" as const };

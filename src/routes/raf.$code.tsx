@@ -1,9 +1,8 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { useServerFn } from "@tanstack/react-start";
+import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { setRafCookie, rafShareDescription } from "@/lib/referral";
-import { resolveReferralCode, resolveReferralCodeMeta } from "@/lib/referrals.functions";
+import { resolveReferralCodeTenantSlug } from "@/lib/referrals.functions";
 import { Button } from "@/components/ui/button";
 import { Gift, CalendarCheck, MessageSquare, Mic, ShieldCheck } from "lucide-react";
 import avatarImg from "@/assets/susan.png";
@@ -23,16 +22,17 @@ function rafShareUrl(code: string, tenantSlug?: string | null): string {
 
 export const Route = createFileRoute("/raf/$code")({
   loader: async ({ params }) => {
-    const meta = await resolveReferralCodeMeta(params.code);
-    return { meta, shareUrl: rafShareUrl(params.code, meta?.tenantSlug) };
+    // B2a: the bare /raf/<code> route resolves ONLY the code's owning tenant (to bootstrap-redirect
+    // into it). The referrer identity is never fetched or rendered here — it is disclosed only on
+    // the tenant-validated /$tenantSlug/raf/<code> route.
+    const { tenantSlug } = await resolveReferralCodeTenantSlug(params.code);
+    return { tenantSlug, shareUrl: rafShareUrl(params.code, tenantSlug) };
   },
   head: ({ loaderData, params }) => {
-    const referrerName = loaderData?.meta?.referrer_name ?? null;
-    const title = referrerName
-      ? `${referrerName} invited you — Mortgage Hub`
-      : "A friend invited you — Mortgage Hub";
-    const description = rafShareDescription(referrerName);
-    const url = loaderData?.shareUrl ?? rafShareUrl(params.code, loaderData?.meta?.tenantSlug);
+    // No referrer name in metadata before tenant validation.
+    const title = "A friend invited you — Mortgage Hub";
+    const description = rafShareDescription(null);
+    const url = loaderData?.shareUrl ?? rafShareUrl(params.code, loaderData?.tenantSlug ?? null);
     return {
       meta: [
         { title },
@@ -51,7 +51,7 @@ function ReferAFriendLanding() {
   const { code } = Route.useParams();
   const loaderData = Route.useLoaderData();
   const navigate = useNavigate();
-  const tenantSlug = loaderData?.meta?.tenantSlug ?? null;
+  const tenantSlug = loaderData?.tenantSlug ?? null;
 
   useEffect(() => {
     if (!tenantSlug) return;
@@ -65,7 +65,7 @@ function ReferAFriendLanding() {
     return <div className="min-h-screen bg-background" />;
   }
 
-  return <RafLanding code={code} initialMeta={loaderData?.meta ?? null} />;
+  return <RafLanding code={code} initialMeta={null} />;
 }
 
 export function RafLanding({
@@ -80,45 +80,20 @@ export function RafLanding({
 }) {
   const navigate = useNavigate();
   const tenantUi = useTenantUi();
-  const resolveFn = useServerFn(resolveReferralCode);
-  const [referrerName, setReferrerName] = useState<string | null>(
-    initialMeta?.referrer_name ?? null,
-  );
-  const [tenantSlug, setTenantSlug] = useState<string | null>(
-    initialMeta?.tenantSlug ?? tenantUi?.slug ?? null,
-  );
-  const [ready, setReady] = useState(!!initialMeta);
+  // B2a: the referrer name is only ever shown from server-validated, tenant-scoped loader data
+  // (initialMeta, supplied exclusively by the tenant-prefixed route). The bare route passes
+  // initialMeta=null and never fetches identity client-side, so no referrer name is disclosed
+  // before tenant validation.
+  const referrerName = initialMeta?.referrer_name ?? null;
+  const tenantSlug = initialMeta?.tenantSlug ?? tenantUi?.slug ?? null;
 
   useEffect(() => {
-    let cancelled = false;
-
+    // Record the RAF code in the untrusted 'raf_ref' cookie; it is corroborating context only and
+    // carries no tenant authority (claimReferral resolves the authoritative tenant on claim).
     if (code) setRafCookie(code);
-
-    if (!initialMeta) {
-      (async () => {
-        try {
-          const link = await resolveFn({ data: { code } });
-          if (cancelled) return;
-          if (link) {
-            setRafCookie(link.code);
-            setReferrerName(link.referrer_name ?? null);
-            setTenantSlug(link.tenantSlug ?? tenantUi?.slug ?? null);
-          }
-        } catch {
-          // Network/server hiccup — still show the welcoming page.
-        } finally {
-          if (!cancelled) setReady(true);
-        }
-      })();
-    }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [code, resolveFn, initialMeta, tenantUi?.slug]);
+  }, [code]);
 
   useEffect(() => {
-    if (!ready) return;
     let cancelled = false;
     supabase.auth.getSession().then(({ data }) => {
       if (cancelled || !data.session) return;
@@ -134,9 +109,7 @@ export function RafLanding({
     return () => {
       cancelled = true;
     };
-  }, [ready, tenantSlug, navigate]);
-
-  if (!ready) return <div className="min-h-screen bg-background" />;
+  }, [tenantSlug, navigate]);
 
   const firmLabel = tenantUi?.tradingName || tenantUi?.companyName || "Mortgage Hub";
   const authSearch = buildAuthNavigateSearch({ tenantSlug });

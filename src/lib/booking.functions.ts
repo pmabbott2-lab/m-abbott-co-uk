@@ -161,15 +161,9 @@ async function resolveBookingTenantId(opts: {
     return ctx.tenant.id;
   }
 
-  if (opts.introducerId) {
-    const { data: intro } = await supabaseAdmin
-      .from("introducers")
-      .select("tenant_id")
-      .eq("id", opts.introducerId)
-      .maybeSingle();
-    if (intro?.tenant_id) return intro.tenant_id as string;
-  }
-
+  // B2a: a logged-in user's canonical (sole-membership) tenant outranks any introducer carried by
+  // the untrusted referral cookie, so a foreign / stale cookie can never switch an existing user
+  // into another tenant. Ambiguous (0 / 2+ membership) users fall through rather than being guessed.
   if (opts.actingUserId) {
     try {
       const auth = await resolveSoleMembershipTenant(opts.actingUserId);
@@ -177,6 +171,15 @@ async function resolveBookingTenantId(opts: {
     } catch (e) {
       if (!(e instanceof TenantContextError)) throw e;
     }
+  }
+
+  if (opts.introducerId) {
+    const { data: intro } = await supabaseAdmin
+      .from("introducers")
+      .select("tenant_id")
+      .eq("id", opts.introducerId)
+      .maybeSingle();
+    if (intro?.tenant_id) return intro.tenant_id as string;
   }
 
   if (opts.advisorId) {
@@ -1044,7 +1047,8 @@ async function bookAppointmentTrusted(
     referralChannel = "direct_booking";
   }
 
-  // Introducer must belong to the same tenant when present.
+  // Introducer must belong to the same tenant when present. Retained for the staff-credit path
+  // (line below), where a mismatch is a server-side invariant violation, not untrusted input.
   const assertIntroducerInBookingTenant = async (id: string) => {
     const { data: introRow } = await supabaseAdmin
       .from("introducers")
@@ -1059,7 +1063,26 @@ async function bookAppointmentTrusted(
       );
     }
   };
-  if (introducerId && !creditActingStaff) await assertIntroducerInBookingTenant(introducerId);
+
+  // B2a: an introducer carried by the untrusted referral cookie is corroborating context, not
+  // authority. If it is foreign to (or absent from) the authoritative booking tenant, DISCARD it
+  // and continue the booking in the authoritative tenant — never block the customer's journey (BR7)
+  // and never let the cookie switch tenant. A same-tenant introducer is preserved and credited.
+  if (introducerId && !creditActingStaff) {
+    const { data: introRow } = await supabaseAdmin
+      .from("introducers")
+      .select("id, tenant_id")
+      .eq("id", introducerId)
+      .maybeSingle();
+    if (!introRow || introRow.tenant_id !== tenantId) {
+      introducerId = null;
+      if (!actingUserId) {
+        // Revert the referral-link attribution set for the (now-discarded) cookie introducer.
+        leadSource = "web";
+        referralChannel = data.channel ?? "direct_booking";
+      }
+    }
+  }
 
   if (leadId) {
     const { assertRowBelongsToTenant } = await import("@/lib/tenant-assert.server");
