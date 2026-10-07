@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mortgage calculator — Trent Valley Financial Services</title>
+  <meta
+    name="description"
+    content="Estimate monthly repayments for a purchase or remortgage with the Trent Valley Financial Services mortgage calculator. Illustrative only — not a quote."
+  />
+  <link rel="icon" href="assets/logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Figtree:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="styles.css?v=4" />
+  <script src="site-config.js?v=1"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="logo-link" href="/" aria-label="Trent Valley Financial Services home">
+        <img class="logo-img" src="assets/logo-white.png" width="260" height="130" alt="Trent Valley Financial Services" />
+      </a>
+      <nav class="desktop-nav" aria-label="Primary">
+        <a href="/#about">About Peter</a>
+        <a href="/#families">For families</a>
+        <a href="calculator.html" aria-current="page">Calculator</a>
+        <a href="introducers.html">Introducers</a>
+        <a href="careers.html">Careers</a>
+        <a href="/#start">Get in touch</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-ghost btn-sm" href="#" data-hub-link="/{tenant}/login" hidden>Sign in</a>
+        <a class="btn btn-ghost btn-sm" href="/#callback">Callback</a>
+        <a class="btn btn-primary btn-sm" href="/#appointment">Book</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="sub-hero" aria-label="Introduction">
+      <div class="hero-atmosphere" aria-hidden="true"></div>
+      <div class="container">
+        <span class="section-kicker">Mortgage calculator</span>
+        <h1>A clear first look at the numbers.</h1>
+        <p>
+          Estimate monthly repayments for a purchase or a remortgage. Figures are illustrative —
+          a starting point for the conversation, not a quote or a recommendation.
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="calc-layout">
+          <div class="panel">
+            <div class="calc-head">
+              <h2>Your figures</h2>
+              <div class="calc-mode" role="group" aria-label="Mortgage type">
+                <button type="button" class="calc-mode-btn is-active" data-calc-mode="purchase" aria-pressed="true">Purchase</button>
+                <button type="button" class="calc-mode-btn" data-calc-mode="remortgage" aria-pressed="false">Remortgage</button>
+              </div>
+            </div>
+
+            <div class="form-grid two">
+              <div class="field">
+                <label for="calc-price">Property value</label>
+                <div class="money-input">
+                  <span aria-hidden="true">£</span>
+                  <input type="text" id="calc-price" inputmode="numeric" value="335,000" autocomplete="off" />
+                </div>
+              </div>
+              <div class="field" id="field-deposit">
+                <label for="calc-deposit">Deposit</label>
+                <div class="money-input">
+                  <span aria-hidden="true">£</span>
+                  <input type="text" id="calc-deposit" inputmode="numeric" value="50,000" autocomplete="off" />
+                </div>
+              </div>
+              <div class="field" id="field-outstanding" hidden>
+                <label for="calc-outstanding">Outstanding mortgage</label>
+                <div class="money-input">
+                  <span aria-hidden="true">£</span>
+                  <input type="text" id="calc-outstanding" inputmode="numeric" value="200,000" autocomplete="off" />
+                </div>
+              </div>
+              <div class="field">
+                <label for="calc-loan">Loan amount <span class="field-note">(calculated)</span></label>
+                <div class="money-input">
+                  <span aria-hidden="true">£</span>
+                  <input type="text" id="calc-loan" readonly tabindex="-1" aria-readonly="true" />
+                </div>
+              </div>
+              <div class="field">
+                <label for="calc-term">Term (years)</label>
+                <input type="number" id="calc-term" min="1" max="40" value="30" />
+              </div>
+            </div>
+          </div>
+
+          <aside class="calc-results" aria-label="Your estimate">
+            <span class="section-kicker">Estimated monthly payment</span>
+            <strong class="calc-monthly" id="calc-monthly" aria-live="polite">—</strong>
+            <dl class="calc-stats">
+              <div><dt>Loan to value</dt><dd id="calc-ltv">—</dd></div>
+              <div><dt>Illustrative rate</dt><dd id="calc-rate">—</dd></div>
+              <div><dt>Total repayable</dt><dd id="calc-total">—</dd></div>
+              <div><dt>Total interest</dt><dd id="calc-interest">—</dd></div>
+            </dl>
+            <p id="rate-status" class="calc-status"></p>
+            <div class="bank-rate" role="group" aria-label="Bank of England Bank Rate">
+              <span>Bank of England Bank Rate</span>
+              <strong id="bank-rate-value">—</strong>
+              <span id="bank-rate-source">Loading…</span>
+              <a id="bank-rate-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Source</a>
+            </div>
+          </aside>
+        </div>
+
+        <div class="calc-notes">
+          <p id="rate-disclaimer">
+            Illustrative average market rates by LTV band, not advice. Your actual rate depends on your
+            circumstances, credit profile and lender criteria.
+          </p>
+          <p>
+            Repayment mortgage illustration using the standard amortisation formula. Bank of England Bank Rate is
+            shown for reference only and is not the rate you would pay.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-muted">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="section-kicker">Next steps</span>
+          <div class="rule" aria-hidden="true"></div>
+          <h2>When you’re ready, talk it through.</h2>
+          <p>
+            A calculator is only a starting point. A conversation with Peter turns the figures into a plan
+            that fits your family and your timing.
+          </p>
+        </div>
+        <div class="paths-auto reveal">
+          <a class="path-link-light" href="/#callback">
+            <span class="path-index">Callback</span>
+            <h3>Request a callback</h3>
+            <p>Share a few details and we will return your call at a convenient time.</p>
+            <span class="path-cta">Open form →</span>
+          </a>
+          <a class="path-link-light" href="/#appointment">
+            <span class="path-index">Appointment</span>
+            <h3>Book an appointment</h3>
+            <p>Choose a preferred slot for a private conversation — in person, by video or by telephone.</p>
+            <span class="path-cta">Open form →</span>
+          </a>
+          <a class="path-link-light" href="#" data-hub-link="/{tenant}/login?join=1" hidden>
+            <span class="path-index">Online</span>
+            <h3>Start online</h3>
+            <p>Create your secure MortgageHub account and share your details before we speak.</p>
+            <span class="path-cta">Get started →</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="section-kicker">How it works</span>
+          <div class="rule" aria-hidden="true"></div>
+          <h2>What the calculator does — and doesn’t.</h2>
+        </div>
+        <div class="guide-grid reveal">
+          <div>
+            <h3>The estimate</h3>
+            <p>
+              The calculator works out a monthly repayment for a capital-and-interest mortgage from the property
+              value, your deposit (or outstanding balance when remortgaging) and the term you choose. The rate is an
+              illustrative average for your loan-to-value band.
+            </p>
+          </div>
+          <div>
+            <h3>Key assumptions</h3>
+            <ul>
+              <li>Interest is compounded monthly.</li>
+              <li>The illustrative rate applies for the full term.</li>
+              <li>Fees, product incentives and lender criteria are not included.</li>
+              <li>It does not replace a full affordability assessment.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="notice reveal" role="note">
+          <strong>Important — illustrative figures only</strong>
+          <p>
+            This calculator gives an estimate based on the figures you enter. Rates shown are not mortgage offers,
+            quotations or recommendations. Your home may be repossessed if you do not keep up repayments on your
+            mortgage. See our <a href="disclosures.html">disclosures</a> for more information.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <img class="footer-logo" src="assets/logo-white.png" width="220" height="110" alt="Trent Valley Financial Services" />
+          <p>
+            <strong>Trent Valley Financial Services</strong><br />
+            Local financial services · Built on experience
+          </p>
+        </div>
+        <div class="footer-links">
+          <a href="/#about">About Peter</a>
+          <a href="/#story">Our story</a>
+          <a href="/#families">For families</a>
+          <a href="calculator.html">Calculator</a>
+          <a href="introducers.html">Introducers</a>
+          <a href="careers.html">Careers</a>
+          <a href="/#callback">Callback</a>
+          <a href="/#appointment">Appointment</a>
+          <a href="disclosures.html">Disclosures</a>
+        </div>
+      </div>
+      <div class="reg-block">
+        <p>
+          <strong>Regulatory placeholder:</strong> Trent Valley Financial Services — legal entity,
+          FCA authorisation and FRN to be confirmed before launch. This page is a design mock-up only.
+        </p>
+        <p>Your home may be repossessed if you do not keep up repayments on a mortgage or other loan secured on it.</p>
+        <p>© <span data-year></span> Trent Valley Financial Services. Template site — not financial advice.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="site.js?v=3"></script>
+  <script src="calculator.js?v=1"></script>
+</body>
+</html>

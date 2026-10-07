@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Careers — Trent Valley Financial Services</title>
+  <meta
+    name="description"
+    content="Careers at Trent Valley Financial Services. No current vacancies — register your interest in future mortgage and protection adviser roles."
+  />
+  <link rel="icon" href="assets/logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Figtree:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="styles.css?v=4" />
+  <script src="site-config.js?v=1"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="logo-link" href="/" aria-label="Trent Valley Financial Services home">
+        <img class="logo-img" src="assets/logo-white.png" width="260" height="130" alt="Trent Valley Financial Services" />
+      </a>
+      <nav class="desktop-nav" aria-label="Primary">
+        <a href="/#about">About Peter</a>
+        <a href="/#families">For families</a>
+        <a href="calculator.html">Calculator</a>
+        <a href="introducers.html">Introducers</a>
+        <a href="careers.html" aria-current="page">Careers</a>
+        <a href="/#start">Get in touch</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-primary btn-sm" href="#register-interest">Register interest</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="sub-hero" aria-label="Introduction">
+      <div class="hero-atmosphere" aria-hidden="true"></div>
+      <div class="container">
+        <span class="section-kicker">Careers</span>
+        <h1>Join a firm built on experience.</h1>
+        <p>
+          We are building a local, relationship-led advice business. When we grow the team, we will be looking
+          for advisers who share our values and want the time to do the job properly.
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="section-kicker">Working with us</span>
+          <div class="rule" aria-hidden="true"></div>
+          <h2>What you can expect.</h2>
+        </div>
+        <div class="value-grid reveal">
+          <article>
+            <h3>Time with clients</h3>
+            <p>Fewer, better conversations — advice given carefully, without a sales-floor pace.</p>
+          </article>
+          <article>
+            <h3>Experienced leadership</h3>
+            <p>Support and development from over 25 years in retail banking and mortgage distribution.</p>
+          </article>
+          <article>
+            <h3>Modern tools behind the scenes</h3>
+            <p>Our MortgageHub platform prepares clients before you meet them and keeps admin in one place.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-muted" id="vacancies">
+      <div class="container narrow">
+        <div class="section-head reveal">
+          <span class="section-kicker">Vacancies</span>
+          <div class="rule" aria-hidden="true"></div>
+          <h2>Current opportunities.</h2>
+        </div>
+        <div class="empty-state reveal">
+          <h3>There are no vacancies at the moment.</h3>
+          <p>
+            We are always pleased to hear from experienced mortgage and protection advisers, and from newly
+            qualified advisers who share our values. Register your interest and we will be in touch if a suitable
+            role opens.
+          </p>
+          <a class="btn btn-navy" href="#register-interest">Register your interest</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="register-interest">
+      <div class="container narrow">
+        <div class="panel reveal">
+          <div class="panel-head">
+            <h3>Register your interest</h3>
+            <p>Leave a few details and, if you like, your CV. We will contact you when a suitable role opens.</p>
+          </div>
+          <form data-form-type="careers-interest" data-endpoint="careersApplication" novalidate>
+            <div class="form-grid two">
+              <div class="field full">
+                <label for="apply-role">Area of interest <span class="req">*</span></label>
+                <select id="apply-role" name="role" required data-error="Please choose the kind of role you're interested in.">
+                  <option value="">Select…</option>
+                  <option value="experienced-mortgage-protection-adviser">Mortgage &amp; protection adviser (experienced)</option>
+                  <option value="newly-qualified-mortgage-adviser">Newly qualified mortgage adviser</option>
+                  <option value="administration-support">Administration &amp; client support</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div class="field full">
+                <label for="apply-name">Full name <span class="req">*</span></label>
+                <input type="text" id="apply-name" name="name" required autocomplete="name" data-error="Please enter your full name." />
+              </div>
+              <div class="field">
+                <label for="apply-phone">Telephone <span class="req">*</span></label>
+                <input type="tel" id="apply-phone" name="phone" required autocomplete="tel" placeholder="07…" data-error="Please enter your telephone number." />
+              </div>
+              <div class="field">
+                <label for="apply-email">Email <span class="req">*</span></label>
+                <input type="email" id="apply-email" name="email" required autocomplete="email" placeholder="you@example.com" data-error="Please enter a valid email address." />
+              </div>
+              <div class="field full">
+                <span class="field-label" id="apply-cv-label">CV <span class="field-note">(optional · PDF or Word, up to 5MB)</span></span>
+                <div class="file-upload">
+                  <input
+                    type="file"
+                    id="apply-cv"
+                    name="cv"
+                    accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    data-max-mb="5"
+                    aria-labelledby="apply-cv-label apply-cv-button"
+                  />
+                  <label for="apply-cv" id="apply-cv-button" class="btn btn-navy btn-sm">Upload CV</label>
+                  <span class="file-upload-name" data-file-name>No file chosen</span>
+                  <button type="button" class="file-upload-clear" data-file-clear hidden>Remove</button>
+                </div>
+              </div>
+              <div class="field full">
+                <label for="apply-message">A little about you <span class="field-note">(optional)</span></label>
+                <textarea id="apply-message" name="message" placeholder="Your experience, qualifications and the kind of role you're looking for."></textarea>
+              </div>
+            </div>
+            <label class="consent">
+              <input type="checkbox" name="cemapQualified" />
+              <span>I hold CeMAP (or an equivalent mortgage advice qualification).</span>
+            </label>
+            <label class="consent">
+              <input type="checkbox" name="consent" required data-error="Please confirm you're happy for us to keep your details." />
+              <span>
+                I agree that Trent Valley Financial Services may store my details and contact me about future
+                opportunities, in line with the <a href="disclosures.html">privacy information</a>.
+              </span>
+            </label>
+            <p class="form-message" hidden></p>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-navy">Register interest</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <img class="footer-logo" src="assets/logo-white.png" width="220" height="110" alt="Trent Valley Financial Services" />
+          <p>
+            <strong>Trent Valley Financial Services</strong><br />
+            Local financial services · Built on experience
+          </p>
+        </div>
+        <div class="footer-links">
+          <a href="/#about">About Peter</a>
+          <a href="/#story">Our story</a>
+          <a href="/#families">For families</a>
+          <a href="calculator.html">Calculator</a>
+          <a href="introducers.html">Introducers</a>
+          <a href="careers.html">Careers</a>
+          <a href="/#callback">Callback</a>
+          <a href="/#appointment">Appointment</a>
+          <a href="disclosures.html">Disclosures</a>
+        </div>
+      </div>
+      <div class="reg-block">
+        <p>
+          <strong>Regulatory placeholder:</strong> Trent Valley Financial Services — legal entity,
+          FCA authorisation and FRN to be confirmed before launch. This page is a design mock-up only.
+        </p>
+        <p>Trent Valley Financial Services is an equal opportunities employer. Any offer would be subject to interview, references and FCA fitness and propriety checks.</p>
+        <p>© <span data-year></span> Trent Valley Financial Services. Template site — not financial advice.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="site.js?v=3"></script>
+  <script src="site-forms.js?v=1"></script>
+</body>
+</html>

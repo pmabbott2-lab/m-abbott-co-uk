@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Introducer partnerships — Trent Valley Financial Services</title>
+  <meta
+    name="description"
+    content="Work with Trent Valley Financial Services. A local, experienced firm for estate agents, solicitors, accountants and other professionals who refer clients for mortgage advice."
+  />
+  <link rel="icon" href="assets/logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Figtree:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="styles.css?v=4" />
+  <script src="site-config.js?v=1"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="logo-link" href="/" aria-label="Trent Valley Financial Services home">
+        <img class="logo-img" src="assets/logo-white.png" width="260" height="130" alt="Trent Valley Financial Services" />
+      </a>
+      <nav class="desktop-nav" aria-label="Primary">
+        <a href="/#about">About Peter</a>
+        <a href="/#families">For families</a>
+        <a href="calculator.html">Calculator</a>
+        <a href="introducers.html" aria-current="page">Introducers</a>
+        <a href="careers.html">Careers</a>
+        <a href="/#start">Get in touch</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-ghost btn-sm" href="#" data-hub-link="/{tenant}/login" hidden>Partner sign in</a>
+        <a class="btn btn-primary btn-sm" href="#introducer-enquiry">Enquire</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="sub-hero" aria-label="Introduction">
+      <div class="hero-atmosphere" aria-hidden="true"></div>
+      <div class="container">
+        <span class="section-kicker">Introducer partnerships</span>
+        <h1>Refer your clients to a local firm built on experience.</h1>
+        <p>
+          We work with professionals across the Trent Valley who want their clients looked after properly —
+          with care, clear communication and advice that puts the family first.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#introducer-enquiry">Enquire about becoming an introducer</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="section-kicker">Who we work with</span>
+          <div class="rule" aria-hidden="true"></div>
+          <h2>Professionals whose clients need a mortgage.</h2>
+          <p>If your clients are buying, moving or remortgaging, we would like to hear from you.</p>
+        </div>
+        <ul class="chip-row reveal" aria-label="Types of introducer">
+          <li class="chip">Estate agents</li>
+          <li class="chip">Solicitors &amp; conveyancers</li>
+          <li class="chip">Accountants</li>
+          <li class="chip">Financial planners</li>
+          <li class="chip">Housebuilders &amp; developers</li>
+          <li class="chip">Other professional referrers</li>
+        </ul>
+
+        <div class="value-grid reveal">
+          <article>
+            <h3>Your clients, looked after</h3>
+            <p>Every referral gets a personal, unhurried conversation and a clear explanation of the options.</p>
+          </article>
+          <article>
+            <h3>Kept in the loop</h3>
+            <p>With your client’s permission, we keep you informed as things move forward, so you can plan with confidence.</p>
+          </article>
+          <article>
+            <h3>A reputation to protect</h3>
+            <p>Built on traditional values — the way you would want your own clients treated.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-deep">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="section-kicker">How it works</span>
+          <div class="rule" aria-hidden="true"></div>
+          <h2>Three simple steps.</h2>
+        </div>
+        <div class="family-paths reveal">
+          <article class="family-path">
+            <span class="path-index">01</span>
+            <h3>Get in touch</h3>
+            <p>Tell us about you and your business using the enquiry form below.</p>
+          </article>
+          <article class="family-path">
+            <span class="path-index">02</span>
+            <h3>Agree terms</h3>
+            <p>We talk through how referrals will work and agree written terms before anything begins.</p>
+          </article>
+          <article class="family-path">
+            <span class="path-index">03</span>
+            <h3>Refer with confidence</h3>
+            <p>Introduce clients when they need advice. Online referral links and progress updates through MortgageHub are coming soon.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-muted" id="introducer-enquiry">
+      <div class="container narrow">
+        <div class="panel reveal">
+          <div class="panel-head">
+            <h3>Become an introducer</h3>
+            <p>Tell us a little about you and your business and we will be in touch to talk it through.</p>
+          </div>
+          <form data-form-type="introducer-enquiry" data-endpoint="introducerEnquiry" novalidate>
+            <div class="form-grid two">
+              <div class="field">
+                <label for="intro-name">Your name <span class="req">*</span></label>
+                <input type="text" id="intro-name" name="name" required autocomplete="name" data-error="Please enter your name." />
+              </div>
+              <div class="field">
+                <label for="intro-company">Company name <span class="req">*</span></label>
+                <input type="text" id="intro-company" name="company" required autocomplete="organization" data-error="Please enter your company name." />
+              </div>
+              <div class="field full">
+                <label for="intro-type">Type of business <span class="req">*</span></label>
+                <select id="intro-type" name="businessType" required data-error="Please choose your type of business.">
+                  <option value="">Select…</option>
+                  <option value="estate-agent">Estate agent</option>
+                  <option value="solicitor">Solicitor / conveyancer</option>
+                  <option value="accountant">Accountant</option>
+                  <option value="financial-planner">Financial planner</option>
+                  <option value="housebuilder">Housebuilder / developer</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="intro-phone">Telephone <span class="req">*</span></label>
+                <input type="tel" id="intro-phone" name="phone" required autocomplete="tel" placeholder="07…" data-error="Please enter your telephone number." />
+              </div>
+              <div class="field">
+                <label for="intro-email">Email <span class="req">*</span></label>
+                <input type="email" id="intro-email" name="email" required autocomplete="email" placeholder="you@company.co.uk" data-error="Please enter a valid email address." />
+              </div>
+              <div class="field full">
+                <label for="intro-message">Anything else we should know? <span class="field-note">(optional)</span></label>
+                <textarea id="intro-message" name="message" placeholder="For example, your area and the kind of clients you usually work with."></textarea>
+              </div>
+            </div>
+            <label class="consent">
+              <input type="checkbox" name="consent" required data-error="Please confirm you're happy for us to contact you." />
+              <span>
+                I agree that Trent Valley Financial Services may store these details and contact me about an introducer
+                arrangement, in line with the <a href="disclosures.html">privacy information</a>.
+              </span>
+            </label>
+            <p class="form-message" hidden></p>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-navy">Send enquiry</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="notice reveal" role="note">
+          <strong>For introducers</strong>
+          <p>
+            Written terms are agreed for every introducer arrangement. Introducers must not present themselves as
+            giving regulated mortgage advice unless separately authorised, and any referral fees are disclosed to
+            clients in line with FCA requirements.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <img class="footer-logo" src="assets/logo-white.png" width="220" height="110" alt="Trent Valley Financial Services" />
+          <p>
+            <strong>Trent Valley Financial Services</strong><br />
+            Local financial services · Built on experience
+          </p>
+        </div>
+        <div class="footer-links">
+          <a href="/#about">About Peter</a>
+          <a href="/#story">Our story</a>
+          <a href="/#families">For families</a>
+          <a href="calculator.html">Calculator</a>
+          <a href="introducers.html">Introducers</a>
+          <a href="careers.html">Careers</a>
+          <a href="/#callback">Callback</a>
+          <a href="/#appointment">Appointment</a>
+          <a href="disclosures.html">Disclosures</a>
+        </div>
+      </div>
+      <div class="reg-block">
+        <p>
+          <strong>Regulatory placeholder:</strong> Trent Valley Financial Services — legal entity,
+          FCA authorisation and FRN to be confirmed before launch. This page is a design mock-up only.
+        </p>
+        <p>Introducer information is for professional referrers only and is not customer advice.</p>
+        <p>© <span data-year></span> Trent Valley Financial Services. Template site — not financial advice.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="site.js?v=3"></script>
+  <script src="site-forms.js?v=1"></script>
+</body>
+</html>
