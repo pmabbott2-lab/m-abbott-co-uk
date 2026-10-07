@@ -898,37 +898,6 @@ async function sendBookingConfirmations(opts: {
   }
 }
 
-const BOOKING_ATTRIBUTION_LOCKED_MESSAGE =
-  "This booking can't be completed from this company account yet.";
-
-/**
- * Introducer attribution is still one global first-wins row per customer (S4C4). A booking may
- * create that row only when the customer is provably tied to the booking tenant alone. An
- * existing row is never modified by a booking, so it does not block one.
- */
-async function assertBookingMayAttributeCustomer(
-  customerId: string,
-  tenantId: string,
-): Promise<void> {
-  const { supabaseAdminUntyped: supabaseAdmin } =
-    await import("@/integrations/supabase/client.server");
-  const { data: links, error } = await supabaseAdmin
-    .from("customer_introducer_links")
-    .select("customer_id")
-    .eq("customer_id", customerId)
-    .limit(1);
-  if (error) {
-    if (isMissingContactTable(error)) return;
-    throw new Error(error.message);
-  }
-  if ((links ?? []).length > 0) return;
-  const { customerTenantFootprint } = await import("@/lib/tenant-assert.server");
-  const footprint = await customerTenantFootprint(customerId);
-  const onlyBookingTenant =
-    !footprint.indeterminate && [...footprint.tenantIds].every((t) => t === tenantId);
-  if (!onlyBookingTenant) throw new Error(BOOKING_ATTRIBUTION_LOCKED_MESSAGE);
-}
-
 /**
  * Trusted booking implementation. Callers must have established ownership or staff / introducer
  * authority first; client-shaped input must go through bookAppointmentPublic instead.
@@ -1096,8 +1065,28 @@ async function bookAppointmentTrusted(
 
   const targetCustomerId = data.customerId ?? actingUserId ?? null;
   const customerIdForIntro = targetCustomerId ?? sessionCustomerId;
-  if (customerIdForIntro && (introducerId || creditActingStaff)) {
-    await assertBookingMayAttributeCustomer(customerIdForIntro, tenantId);
+  // Attribution eligibility is read before this booking writes anything, so the appointment and
+  // case it creates never disqualify it. Another tenant's attribution never blocks the booking.
+  const { snapshotTenantCustomerState, createTenantAttributionIfEligible } =
+    await import("@/lib/introducer-attribution");
+  const attributionSnapshot =
+    customerIdForIntro && (introducerId || creditActingStaff)
+      ? await snapshotTenantCustomerState(supabaseAdmin, customerIdForIntro, tenantId)
+      : null;
+  // A deactivated or removed staff registration in this tenant is not revived by a booking.
+  if (creditActingStaff && actingUserId) {
+    const { data: staffRegistration, error: staffRegistrationErr } = await supabaseAdmin
+      .from("introducers")
+      .select("id, active, deleted_at")
+      .eq("user_id", actingUserId)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (
+      staffRegistrationErr ||
+      (staffRegistration && (staffRegistration.active === false || staffRegistration.deleted_at))
+    ) {
+      creditActingStaff = false;
+    }
   }
   if (creditActingStaff && actingUserId) {
     introducerId = await ensureStaffIntroducerRecord(actingUserId);
@@ -1201,14 +1190,14 @@ async function bookAppointmentTrusted(
       .is("appointment_id", null);
   }
 
-  if (customerIdForIntro && introducerId) {
-    const { ensureCustomerIntroducerLink } = await import("@/lib/introducer-attribution");
-    await ensureCustomerIntroducerLink(
-      supabaseAdmin,
-      customerIdForIntro,
+  if (customerIdForIntro && introducerId && attributionSnapshot) {
+    await createTenantAttributionIfEligible(supabaseAdmin, {
+      customerId: customerIdForIntro,
+      tenantId,
       introducerId,
-      "booking",
-    );
+      source: "booking",
+      snapshot: attributionSnapshot,
+    });
   }
 
   if (data.sendSms !== false || data.customerEmail) {
@@ -2677,36 +2666,25 @@ export const listAdvisorContacts = createServerFn({ method: "GET" })
     if (customerIds.length > 0) {
       const { data: linksRaw } = await supabaseAdmin
         .from("customer_introducer_links")
-        .select("customer_id, introducer_id, tenant_id")
+        .select("customer_id, introducer_id")
+        .eq("tenant_id", tenantId)
         .in("customer_id", customerIds);
-      const allLinks = (linksRaw ?? []) as Array<{
-        customer_id: string;
-        introducer_id: string;
-        tenant_id: string | null;
-      }>;
-      const introIds = [...new Set(allLinks.map((l) => l.introducer_id))];
-      const introMap = new Map<
-        string,
-        { code: string | null; name: string | null; tenantId: string | null }
-      >();
+      const links = (linksRaw ?? []) as Array<{ customer_id: string; introducer_id: string }>;
+      const introIds = [...new Set(links.map((l) => l.introducer_id))];
+      const introMap = new Map<string, { code: string | null; name: string | null }>();
       if (introIds.length > 0) {
         const { data: intros } = await supabaseAdmin
           .from("introducers")
-          .select("id, company_code, company_name, tenant_id")
+          .select("id, company_code, company_name")
+          .eq("tenant_id", tenantId)
           .in("id", introIds);
         for (const i of intros ?? []) {
           introMap.set(i.id, {
             code: (i as { company_code?: string | null }).company_code ?? null,
             name: (i as { company_name?: string | null }).company_name ?? null,
-            tenantId: (i as { tenant_id?: string | null }).tenant_id ?? null,
           });
         }
       }
-      const links = allLinks.filter((l) => {
-        const introTenant = introMap.get(l.introducer_id)?.tenantId ?? null;
-        if (l.tenant_id && introTenant && l.tenant_id !== introTenant) return false;
-        return (l.tenant_id ?? introTenant) === tenantId;
-      });
       const linkByCustomer = new Map(links.map((l) => [l.customer_id, l.introducer_id]));
       for (const c of contacts) {
         if (!c.customerId) continue;

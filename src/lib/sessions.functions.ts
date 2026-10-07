@@ -838,31 +838,23 @@ export const getCustomerHub = createServerFn({ method: "POST" })
     }
 
     let introducer: CustomerHubIntroducer = null;
-    const { peekIntroducerIdForCustomer } = await import("@/lib/introducer-attribution");
-    const resolvedId = await peekIntroducerIdForCustomer(
-      supabaseAdmin,
-      data.customerId,
-      sessionIds[0] ?? null,
-    );
-    if (resolvedId) {
+    const { getTenantAttribution } = await import("@/lib/introducer-attribution");
+    const attribution = await getTenantAttribution(supabaseAdmin, actingTenantId, data.customerId);
+    if (attribution) {
       const { data: intro } = await supabaseAdmin
         .from("introducers")
-        .select("id, company_name, company_code, slug, tenant_id")
-        .eq("id", resolvedId)
+        .select("id, company_name, company_code, slug")
+        .eq("id", attribution.introducerId)
+        .eq("tenant_id", actingTenantId)
         .maybeSingle();
-      const introTenantId = (intro as { tenant_id?: string | null } | null)?.tenant_id ?? null;
-      if (intro && introTenantId === actingTenantId) {
-        let tenantSlug: string | null = null;
-        const tenantId = introTenantId;
-        if (tenantId) {
-          const { data: ten } = await supabaseAdmin
-            .from("tenants")
-            .select("slug, status")
-            .eq("id", tenantId)
-            .eq("status", "active")
-            .maybeSingle();
-          tenantSlug = ten?.slug ?? null;
-        }
+      if (intro) {
+        const { data: ten } = await supabaseAdmin
+          .from("tenants")
+          .select("slug, status")
+          .eq("id", actingTenantId)
+          .eq("status", "active")
+          .maybeSingle();
+        const tenantSlug: string | null = ten?.slug ?? null;
         introducer = {
           id: intro.id,
           companyName: intro.company_name,
@@ -3920,7 +3912,8 @@ export const exportOwnerCustomerReport = createServerFn({ method: "GET" })
     {
       const { data: links } = await supabaseAdmin
         .from("customer_introducer_links")
-        .select("customer_id, introducer_id");
+        .select("customer_id, introducer_id")
+        .eq("tenant_id", view.tenantId);
       const introIds = [...new Set((links ?? []).map((l) => l.introducer_id))];
       const introNameById = new Map<string, string>();
       if (introIds.length > 0) {

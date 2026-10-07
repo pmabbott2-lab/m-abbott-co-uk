@@ -253,34 +253,14 @@ export const listJourneyAnalyticsLeads = createServerFn({ method: "GET" })
     {
       const { data: links, error } = await supabaseAdmin
         .from("customer_introducer_links")
-        .select("customer_id, tenant_id, introducer_id")
+        .select("customer_id")
+        .eq("tenant_id", tenantId)
         .in("customer_id", customerIds);
       if (error && !isMissingTable(error)) {
         /* ignore missing links table */
       } else {
-        type LinkRow = {
-          customer_id: string | null;
-          tenant_id: string | null;
-          introducer_id: string | null;
-        };
-        const linkRows = (links ?? []) as LinkRow[];
-        const introIds = [
-          ...new Set(linkRows.map((l) => l.introducer_id).filter((id): id is string => !!id)),
-        ];
-        const introTenant = new Map<string, string | null>();
-        if (introIds.length) {
-          const { data: intros } = await supabaseAdmin
-            .from("introducers")
-            .select("id, tenant_id")
-            .in("id", introIds);
-          for (const i of (intros ?? []) as Array<{ id: string; tenant_id: string | null }>) {
-            introTenant.set(i.id, i.tenant_id);
-          }
-        }
-        for (const l of linkRows) {
-          const effective =
-            l.tenant_id ?? (l.introducer_id ? introTenant.get(l.introducer_id) : null);
-          if (l.customer_id && effective === tenantId) introducerCustomers.add(l.customer_id);
+        for (const l of (links ?? []) as Array<{ customer_id: string | null }>) {
+          if (l.customer_id) introducerCustomers.add(l.customer_id);
         }
       }
     }

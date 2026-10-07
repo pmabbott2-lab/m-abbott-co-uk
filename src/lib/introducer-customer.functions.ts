@@ -1,50 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { resolveAdminAccess } from "@/lib/admin.functions";
-import { canAmendIntroducer, canRefreshIntroducerCommission } from "@/lib/admin-access";
+import type { ResourceCapability } from "@/lib/tenant-assert.server";
 
-function isMissing(error: { code?: string; message?: string } | null): boolean {
-  if (!error) return false;
-  const msg = (error.message ?? "").toLowerCase();
-  return (
-    error.code === "42P01" ||
-    error.code === "42703" ||
-    error.code === "PGRST204" ||
-    msg.includes("does not exist") ||
-    msg.includes("schema cache")
-  );
-}
+type AdminDb = (typeof import("@/integrations/supabase/client.server"))["supabaseAdminUntyped"];
 
-async function logFinanceAudit(
-  supabaseAdmin: Awaited<
-    ReturnType<typeof import("@/integrations/supabase/client.server")>
-  >["supabaseAdmin"],
-  row: {
-    audit_type: string;
-    subject_user_id?: string | null;
-    customer_id?: string | null;
-    session_id?: string | null;
-    role?: string | null;
-    fee_type?: string | null;
-    summary: string;
-    detail?: Record<string, unknown>;
-    changed_by: string;
-  },
-) {
-  const { error } = await supabaseAdmin.from("finance_audit_log").insert({
-    audit_type: row.audit_type,
-    subject_user_id: row.subject_user_id ?? null,
-    customer_id: row.customer_id ?? null,
-    session_id: row.session_id ?? null,
-    role: row.role ?? null,
-    fee_type: row.fee_type ?? null,
-    summary: row.summary,
-    detail: row.detail ?? null,
-    changed_by: row.changed_by,
-  });
-  if (error && !isMissing(error)) console.error("finance_audit_log", error);
-}
+export const COMMISSION_REFRESH_DISABLED_MESSAGE =
+  "Commission refresh is not available. Historical commission is unchanged.";
 
 export type CustomerIntroducerInfo = {
   customerId: string;
@@ -56,30 +18,42 @@ export type CustomerIntroducerInfo = {
   isStaff: boolean;
 };
 
+/** Introducer attribution is looked up and amended by the acting tenant's Owner only. */
+function ownerCapability(mutate: boolean): ResourceCapability {
+  return { mutate, allocation: "none", allow: (v) => v.adminAccess.isOwner };
+}
+
+/** A session named alongside a customer must be that customer's live session in the tenant. */
+async function assertCustomerSessionInTenant(
+  db: AdminDb,
+  sessionId: string,
+  customerId: string,
+  tenantId: string,
+): Promise<void> {
+  const { RESOURCE_NOT_FOUND_MESSAGE } = await import("@/lib/tenant-assert.server");
+  const { data, error } = await db
+    .from("interview_sessions")
+    .select("id")
+    .eq("id", sessionId)
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+}
+
 export const lookupIntroducerByCode = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ companyCode: z.string().regex(/^\d{4}$/) }).parse(d))
   .handler(async ({ data, context }) => {
-    const { resolveActingTenantRole } = await import("@/lib/tenant-role.server");
-    const view = await resolveActingTenantRole(context.userId);
-    if (!view.isMainAdmin && !view.isAdvisor) {
-      throw new Error("Forbidden");
-    }
-
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: intro, error } = await supabaseAdmin
-      .from("introducers")
-      .select("id, company_name, company_code, active, deleted_at")
-      .eq("company_code", data.companyCode)
-      .is("deleted_at", null)
-      .maybeSingle();
-    if (error && !isMissing(error)) throw new Error(error.message);
-    if (!intro || !intro.active) throw new Error(`No active introducer found for code ${data.companyCode}.`);
-    return {
-      introducerId: intro.id as string,
-      companyCode: (intro as { company_code?: string }).company_code ?? data.companyCode,
-      companyName: (intro as { company_name?: string | null }).company_name ?? null,
-    };
+    const { resolveActingTenantForList } = await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, ownerCapability(false));
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    const { resolveTenantIntroducerByCode } = await import("@/lib/introducer-attribution");
+    const intro = await resolveTenantIntroducerByCode(supabaseAdmin, tenantId, data.companyCode);
+    return { companyCode: intro.companyCode, companyName: intro.companyName };
   });
 
 export const getCustomerIntroducer = createServerFn({ method: "GET" })
@@ -87,60 +61,69 @@ export const getCustomerIntroducer = createServerFn({ method: "GET" })
   .inputValidator((d: unknown) =>
     z.object({ customerId: z.string().uuid(), sessionId: z.string().uuid().optional() }).parse(d),
   )
-  .handler(async ({ data }): Promise<CustomerIntroducerInfo> => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { resolveIntroducerIdForCustomer } = await import("@/lib/introducer-attribution");
-    const introducerId = await resolveIntroducerIdForCustomer(
-      supabaseAdmin,
-      data.customerId,
-      data.sessionId ?? null,
-    );
-
-    if (!introducerId) {
-      return {
-        customerId: data.customerId,
-        introducerId: null,
-        companyCode: null,
-        companyName: null,
-        effectiveFrom: null,
-        isStaff: false,
-      };
+  .handler(async ({ data, context }): Promise<CustomerIntroducerInfo> => {
+    const { authoriseTenantCustomer } = await import("@/lib/tenant-assert.server");
+    const { staffCustomerCapability } = await import("@/lib/sessions.functions");
+    const { tenantId } = await authoriseTenantCustomer({
+      userId: context.userId,
+      customerId: data.customerId,
+      capability: staffCustomerCapability(false),
+    });
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    if (data.sessionId) {
+      await assertCustomerSessionInTenant(supabaseAdmin, data.sessionId, data.customerId, tenantId);
     }
 
-    const { data: intro } = await supabaseAdmin
-      .from("introducers")
-      .select("id, company_code, company_name, user_id, tenant_id")
-      .eq("id", introducerId)
-      .maybeSingle();
+    const empty: CustomerIntroducerInfo = {
+      customerId: data.customerId,
+      introducerId: null,
+      companyCode: null,
+      companyName: null,
+      effectiveFrom: null,
+      isStaff: false,
+    };
+    const { getTenantAttribution } = await import("@/lib/introducer-attribution");
+    const attribution = await getTenantAttribution(supabaseAdmin, tenantId, data.customerId);
+    if (!attribution) return empty;
 
-    const { data: link } = await supabaseAdmin
-      .from("customer_introducer_links")
-      .select("effective_from")
-      .eq("customer_id", data.customerId)
+    const { data: intro, error } = await supabaseAdmin
+      .from("introducers")
+      .select("id, company_code, company_name, user_id")
+      .eq("id", attribution.introducerId)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!intro) return empty;
 
     let isStaff = false;
-    const introUserId = (intro as { user_id?: string | null } | null)?.user_id ?? null;
-    const introTenantId = (intro as { tenant_id?: string | null } | null)?.tenant_id ?? null;
-    if (introUserId) {
-      const { loadTenantRoleForTenantId, resolveActingTenantRole } = await import(
-        "@/lib/tenant-role.server"
-      );
-      const targetView = introTenantId
-        ? await loadTenantRoleForTenantId(introUserId, introTenantId)
-        : await resolveActingTenantRole(introUserId);
+    if (intro.user_id) {
+      const { loadTenantRoleForTenantId } = await import("@/lib/tenant-role.server");
+      const targetView = await loadTenantRoleForTenantId(intro.user_id as string, tenantId);
       isStaff = targetView.isAdvisor || targetView.isMainAdmin;
     }
 
     return {
       customerId: data.customerId,
-      introducerId,
-      companyCode: (intro as { company_code?: string | null })?.company_code ?? null,
-      companyName: (intro as { company_name?: string | null })?.company_name ?? null,
-      effectiveFrom: (link as { effective_from?: string | null })?.effective_from ?? null,
+      introducerId: attribution.introducerId,
+      companyCode: (intro.company_code as string | null) ?? null,
+      companyName: (intro.company_name as string | null) ?? null,
+      effectiveFrom: attribution.effectiveFrom,
       isStaff,
     };
   });
+
+function amendmentErrorMessage(message: string, notFound: string, noIntroducer: string): string {
+  if (message.includes("attribution_introducer_not_found")) return noIntroducer;
+  if (
+    message.includes("attribution_customer_not_found") ||
+    message.includes("attribution_session_not_found") ||
+    message.includes("attribution_tenant_inactive")
+  ) {
+    return notFound;
+  }
+  return "Could not amend the introducer.";
+}
 
 export const amendCustomerIntroducer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -155,218 +138,63 @@ export const amendCustomerIntroducer = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canAmendIntroducer(access)) throw new Error("Forbidden");
-
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: intro, error: introErr } = await supabaseAdmin
-      .from("introducers")
-      .select("id, company_name, company_code")
-      .eq("company_code", data.companyCode)
-      .is("deleted_at", null)
-      .maybeSingle();
-    if (introErr && !isMissing(introErr)) throw new Error(introErr.message);
-    if (!intro) throw new Error(`No introducer found for code ${data.companyCode}.`);
-
-    const { data: prevLink } = await supabaseAdmin
-      .from("customer_introducer_links")
-      .select("introducer_id")
-      .eq("customer_id", data.customerId)
-      .maybeSingle();
-
-    const now = new Date().toISOString();
-    const { error: linkErr } = await supabaseAdmin.from("customer_introducer_links").upsert(
-      {
-        customer_id: data.customerId,
-        introducer_id: intro.id,
-        source: "amended",
-        effective_from: now,
-        updated_at: now,
-      },
-      { onConflict: "customer_id" },
-    );
-    if (linkErr && !isMissing(linkErr)) throw new Error(linkErr.message);
-
-    const { error: histErr } = await supabaseAdmin.from("introducer_amendment_history").insert({
-      customer_id: data.customerId,
-      session_id: data.sessionId ?? null,
-      previous_introducer_id: prevLink?.introducer_id ?? null,
-      new_introducer_id: intro.id,
-      company_code: intro.company_code,
-      company_name: intro.company_name,
-      effective_from: now,
-      commission_refreshed: false,
-      changed_by: context.userId,
-      note: data.note ?? null,
+    const { authoriseTenantCustomer, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await authoriseTenantCustomer({
+      userId: context.userId,
+      customerId: data.customerId,
+      capability: ownerCapability(true),
     });
-    if (histErr && !isMissing(histErr)) throw new Error(histErr.message);
-
-    const prevName = prevLink?.introducer_id
-      ? (
-          await supabaseAdmin
-            .from("introducers")
-            .select("company_name, company_code")
-            .eq("id", prevLink.introducer_id)
-            .maybeSingle()
-        ).data
-      : null;
-
-    await logFinanceAudit(supabaseAdmin, {
-      audit_type: "introducer_amendment",
-      customer_id: data.customerId,
-      session_id: data.sessionId ?? null,
-      summary: `Introducer amended to ${intro.company_name ?? intro.company_code} (${intro.company_code})`,
-      detail: {
-        previous: prevName
-          ? `${prevName.company_name ?? ""} (${prevName.company_code ?? ""})`.trim()
-          : "None",
-        new: `${intro.company_name ?? ""} (${intro.company_code ?? ""})`.trim(),
-        effectiveFrom: now,
-        commissionRefresh: false,
-      },
-      changed_by: context.userId,
-    });
-
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
     if (data.sessionId) {
-      const { appendContactLog } = await import("@/lib/booking.functions");
-      await appendContactLogPublic(
-        supabaseAdmin,
-        data.sessionId,
-        context.userId,
-        `Introducer amended to ${intro.company_name ?? intro.company_code} (${intro.company_code}). Commission from ${new Date(now).toLocaleDateString("en-GB")} only unless owner refreshes.`,
+      await assertCustomerSessionInTenant(supabaseAdmin, data.sessionId, data.customerId, tenantId);
+    }
+    const { resolveTenantIntroducerByCode, NO_ACTIVE_INTRODUCER_FOR_CODE_MESSAGE } =
+      await import("@/lib/introducer-attribution");
+    const intro = await resolveTenantIntroducerByCode(supabaseAdmin, tenantId, data.companyCode);
+
+    const { data: rows, error } = await supabaseAdmin.rpc("amend_customer_introducer_attribution", {
+      p_tenant_id: tenantId,
+      p_customer_id: data.customerId,
+      p_introducer_id: intro.id,
+      p_changed_by: context.userId,
+      p_session_id: data.sessionId ?? null,
+      p_note: data.note ?? null,
+    });
+    if (error) {
+      throw new Error(
+        amendmentErrorMessage(
+          String(error.message ?? ""),
+          RESOURCE_NOT_FOUND_MESSAGE,
+          NO_ACTIVE_INTRODUCER_FOR_CODE_MESSAGE,
+        ),
       );
     }
+    const result = ((rows ?? []) as Array<{ changed: boolean; effective_from: string | null }>)[0];
+    if (!result) throw new Error("Could not amend the introducer.");
 
-    return { ok: true, introducerId: intro.id as string };
+    if (result.changed && data.sessionId) {
+      const effective = result.effective_from ? new Date(result.effective_from) : new Date();
+      const { error: logErr } = await supabaseAdmin.from("customer_contact_log").insert({
+        session_id: data.sessionId,
+        author_id: context.userId,
+        entry_type: "note",
+        tenant_id: tenantId,
+        body: `Introducer amended to ${intro.companyName ?? intro.companyCode} (${intro.companyCode}). Applies from ${effective.toLocaleDateString("en-GB")}; historical commission is unchanged.`,
+      });
+      if (logErr) console.error("contact log", logErr);
+    }
+
+    return { ok: true, changed: Boolean(result.changed) };
   });
 
-async function appendContactLogPublic(
-  supabaseAdmin: Awaited<
-    ReturnType<typeof import("@/integrations/supabase/client.server")>
-  >["supabaseAdmin"],
-  sessionId: string,
-  authorId: string,
-  body: string,
-) {
-  const { error } = await supabaseAdmin.from("customer_contact_log").insert({
-    session_id: sessionId,
-    author_id: authorId,
-    entry_type: "note",
-    body,
-  });
-  if (error && !isMissing(error)) console.error("contact log", error);
-}
-
+/** Backdated commission reattribution is disabled: it rewrote ledger rows across tenants. */
 export const refreshCustomerIntroducerCommission = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z.object({ customerId: z.string().uuid(), sessionId: z.string().uuid().optional() }).parse(d),
   )
-  .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canRefreshIntroducerCommission(access)) throw new Error("Owner only");
-
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { resolveIntroducerIdForCustomer } = await import("@/lib/introducer-attribution");
-
-    const newIntroducerId = await resolveIntroducerIdForCustomer(
-      supabaseAdmin,
-      data.customerId,
-      data.sessionId ?? null,
-    );
-    if (!newIntroducerId) throw new Error("No introducer linked to this customer.");
-
-    const { data: intro } = await supabaseAdmin
-      .from("introducers")
-      .select("user_id, company_name, company_code")
-      .eq("id", newIntroducerId)
-      .maybeSingle();
-    if (!intro?.user_id) throw new Error("Introducer has no user account.");
-
-    const { data: sessions } = await supabaseAdmin
-      .from("interview_sessions")
-      .select("id")
-      .eq("customer_id", data.customerId)
-      .is("deleted_at", null);
-    const sessionIds = (sessions ?? []).map((s) => s.id);
-    if (sessionIds.length === 0) return { ok: true, adjusted: 0 };
-
-    const { data: ledgerRows, error } = await supabaseAdmin
-      .from("finance_ledger")
-      .select("*")
-      .in("session_id", sessionIds)
-      .eq("kind", "commission")
-      .eq("beneficiary_role", "introducer");
-    if (error && !isMissing(error)) throw new Error(error.message);
-
-    let adjusted = 0;
-    const now = new Date().toISOString();
-
-    for (const row of ledgerRows ?? []) {
-      if (row.beneficiary_user_id === intro.user_id) continue;
-
-      await supabaseAdmin.from("finance_ledger").insert({
-        session_id: row.session_id,
-        fee_line_id: row.fee_line_id,
-        kind: "commission",
-        fee_type: row.fee_type,
-        amount_pence: -row.amount_pence,
-        is_reversal: true,
-        beneficiary_user_id: row.beneficiary_user_id,
-        beneficiary_role: "introducer",
-        commission_pct: row.commission_pct,
-        note: "Commission refresh — reversal (introducer amended)",
-        created_by: context.userId,
-      });
-
-      await supabaseAdmin.from("finance_ledger").insert({
-        session_id: row.session_id,
-        fee_line_id: row.fee_line_id,
-        kind: "commission",
-        fee_type: row.fee_type,
-        amount_pence: row.amount_pence,
-        is_reversal: false,
-        beneficiary_user_id: intro.user_id,
-        beneficiary_role: "introducer",
-        commission_pct: row.commission_pct,
-        payout_status: row.payout_status ?? "received",
-        note: "Commission refresh — reattributed to amended introducer",
-        created_by: context.userId,
-      });
-      adjusted++;
-    }
-
-    await supabaseAdmin.from("introducer_amendment_history").insert({
-      customer_id: data.customerId,
-      session_id: data.sessionId ?? null,
-      new_introducer_id: newIntroducerId,
-      company_code: intro.company_code,
-      company_name: intro.company_name,
-      effective_from: now,
-      commission_refreshed: true,
-      changed_by: context.userId,
-      note: `Commission refreshed — ${adjusted} entries reattributed`,
-    });
-
-    await logFinanceAudit(supabaseAdmin, {
-      audit_type: "commission_refresh",
-      customer_id: data.customerId,
-      session_id: data.sessionId ?? null,
-      summary: `Commission backdated to ${intro.company_name ?? intro.company_code} (${adjusted} entries)`,
-      detail: { adjusted, introducerId: newIntroducerId },
-      changed_by: context.userId,
-    });
-
-    if (data.sessionId) {
-      await appendContactLogPublic(
-        supabaseAdmin,
-        data.sessionId,
-        context.userId,
-        `Owner refreshed introducer commission — ${adjusted} ledger entries reattributed to ${intro.company_name ?? intro.company_code}.`,
-      );
-    }
-
-    return { ok: true, adjusted };
+  .handler(async (): Promise<{ ok: boolean; adjusted: number }> => {
+    throw new Error(COMMISSION_REFRESH_DISABLED_MESSAGE);
   });
