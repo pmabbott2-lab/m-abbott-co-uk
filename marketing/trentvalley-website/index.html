@@ -15,25 +15,23 @@
     href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Figtree:wght@400;500;600;700&display=swap"
     rel="stylesheet"
   />
-  <link rel="stylesheet" href="styles.css?v=5" />
+  <link rel="stylesheet" href="styles.css?v=6" />
   <script src="site-config.js?v=1"></script>
 </head>
 <body>
-  <header class="site-header">
-    <div class="container header-inner">
-      <a class="logo-link" href="index.html" aria-label="Trent Valley Financial Services home">
-        <img class="logo-img" src="assets/logo-white.png" width="260" height="130" alt="Trent Valley Financial Services" />
+  <div class="scroll-bar" data-scroll-bar aria-hidden="true" inert>
+    <div class="container scroll-bar-inner" data-menu-wrap>
+      <a class="scroll-bar-logo" href="#top" aria-label="Back to top">
+        <img src="assets/logo-white.png" width="260" height="130" alt="Trent Valley Financial Services" />
       </a>
       <div class="header-actions">
-        <a class="header-link" href="calculator.html">Mortgage calculator</a>
-        <a class="btn btn-ghost btn-sm" href="#" data-hub-link="/{tenant}/login" hidden>Sign in</a>
         <a class="btn btn-ghost btn-sm" href="#callback">Callback</a>
         <a class="btn btn-primary btn-sm" href="#appointment">Book</a>
-        <button type="button" class="nav-toggle" data-nav-toggle aria-expanded="false" aria-controls="site-menu" aria-label="Open site menu">
+        <button type="button" class="nav-toggle" data-nav-toggle aria-expanded="false" aria-controls="scroll-menu" aria-label="Open site menu">
           <span class="nav-toggle-bars" aria-hidden="true"></span>
         </button>
       </div>
-      <nav id="site-menu" class="site-menu" data-site-menu aria-label="Site menu" hidden>
+      <nav id="scroll-menu" class="site-menu" data-site-menu aria-label="Site menu" hidden>
         <a href="#about">About Peter</a>
         <a href="#families">For families</a>
         <a href="calculator.html">Mortgage calculator</a>
@@ -42,10 +40,10 @@
         <a href="#start">Get in touch</a>
       </nav>
     </div>
-  </header>
+  </div>
 
   <main>
-    <section class="hero" aria-label="Introduction">
+    <section id="top" class="hero hero-home" aria-label="Introduction">
       <div class="hero-atmosphere" aria-hidden="true"></div>
       <div class="container hero-spread">
         <div class="hero-brand-col">
@@ -57,6 +55,22 @@
             alt="Trent Valley Financial Services — Built on experience"
           />
           <p class="hero-tag">Local financial services · Traditional values</p>
+          <div class="hero-nav" data-menu-wrap>
+            <a class="btn btn-ghost btn-sm" href="calculator.html">Mortgage calculator</a>
+            <a class="btn btn-ghost btn-sm" href="#" data-hub-link="/{tenant}/login" hidden>Sign in</a>
+            <button type="button" class="nav-toggle nav-toggle-label" data-nav-toggle aria-expanded="false" aria-controls="site-menu" aria-label="Open site menu">
+              <span class="nav-toggle-bars" aria-hidden="true"></span>
+              <span aria-hidden="true">Menu</span>
+            </button>
+            <nav id="site-menu" class="site-menu" data-site-menu aria-label="Site menu" hidden>
+              <a href="#about">About Peter</a>
+              <a href="#families">For families</a>
+              <a href="calculator.html">Mortgage calculator</a>
+              <a href="introducers.html">Introducers</a>
+              <a href="careers.html">Careers</a>
+              <a href="#start">Get in touch</a>
+            </nav>
+          </div>
         </div>
         <div class="hero-copy-col">
           <h1>A calmer way to look after the family’s next mortgage decision.</h1>
@@ -368,6 +382,6 @@
     </div>
   </footer>
 
-  <script src="site.js?v=4"></script>
+  <script src="site.js?v=5"></script>
 </body>
 </html>
