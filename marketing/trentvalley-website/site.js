@@ -20,6 +20,34 @@
     }
   });
 
+  // Site menu dropdown
+  var navToggle = document.querySelector("[data-nav-toggle]");
+  var siteMenu = document.querySelector("[data-site-menu]");
+  if (navToggle && siteMenu) {
+    var setMenuOpen = function (open) {
+      siteMenu.hidden = !open;
+      navToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      navToggle.setAttribute("aria-label", open ? "Close site menu" : "Open site menu");
+      navToggle.classList.toggle("is-open", open);
+    };
+    navToggle.addEventListener("click", function (e) {
+      e.stopPropagation();
+      setMenuOpen(siteMenu.hidden);
+    });
+    siteMenu.addEventListener("click", function (e) {
+      if (e.target.closest("a")) setMenuOpen(false);
+    });
+    document.addEventListener("click", function (e) {
+      if (!siteMenu.hidden && !e.target.closest(".site-header")) setMenuOpen(false);
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !siteMenu.hidden) {
+        setMenuOpen(false);
+        navToggle.focus();
+      }
+    });
+  }
+
   // Template forms: never submit.
   document.querySelectorAll("[data-template-form]").forEach(function (form) {
     form.addEventListener("submit", function (e) {
