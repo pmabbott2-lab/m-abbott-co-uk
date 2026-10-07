@@ -1205,8 +1205,15 @@ export const submitSession = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     // RAF: completing (submitting) a fact-find qualifies the customer's referral
     // so the referrer's bonus becomes reviewable. Best-effort, never blocks.
+    // B2b: the authoritative tenant is the submitted session's own tenant_id (the customer's
+    // canonical tenant for this fact-find), passed explicitly. If the session is tenantless or
+    // its tenant cannot be read, markReferralQualified fails closed and no referral is qualified.
+    const { loadSessionTenantMap } = await import("@/lib/tenant-assert.server");
+    const sessionTenantId = await loadSessionTenantMap([data.sessionId])
+      .then((m) => m.get(data.sessionId) ?? null)
+      .catch(() => null);
     const { markReferralQualified } = await import("@/lib/referrals.functions");
-    await markReferralQualified(context.userId);
+    await markReferralQualified(context.userId, sessionTenantId);
 
     if (!alreadySubmitted) {
       await sendInterviewCompleteSms(existing.customer_id, data.sessionId);

@@ -3677,18 +3677,27 @@ export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
       .single();
     if (introErr) throw new Error(introErr.message);
     if (!introducer?.slug) throw new Error("Booking link profile is not set up yet.");
+    // B2b: never create a tenantless lead — fail closed if the staff introducer is unbound.
+    if (!introducer.tenant_id) throw new Error("Introducer is not bound to a tenant.");
 
+    const { withForcedTenantId } = await import("@/lib/tenant-assert.server");
     const phone = normaliseUkPhone(data.customerPhone);
     const { data: lead, error: leadErr } = await supabaseAdmin
       .from("introducer_leads")
-      .insert({
-        introducer_id: introducerId,
-        customer_name: data.customerName,
-        customer_phone: phone,
-        customer_email: data.customerEmail,
-        status: "new",
-        channel: "text",
-      })
+      .insert(
+        // B2b: stamp the authorised staff introducer's tenant; caller tenant_id is stripped.
+        withForcedTenantId(
+          {
+            introducer_id: introducerId,
+            customer_name: data.customerName,
+            customer_phone: phone,
+            customer_email: data.customerEmail,
+            status: "new",
+            channel: "text",
+          },
+          introducer.tenant_id,
+        ),
+      )
       .select("id")
       .single();
     if (leadErr) throw new Error(leadErr.message);
@@ -3872,21 +3881,30 @@ export const sendIntroducerCustomerBookingLink = createServerFn({ method: "POST"
     if (introErr) throw new Error(introErr.message);
     if (!introducer) throw new Error(INTRODUCER_REGISTRATION_INACTIVE_MESSAGE);
     if (!introducer.slug) throw new Error("Introducer referral link is not set up yet.");
+    // B2b: never create a tenantless lead — fail closed if the registration is unbound.
+    if (!introducer.tenant_id) throw new Error("Introducer is not bound to a tenant.");
     if (introducer.active === false) {
       await db.from("introducers").update({ active: true }).eq("id", introducerId);
     }
 
+    const { withForcedTenantId } = await import("@/lib/tenant-assert.server");
     const phone = normaliseUkPhone(data.customerPhone);
     const { data: lead, error: leadErr } = await db
       .from("introducer_leads")
-      .insert({
-        introducer_id: introducerId,
-        customer_name: data.customerName,
-        customer_phone: phone,
-        customer_email: data.customerEmail,
-        status: "new",
-        channel: "text",
-      })
+      .insert(
+        // B2b: stamp the authorised registration's introducer tenant; caller tenant_id is stripped.
+        withForcedTenantId(
+          {
+            introducer_id: introducerId,
+            customer_name: data.customerName,
+            customer_phone: phone,
+            customer_email: data.customerEmail,
+            status: "new",
+            channel: "text",
+          },
+          introducer.tenant_id,
+        ),
+      )
       .select("id")
       .single();
     if (leadErr) throw new Error(leadErr.message);

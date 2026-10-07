@@ -444,21 +444,30 @@ export const createManualLead = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { requireActiveActingIntroducerRegistration } =
       await import("@/lib/introducer-registration.server");
+    const { withForcedTenantId } = await import("@/lib/tenant-assert.server");
     const registration = await requireActiveActingIntroducerRegistration({
       actingUserId: context.userId,
     });
 
+    // B2b: stamp the lead with the acting introducer registration's canonical tenant. Any
+    // caller-supplied tenant_id is stripped; the tenant never comes from customer details.
     const { data: lead, error } = await context.supabase
       .from("introducer_leads")
-      .insert({
-        introducer_id: registration.id,
-        lead_source: "introducer_portal",
-        channel: "manual",
-        customer_name: data.customerName,
-        customer_phone: data.customerPhone,
-        customer_email: data.customerEmail || null,
-        notes: data.notes || null,
-      })
+      .insert(
+        // Generated types predate introducer_leads.tenant_id.
+        withForcedTenantId(
+          {
+            introducer_id: registration.id,
+            lead_source: "introducer_portal",
+            channel: "manual",
+            customer_name: data.customerName,
+            customer_phone: data.customerPhone,
+            customer_email: data.customerEmail || null,
+            notes: data.notes || null,
+          },
+          registration.tenantId,
+        ) as never,
+      )
       .select()
       .single();
     if (error) throw new Error(error.message);

@@ -455,12 +455,20 @@ export const claimReferral = createServerFn({ method: "POST" })
 // Advance the referral for a friend to 'qualified' once they complete a
 // fact-find or book. Called from submitSession. Best-effort: swallows missing
 // table errors and never throws into the caller's happy path.
-export async function markReferralQualified(referredUserId: string): Promise<void> {
+export async function markReferralQualified(
+  referredUserId: string,
+  tenantId: string | null,
+): Promise<void> {
+  // B2b: RAF qualification is tenant-scoped. The authoritative tenant is the submitted interview
+  // session's tenant (passed by submitSession) — never derived from the referral, cookie, email,
+  // phone, or a membership guess. Without an authoritative tenant we FAIL CLOSED: no referral is
+  // qualified, so foreign-tenant and tenantless referrals are never touched.
+  if (!tenantId) return;
   try {
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const { data: updated, error } = await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from("referrals")
       .update({
         status: "qualified",
@@ -468,16 +476,18 @@ export async function markReferralQualified(referredUserId: string): Promise<voi
         updated_at: new Date().toISOString(),
       })
       .eq("referred_user_id", referredUserId)
-      .in("status", ["pending", "signed_up"])
-      .select("id");
+      .eq("tenant_id", tenantId)
+      .in("status", ["pending", "signed_up"]);
     if (error && !isMissingTableError(error)) {
       console.error("markReferralQualified failed", error);
       return;
     }
-    const { ensureRafCommissionLedgerEntry } = await import("@/lib/finance.functions");
-    for (const row of updated ?? []) {
-      await ensureRafCommissionLedgerEntry(row.id);
-    }
+    // B2b TEMPORARY FINANCIAL GUARD — RAF financial posting is deliberately DEFERRED to
+    // G7F-4S4C4-B4. B2a made new referrals tenant-stamped, which would otherwise make this
+    // qualification path create finance_ledger commission rows (ensureRafCommissionLedgerEntry
+    // only skips tenantless referrals). Until B4 designs RAF commission semantics, qualification
+    // changes lifecycle/status ONLY and must create no financial record. Do NOT re-introduce the
+    // ensureRafCommissionLedgerEntry call here.
   } catch (e) {
     console.error("markReferralQualified threw", e);
   }
@@ -1007,17 +1017,32 @@ export const listMyReferralActivity = createServerFn({ method: "GET" })
     };
   });
 
+/**
+ * B2b: RAF self-service tenant = the canonical verified acting tenant (A1/A2). Never the first or
+ * an arbitrary membership, a referral code, a cookie or a caller value. 0 authority, or 2+
+ * memberships without a verified tenant context, fail closed inside resolveActingTenant.
+ * Membership is still required, so platform entry into a foreign company cannot mint a code.
+ */
+async function resolveRafSelfServiceTenant(
+  userId: string,
+): Promise<{ tenant: { id: string; slug: string } }> {
+  const { resolveActingTenant, TenantContextError } = await import("@/lib/tenant-assert.server");
+  const { tenantId, view } = await resolveActingTenant(userId);
+  if (!view.member || !view.tenantSlug) {
+    throw new TenantContextError("TENANT_DATA_ACCESS_DENIED", "Tenant access denied.");
+  }
+  return { tenant: { id: tenantId, slug: view.tenantSlug } };
+}
+
 export const ensureMyReferralLink = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const { resolveSoleMembershipTenant, withForcedTenantId } = await import(
-      "@/lib/tenant-assert.server"
-    );
+    const { withForcedTenantId } = await import("@/lib/tenant-assert.server");
     const actingUserId = context!.userId;
-    const authorised = await resolveSoleMembershipTenant(actingUserId);
+    const authorised = await resolveRafSelfServiceTenant(actingUserId);
 
     const { data: existing } = await supabaseAdmin
       .from("referral_codes")
@@ -1068,10 +1093,8 @@ export const sendMyReferralLink = createServerFn({ method: "POST" })
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const { resolveSoleMembershipTenant, withForcedTenantId } = await import(
-      "@/lib/tenant-assert.server"
-    );
-    const authorised = await resolveSoleMembershipTenant(context.userId);
+    const { withForcedTenantId } = await import("@/lib/tenant-assert.server");
+    const authorised = await resolveRafSelfServiceTenant(context.userId);
     const { requireTenantFeature } = await import("@/lib/tenant-features.server");
     await requireTenantFeature(authorised.tenant.id, "refer_a_friend");
 
