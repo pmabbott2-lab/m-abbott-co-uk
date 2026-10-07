@@ -30,7 +30,7 @@
   }
 
   function formatGbp(value) {
-    return Number.isFinite(value) ? "£" + Math.round(value).toLocaleString("en-GB") : "—";
+    return "£" + (Number.isFinite(value) ? Math.round(value) : 0).toLocaleString("en-GB");
   }
 
   function formatInput(value) {
@@ -80,11 +80,11 @@
 
   function render(calc) {
     var has = calc.loan > 0 && calc.price > 0;
-    setText("calc-ltv", has ? calc.ltv.toFixed(1) + "%" : "—");
-    setText("calc-rate", has ? ratePct.toFixed(2) + "%" : "—");
-    setText("calc-monthly", has ? formatGbp(calc.monthly) : "—");
-    setText("calc-total", has ? formatGbp(calc.total) : "—");
-    setText("calc-interest", has ? formatGbp(calc.total - calc.loan) : "—");
+    setText("calc-ltv", has ? calc.ltv.toFixed(1) + "%" : "0%");
+    setText("calc-rate", has ? ratePct.toFixed(2) + "%" : "0%");
+    setText("calc-monthly", formatGbp(has ? calc.monthly : 0));
+    setText("calc-total", formatGbp(has ? calc.total : 0));
+    setText("calc-interest", formatGbp(has ? calc.total - calc.loan : 0));
   }
 
   function applyRate(pct, disclaimer, status) {
@@ -177,7 +177,7 @@
         }
       })
       .catch(function () {
-        setText("bank-rate-value", "—");
+        setText("bank-rate-value", "Unavailable");
         setText("bank-rate-source", "Bank Rate unavailable right now");
       });
   }

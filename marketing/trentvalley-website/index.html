@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Trent Valley Financial Services — Built on experience</title>
+  <title>Trent Valley Financial Services | Built on experience</title>
   <meta
     name="description"
-    content="A high-end local financial services business built on traditional values. Mortgage advice for families — first homes, moving on, and remortgage — led by Peter Mabbott."
+    content="A local financial services business built on traditional values. Mortgage advice for families buying a first home, moving home or remortgaging, led by Peter Mabbott."
   />
   <link rel="icon" href="assets/logo.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -15,7 +15,7 @@
     href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Figtree:wght@400;500;600;700&display=swap"
     rel="stylesheet"
   />
-  <link rel="stylesheet" href="styles.css?v=6" />
+  <link rel="stylesheet" href="styles.css?v=7" />
   <script src="site-config.js?v=1"></script>
 </head>
 <body>
@@ -45,6 +45,21 @@
   <main>
     <section id="top" class="hero hero-home" aria-label="Introduction">
       <div class="hero-atmosphere" aria-hidden="true"></div>
+      <div class="container hero-topbar" data-menu-wrap>
+        <a class="btn btn-ghost btn-sm" href="#" data-hub-link="/{tenant}/login" hidden>Sign in</a>
+        <button type="button" class="nav-toggle nav-toggle-label" data-nav-toggle aria-expanded="false" aria-controls="site-menu" aria-label="Open site menu">
+          <span class="nav-toggle-bars" aria-hidden="true"></span>
+          <span aria-hidden="true">Menu</span>
+        </button>
+        <nav id="site-menu" class="site-menu" data-site-menu aria-label="Site menu" hidden>
+          <a href="#about">About Peter</a>
+          <a href="#families">For families</a>
+          <a href="calculator.html">Mortgage calculator</a>
+          <a href="introducers.html">Introducers</a>
+          <a href="careers.html">Careers</a>
+          <a href="#start">Get in touch</a>
+        </nav>
+      </div>
       <div class="container hero-spread">
         <div class="hero-brand-col">
           <img
@@ -52,35 +67,28 @@
             src="assets/logo-white.png"
             width="520"
             height="260"
-            alt="Trent Valley Financial Services — Built on experience"
+            alt="Trent Valley Financial Services, built on experience"
           />
-          <p class="hero-tag">Local financial services · Traditional values</p>
-          <div class="hero-nav" data-menu-wrap>
-            <a class="btn btn-ghost btn-sm" href="calculator.html">Mortgage calculator</a>
-            <a class="btn btn-ghost btn-sm" href="#" data-hub-link="/{tenant}/login" hidden>Sign in</a>
-            <button type="button" class="nav-toggle nav-toggle-label" data-nav-toggle aria-expanded="false" aria-controls="site-menu" aria-label="Open site menu">
-              <span class="nav-toggle-bars" aria-hidden="true"></span>
-              <span aria-hidden="true">Menu</span>
-            </button>
-            <nav id="site-menu" class="site-menu" data-site-menu aria-label="Site menu" hidden>
-              <a href="#about">About Peter</a>
-              <a href="#families">For families</a>
-              <a href="calculator.html">Mortgage calculator</a>
-              <a href="introducers.html">Introducers</a>
-              <a href="careers.html">Careers</a>
-              <a href="#start">Get in touch</a>
-            </nav>
-          </div>
         </div>
         <div class="hero-copy-col">
-          <h1>A calmer way to look after the family’s next mortgage decision.</h1>
+          <p class="hero-eyebrow">Local mortgage advice<span class="hero-eyebrow-extra"> · Traditional values</span></p>
+          <h1>Mortgage advice for the family home.</h1>
           <p class="hero-lead">
-            Trent Valley is being built as a high-end, local financial services business —
-            personal advice rooted in experience, for first homes, moving on, and remortgage.
+            Personal, experienced advice for first homes, moving home and remortgaging<span class="hero-lead-extra">,
+            from a local firm built on traditional values</span>.
           </p>
           <div class="hero-actions">
             <a class="btn btn-primary" href="#callback">Request a callback</a>
             <a class="btn btn-ghost" href="#appointment">Book an appointment</a>
+            <a class="btn btn-ghost" href="calculator.html">
+              <svg class="btn-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                <rect x="3.5" y="1.75" width="13" height="16.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" />
+                <rect x="6" y="4.5" width="8" height="3" rx="0.6" fill="currentColor" />
+                <circle cx="7" cy="11" r="1" fill="currentColor" /><circle cx="10" cy="11" r="1" fill="currentColor" /><circle cx="13" cy="11" r="1" fill="currentColor" />
+                <circle cx="7" cy="14.5" r="1" fill="currentColor" /><circle cx="10" cy="14.5" r="1" fill="currentColor" /><circle cx="13" cy="14.5" r="1" fill="currentColor" />
+              </svg>
+              Mortgage calculator
+            </a>
           </div>
         </div>
       </div>
@@ -123,9 +131,9 @@
               commercial leadership, business transformation, adviser development and operational excellence.
             </p>
             <p>
-              Trent Valley Financial Services is the local expression of that experience — a return to
-              measured, relationship-led advice for families and professional colleagues who want clarity
-              without the noise.
+              Trent Valley Financial Services brings that experience home. It is a return to measured,
+              relationship-led advice for families and professional colleagues who want clarity without
+              the noise.
             </p>
           </div>
         </div>
@@ -141,29 +149,29 @@
         </div>
         <div class="story-grid">
           <p class="story-lead">
-            A high-end, local financial services business — grounded in traditional values,
+            A high-end, local financial services business, grounded in traditional values and
             built for the Trent Valley and the families who call it home.
           </p>
           <div class="story-points">
             <article>
               <h3>High-end, not distant</h3>
               <p>
-                Composed advice and a private tone of service — without losing the warmth of a local firm
+                Composed advice and a private tone of service, with all the warmth of a local firm
                 that knows its community.
               </p>
             </article>
             <article>
               <h3>Traditional values</h3>
               <p>
-                Straight talking, careful listening, and recommendations that put the family first —
-                not a product push.
+                Straight talking, careful listening and recommendations that put the family first,
+                never a product push.
               </p>
             </article>
             <article>
               <h3>Financial services, done properly</h3>
               <p>
-                Mortgage advice at the centre, with the wider conversations families need as life moves on —
-                from first key to the next chapter.
+                Mortgage advice at the centre, with the wider conversations families need as life moves on,
+                from the first key to the next chapter.
               </p>
             </article>
           </div>
@@ -178,8 +186,8 @@
           <div class="rule" aria-hidden="true"></div>
           <h2>Three moments that matter.</h2>
           <p>
-            The same propositions families recognise — first home, moving on, remortgage —
-            framed around people, not product codes.
+            The moments families recognise, from a first home to moving on or remortgaging,
+            framed around people rather than product codes.
           </p>
         </div>
         <div class="family-paths reveal">
@@ -187,23 +195,23 @@
             <span class="path-index">01</span>
             <h3>First-time buyers</h3>
             <p>
-              Stepping onto the ladder together — understanding deposit, affordability and timing
-              so the first home feels like a beginning, not a gamble.
+              Stepping onto the ladder together. We help you understand deposit, affordability and
+              timing so your first home feels like a beginning, not a gamble.
             </p>
           </article>
           <article class="family-path">
             <span class="path-index">02</span>
             <h3>Home movers</h3>
             <p>
-              More space, a new school run, or the next chapter as a family — advice that keeps
-              the move coherent when everything else is in motion.
+              More space, a new school run or the next chapter as a family. Our advice keeps the
+              move coherent when everything else is in motion.
             </p>
           </article>
           <article class="family-path">
             <span class="path-index">03</span>
             <h3>Remortgage</h3>
             <p>
-              Protecting what you have built — reviewing rate, term and monthly rhythm so the
+              Protecting what you have built. We review rate, term and monthly payments so the
               household stays on steady ground.
             </p>
           </article>
@@ -217,7 +225,7 @@
           <span class="section-kicker">Get in touch</span>
           <div class="rule" aria-hidden="true"></div>
           <h2>How would you like to begin?</h2>
-          <p>Template pathways for now — forms below are visual only and not connected to MortgageHub.</p>
+          <p>Template pathways for now. The forms below are visual only and not connected to MortgageHub.</p>
         </div>
         <div class="paths-light reveal">
           <a class="path-link-light" href="#callback">
@@ -229,7 +237,7 @@
           <a class="path-link-light" href="#appointment">
             <span class="path-index">Appointment</span>
             <h3>Book an appointment</h3>
-            <p>Choose a preferred slot for a private conversation — in person or by video.</p>
+            <p>Choose a preferred slot for a private conversation, in person or by video.</p>
             <span class="path-cta">Open form →</span>
           </a>
         </div>
@@ -241,7 +249,7 @@
         <div class="panel reveal">
           <div class="panel-head">
             <h3>Request a callback</h3>
-            <p>Template form — fields and button do not submit anywhere yet.</p>
+            <p>Template form. The fields and button do not submit anywhere yet.</p>
           </div>
           <form data-template-form="callback" novalidate>
             <div class="form-grid two">
@@ -269,13 +277,13 @@
             </div>
             <div class="field" style="margin-top: 1rem">
               <label for="cb-note">How can we help?</label>
-              <textarea id="cb-note" name="note" placeholder="A brief note is enough — we will take it from there."></textarea>
+              <textarea id="cb-note" name="note" placeholder="A brief note is enough. We will take it from there."></textarea>
             </div>
             <label class="consent">
               <input type="checkbox" name="consent" />
               <span>
                 I am happy for Trent Valley Financial Services to contact me about this enquiry.
-                <em> (Template consent — not live.)</em>
+                <em> (Template consent, not live.)</em>
               </span>
             </label>
             <div class="form-actions">
@@ -292,7 +300,7 @@
         <div class="panel reveal">
           <div class="panel-head">
             <h3>Book an appointment</h3>
-            <p>Template diary — slots are illustrative and do not book a real meeting.</p>
+            <p>Template diary. Slots are illustrative and do not book a real meeting.</p>
           </div>
           <form data-template-form="appointment" novalidate>
             <div class="form-grid two">
@@ -373,11 +381,11 @@
       </div>
       <div class="reg-block">
         <p>
-          <strong>Regulatory placeholder:</strong> Trent Valley Financial Services — legal entity,
-          FCA authorisation and FRN to be confirmed before launch. This page is a design mock-up only.
+          <strong>Regulatory placeholder:</strong> the legal entity, FCA authorisation and FRN for
+          Trent Valley Financial Services will be confirmed before launch. This page is a design mock-up only.
         </p>
         <p>Your home may be repossessed if you do not keep up repayments on a mortgage or other loan secured on it.</p>
-        <p>© <span data-year></span> Trent Valley Financial Services. Template site — not financial advice.</p>
+        <p>© <span data-year></span> Trent Valley Financial Services. Template site, not financial advice.</p>
       </div>
     </div>
   </footer>

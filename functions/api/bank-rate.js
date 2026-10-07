@@ -13,7 +13,7 @@ const UPSTREAM_CACHE_SECONDS = 60 * 60;
 const BROWSER_CACHE_SECONDS = 30 * 60;
 
 const DISCLAIMER =
-  "Bank of England Bank Rate for reference only — not a mortgage quote or recommendation. " +
+  "Bank of England Bank Rate for reference only. It is not a mortgage quote or recommendation. " +
   "Your mortgage rate depends on product type, LTV, and lender criteria. " +
   "Trent Valley Financial Services will confirm suitable products after advice.";
 
