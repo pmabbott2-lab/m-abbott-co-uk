@@ -268,7 +268,7 @@ function FinanceBranchPanel({ visibility, staff }: { visibility: StaffBranchVisi
       id: FINANCE_SUB_TABS.FINANCE_REPORT,
       label: "Finance report",
       icon: <PoundSterling className="w-4 h-4 shrink-0" />,
-      content: <OwnerFinanceReport />,
+      content: <OwnerFinanceReport canSetRates={staff.isOwner && !staff.readOnly} />,
     });
   }
 

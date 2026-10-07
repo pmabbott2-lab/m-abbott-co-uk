@@ -742,48 +742,47 @@ function slugifyStaffName(value: string): string {
     .slice(0, 40);
 }
 
-/** Introducer row for staff booking attribution (does not grant introducer portal role). */
-async function ensureStaffIntroducerRecord(staffUserId: string): Promise<string> {
+const STAFF_INTRODUCER_MEMBER_ROLES = ["owner", "supervisor", "general", "adviser"];
+
+const STAFF_BOOKING_LINK_DISABLED_MESSAGE =
+  "Your booking link is disabled for this company. Ask the company owner to re-enable it.";
+
+/**
+ * Introducer registration crediting a staff member's own bookings in `tenantId` (does not grant
+ * the introducer portal role). Returns the existing registration when it is active, creates one
+ * only when the staff member has none in this tenant, and returns null when the registration is
+ * disabled or removed (never revived here) or the user holds no active staff membership in the
+ * tenant. Commission rates are never created or read here: a new registration has no rate set
+ * until the tenant Owner sets one.
+ */
+async function ensureStaffIntroducerRecord(
+  staffUserId: string,
+  tenantId: string,
+): Promise<string | null> {
   const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-  const { resolveSoleMembershipTenant } = await import("@/lib/tenant-assert.server");
-  const authorised = await resolveSoleMembershipTenant(staffUserId);
-  const { data: existing } = await supabaseAdmin
-    .from("introducers")
-    .select("id, active")
+  const { data: staffMembership, error: membershipErr } = await supabaseAdmin
+    .from("tenant_memberships")
+    .select("role")
     .eq("user_id", staffUserId)
-    .eq("tenant_id", authorised.tenant.id)
+    .eq("tenant_id", tenantId)
+    .eq("active", true)
+    .in("role", STAFF_INTRODUCER_MEMBER_ROLES)
+    .limit(1);
+  if (membershipErr) throw new Error(membershipErr.message);
+  if (!staffMembership?.length) return null;
+
+  const { data: existing, error: existingErr } = await supabaseAdmin
+    .from("introducers")
+    .select("id, active, deleted_at")
+    .eq("user_id", staffUserId)
+    .eq("tenant_id", tenantId)
     .maybeSingle();
+  if (existingErr) throw new Error(existingErr.message);
   if (existing?.id) {
-    if (existing.active === false) {
-      await supabaseAdmin
-        .from("introducers")
-        .update({ active: true })
-        .eq("id", existing.id)
-        .eq("tenant_id", authorised.tenant.id);
-    }
-    const { data: existingRate } = await supabaseAdmin
-      .from("commission_rates")
-      .select("user_id")
-      .eq("user_id", staffUserId)
-      .eq("role", "introducer")
-      .maybeSingle();
-    if (!existingRate) {
-      await supabaseAdmin.from("commission_rates").upsert(
-        {
-          user_id: staffUserId,
-          role: "introducer",
-          percentage: 10,
-          pct_fee: 10,
-          pct_mortgage_fee: 10,
-          pct_insurance_fee: 0,
-          pct_other_fee: 0,
-        },
-        { onConflict: "user_id,role" },
-      );
-    }
-    return existing.id;
+    if (existing.active !== true || existing.deleted_at) return null;
+    return existing.id as string;
   }
 
   const { data: profile } = await supabaseAdmin
@@ -800,7 +799,7 @@ async function ensureStaffIntroducerRecord(staffUserId: string): Promise<string>
       .from("introducers")
       .select("id")
       .eq("slug", candidate)
-      .eq("tenant_id", authorised.tenant.id)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
     if (!clash) {
       slug = candidate;
@@ -812,7 +811,7 @@ async function ensureStaffIntroducerRecord(staffUserId: string): Promise<string>
     .from("introducers")
     .insert({
       user_id: staffUserId,
-      tenant_id: authorised.tenant.id,
+      tenant_id: tenantId,
       company_name: ownName,
       slug,
       contact_email: profile?.email ?? null,
@@ -821,28 +820,7 @@ async function ensureStaffIntroducerRecord(staffUserId: string): Promise<string>
     .select("id")
     .single();
   if (error) throw new Error(error.message);
-  // Seed introducer fee + mortgage % if missing (insurance/other stay advisor-exclusive).
-  const { data: existingRate } = await supabaseAdmin
-    .from("commission_rates")
-    .select("user_id")
-    .eq("user_id", staffUserId)
-    .eq("role", "introducer")
-    .maybeSingle();
-  if (!existingRate) {
-    await supabaseAdmin.from("commission_rates").upsert(
-      {
-        user_id: staffUserId,
-        role: "introducer",
-        percentage: 10,
-        pct_fee: 10,
-        pct_mortgage_fee: 10,
-        pct_insurance_fee: 0,
-        pct_other_fee: 0,
-      },
-      { onConflict: "user_id,role" },
-    );
-  }
-  return inserted.id;
+  return inserted.id as string;
 }
 
 async function sendBookingConfirmations(opts: {
@@ -1089,8 +1067,13 @@ async function bookAppointmentTrusted(
     }
   }
   if (creditActingStaff && actingUserId) {
-    introducerId = await ensureStaffIntroducerRecord(actingUserId);
-    await assertIntroducerInBookingTenant(introducerId);
+    const staffIntroducerId = await ensureStaffIntroducerRecord(actingUserId, tenantId);
+    if (staffIntroducerId) {
+      introducerId = staffIntroducerId;
+      await assertIntroducerInBookingTenant(introducerId);
+    } else {
+      creditActingStaff = false;
+    }
   }
 
   const { data: conflict } = await supabaseAdmin
@@ -3640,14 +3623,19 @@ export const sendStaffCustomerBookingLink = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    await assertStaffBookingAccess(context.userId);
+    const flags = await actingTenantStaffFlags(context.userId);
+    if (!flags.isAdvisor && !flags.isAdmin) throw new Error("Forbidden");
+    const actingTenantId =
+      flags.view.member && flags.view.accessContext === "membership" ? flags.view.tenantId : null;
+    if (!actingTenantId) throw new Error("Forbidden");
     const twilioOk = isTwilioConfigured();
     const wantSms = data.sendSms !== false;
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const introducerId = await ensureStaffIntroducerRecord(context.userId);
+    const introducerId = await ensureStaffIntroducerRecord(context.userId, actingTenantId);
+    if (!introducerId) throw new Error(STAFF_BOOKING_LINK_DISABLED_MESSAGE);
     const { data: introducer, error: introErr } = await supabaseAdmin
       .from("introducers")
       .select("slug, company_name, tenant_id")

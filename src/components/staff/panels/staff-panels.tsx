@@ -36,7 +36,7 @@ import {
   listCurrentCommissionArrangements,
   listCommissionPayouts,
   FEE_TYPE_LABELS,
-  RAF_BONUS_POUNDS,
+  type CurrentRateValue,
   type EnrichedLedgerRow,
 } from "@/lib/finance.functions";
 import {
@@ -510,7 +510,46 @@ export function AdminAccessPanel({ isOwner, canEditPerms }: { isOwner: boolean; 
   );
 }
 
-export function OwnerFinanceReport() {
+function formatRatePct(pct: number | null): string {
+  return pct == null ? "Not set" : `${pct}%`;
+}
+
+function RateInput({
+  label,
+  value,
+  onChange,
+  current,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  current: CurrentRateValue;
+  disabled: boolean;
+}) {
+  return (
+    <div className="space-y-1">
+      <Label>{label} %</Label>
+      <Input
+        type="number"
+        min="0"
+        max="100"
+        step="0.001"
+        placeholder="Not set"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <p className="text-[11px] text-muted-foreground">
+        {current
+          ? `Current ${current.pct}% from ${safeFormat(current.effectiveFrom, "d MMM yyyy HH:mm")}`
+          : "No rate set"}
+      </p>
+    </div>
+  );
+}
+
+export function OwnerFinanceReport({ canSetRates = false }: { canSetRates?: boolean }) {
   const ledgerFn = useServerFn(listFinanceLedger);
   const staffFn = useServerFn(listCommissionStaff);
   const setRateFn = useServerFn(setCommissionRate);
@@ -577,12 +616,17 @@ export function OwnerFinanceReport() {
   const [rateRole, setRateRole] = useState<"advisor" | "introducer" | "admin">("advisor");
   const [rateUserId, setRateUserId] = useState("");
   const [staffSearch, setStaffSearch] = useState("");
-  const [pctFee, setPctFee] = useState("10");
-  const [pctMortgage, setPctMortgage] = useState("10");
-  const [pctInsurance, setPctInsurance] = useState("10");
-  const [pctOther, setPctOther] = useState("10");
-  const [introPctFee, setIntroPctFee] = useState("10");
-  const [introPctMortgage, setIntroPctMortgage] = useState("10");
+  // Inputs hold the current rate (blank when no rate is set); only edited values are saved.
+  const [pctFee, setPctFee] = useState("");
+  const [pctMortgage, setPctMortgage] = useState("");
+  const [pctInsurance, setPctInsurance] = useState("");
+  const [pctOther, setPctOther] = useState("");
+  const [introPctFee, setIntroPctFee] = useState("");
+  const [introPctMortgage, setIntroPctMortgage] = useState("");
+  const [effectiveMode, setEffectiveMode] = useState<"" | "now" | "date">("");
+  const [effectiveDate, setEffectiveDate] = useState("");
+  const [confirmBackdate, setConfirmBackdate] = useState(false);
+  const [rateReason, setRateReason] = useState("");
 
   const staffQ = useQuery({
     queryKey: ["commission-staff", rateRole, staffSearch],
@@ -618,79 +662,116 @@ export function OwnerFinanceReport() {
     setRateHistoryUserId("");
   }, [rateHistoryRole]);
 
+  const pctInput = (v: number | null | undefined) => (v == null ? "" : String(v));
+
   useEffect(() => {
     const r = existingRateQ.data;
-    if (!r || !rateUserId) return;
-    if (r.pctFee != null) setPctFee(String(r.pctFee));
-    if (r.pctMortgageFee != null) setPctMortgage(String(r.pctMortgageFee));
-    if (rateRole === "advisor") {
-      if (r.pctInsuranceFee != null) setPctInsurance(String(r.pctInsuranceFee));
-      if (r.pctOtherFee != null) setPctOther(String(r.pctOtherFee));
-    }
+    setPctFee(pctInput(r?.pctFee));
+    setPctMortgage(pctInput(r?.pctMortgageFee));
+    setPctInsurance(rateRole === "advisor" ? pctInput(r?.pctInsuranceFee) : "");
+    setPctOther(rateRole === "advisor" ? pctInput(r?.pctOtherFee) : "");
   }, [existingRateQ.data, rateUserId, rateRole]);
 
   useEffect(() => {
     const r = existingIntroRateQ.data;
-    if (!r || !rateUserId || rateRole !== "advisor") return;
-    if (r.pctFee != null) setIntroPctFee(String(r.pctFee));
-    if (r.pctMortgageFee != null) setIntroPctMortgage(String(r.pctMortgageFee));
+    setIntroPctFee(rateRole === "advisor" ? pctInput(r?.pctFee) : "");
+    setIntroPctMortgage(rateRole === "advisor" ? pctInput(r?.pctMortgageFee) : "");
   }, [existingIntroRateQ.data, rateUserId, rateRole]);
+
+  useEffect(() => {
+    setEffectiveMode("");
+    setEffectiveDate("");
+    setConfirmBackdate(false);
+    setRateReason("");
+  }, [rateUserId, rateRole]);
+
+  const effectiveDateMs = effectiveDate ? new Date(effectiveDate).getTime() : NaN;
+  const effectiveIsBackdated =
+    effectiveMode === "date" && !Number.isNaN(effectiveDateMs) && effectiveDateMs < Date.now();
+
+  /** Fee types whose input differs from the current rate; blank inputs are left unchanged. */
+  const changedRates = (
+    current: { pctFee: number | null; pctMortgageFee: number | null; pctInsuranceFee: number | null; pctOtherFee: number | null } | undefined,
+    inputs: Partial<Record<"fee" | "mortgage_fee" | "insurance_fee" | "other_fee", string>>,
+  ) => {
+    const currentByType = {
+      fee: current?.pctFee ?? null,
+      mortgage_fee: current?.pctMortgageFee ?? null,
+      insurance_fee: current?.pctInsuranceFee ?? null,
+      other_fee: current?.pctOtherFee ?? null,
+    };
+    const out: Partial<Record<"fee" | "mortgage_fee" | "insurance_fee" | "other_fee", number>> = {};
+    for (const [feeType, raw] of Object.entries(inputs) as Array<[keyof typeof currentByType, string | undefined]>) {
+      const text = (raw ?? "").trim();
+      if (!text) continue;
+      const value = Number(text);
+      if (!Number.isFinite(value)) throw new Error("Rates must be numbers between 0 and 100.");
+      if (currentByType[feeType] !== value) out[feeType] = value;
+    }
+    return out;
+  };
 
   const setRate = useMutation({
     mutationFn: async () => {
-      if (rateRole === "admin") {
-        // Admins only earn introducer commission on appointments they book.
-        await setRateFn({
-          data: {
-            userId: rateUserId,
-            role: "introducer",
-            pctFee: Number(pctFee),
-            pctMortgageFee: Number(pctMortgage),
-            pctInsuranceFee: 0,
-            pctOtherFee: 0,
-          },
-        });
-        return;
+      if (!effectiveMode) throw new Error("Choose when the new rate takes effect.");
+      if (effectiveMode === "date" && Number.isNaN(effectiveDateMs)) {
+        throw new Error("Enter the date and time the new rate takes effect.");
       }
-      if (rateRole === "introducer") {
-        await setRateFn({
-          data: {
-            userId: rateUserId,
-            role: "introducer",
-            pctFee: Number(pctFee),
-            pctMortgageFee: Number(pctMortgage),
-            pctInsuranceFee: 0,
-            pctOtherFee: 0,
-          },
-        });
-        return;
-      }
-      await setRateFn({
-        data: {
-          userId: rateUserId,
+      const effective =
+        effectiveMode === "now"
+          ? ({ mode: "now" } as const)
+          : ({
+              mode: "date",
+              effectiveFrom: new Date(effectiveDateMs).toISOString(),
+              confirmBackdate,
+            } as const);
+      const reason = rateReason.trim() || undefined;
+
+      const calls: Array<{
+        role: "advisor" | "introducer";
+        rates: Partial<Record<"fee" | "mortgage_fee" | "insurance_fee" | "other_fee", number>>;
+      }> = [];
+      if (rateRole === "advisor") {
+        calls.push({
           role: "advisor",
-          pctFee: Number(pctFee),
-          pctMortgageFee: Number(pctMortgage),
-          pctInsuranceFee: Number(pctInsurance),
-          pctOtherFee: Number(pctOther),
-        },
-      });
-      await setRateFn({
-        data: {
-          userId: rateUserId,
+          rates: changedRates(existingRateQ.data, {
+            fee: pctFee,
+            mortgage_fee: pctMortgage,
+            insurance_fee: pctInsurance,
+            other_fee: pctOther,
+          }),
+        });
+        if (existingIntroRateQ.data?.subjectAvailable) {
+          calls.push({
+            role: "introducer",
+            rates: changedRates(existingIntroRateQ.data, {
+              fee: introPctFee,
+              mortgage_fee: introPctMortgage,
+            }),
+          });
+        }
+      } else {
+        calls.push({
           role: "introducer",
-          pctFee: Number(introPctFee),
-          pctMortgageFee: Number(introPctMortgage),
-          pctInsuranceFee: 0,
-          pctOtherFee: 0,
-        },
-      });
+          rates: changedRates(existingRateQ.data, { fee: pctFee, mortgage_fee: pctMortgage }),
+        });
+      }
+      const pending = calls.filter((c) => Object.keys(c.rates).length > 0);
+      if (pending.length === 0) throw new Error("No rate changed.");
+      for (const c of pending) {
+        await setRateFn({ data: { userId: rateUserId, role: c.role, rates: c.rates, effective, reason } });
+      }
     },
     onSuccess: () => {
-      toast.success("Commission rates saved — applies to new fees only");
+      toast.success("Commission rates saved — applies to fees from the effective date");
       historyQ.refetch();
       existingRateQ.refetch();
       if (rateRole === "advisor") existingIntroRateQ.refetch();
+      arrangementsQ.refetch();
+      setEffectiveMode("");
+      setEffectiveDate("");
+      setConfirmBackdate(false);
+      setRateReason("");
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not save rates"),
   });
@@ -700,7 +781,7 @@ export function OwnerFinanceReport() {
   const arrangements = arrangementsQ.data ?? [];
   const staff = staffQ.data ?? [];
   const rafBonusPounds =
-    rafBonusQ.data?.amountPence != null ? rafBonusQ.data.amountPence / 100 : RAF_BONUS_POUNDS;
+    rafBonusQ.data?.amountPence != null ? rafBonusQ.data.amountPence / 100 : null;
   const exportSheets = [
     ledgerRowsToSheet(rows),
     commissionRowsToSheet(commissionExportQ.data?.rows ?? []),
@@ -776,7 +857,14 @@ export function OwnerFinanceReport() {
       </div>
       {rateUserId && (
         <>
-        {(rateRole === "advisor" || rateRole === "introducer" || rateRole === "admin") && (
+        {existingRateQ.data && !existingRateQ.data.subjectAvailable && (
+          <p className="text-sm text-muted-foreground rounded-lg border bg-muted/30 p-4">
+            {rateRole === "advisor"
+              ? "This person has no adviser role in this company, so no adviser rate can be set."
+              : "This person has no introducer registration in this company yet, so no introducer rate can be set."}
+          </p>
+        )}
+        {existingRateQ.data?.subjectAvailable && (
         <div className="grid sm:grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-4">
           <div className="sm:col-span-2 text-sm font-medium">
             {rateRole === "advisor"
@@ -785,24 +873,42 @@ export function OwnerFinanceReport() {
                 ? "Introducer commission % (admin bookings — fee + mortgage fee)"
                 : "Introducer commission % (fee + mortgage fee only)"}
           </div>
-          <div className="space-y-1">
-            <Label>{FEE_TYPE_LABELS.fee} %</Label>
-            <Input type="number" min="0" max="100" step="0.1" value={pctFee} onChange={(e) => setPctFee(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label>{FEE_TYPE_LABELS.mortgage_fee} %</Label>
-            <Input type="number" min="0" max="100" step="0.1" value={pctMortgage} onChange={(e) => setPctMortgage(e.target.value)} />
-          </div>
+          {!existingRateQ.data.subjectUsable && (
+            <p className="sm:col-span-2 text-xs text-muted-foreground">
+              This {rateRole === "advisor" ? "adviser role" : "introducer registration"} is disabled.
+              Its rates are kept for history but cannot be changed.
+            </p>
+          )}
+          <RateInput
+            label={FEE_TYPE_LABELS.fee}
+            value={pctFee}
+            onChange={setPctFee}
+            current={existingRateQ.data.current.fee}
+            disabled={!canSetRates || !existingRateQ.data.subjectUsable}
+          />
+          <RateInput
+            label={FEE_TYPE_LABELS.mortgage_fee}
+            value={pctMortgage}
+            onChange={setPctMortgage}
+            current={existingRateQ.data.current.mortgage_fee}
+            disabled={!canSetRates || !existingRateQ.data.subjectUsable}
+          />
           {rateRole === "advisor" && (
             <>
-              <div className="space-y-1">
-                <Label>{FEE_TYPE_LABELS.insurance_fee} %</Label>
-                <Input type="number" min="0" max="100" step="0.1" value={pctInsurance} onChange={(e) => setPctInsurance(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label>{FEE_TYPE_LABELS.other_fee} %</Label>
-                <Input type="number" min="0" max="100" step="0.1" value={pctOther} onChange={(e) => setPctOther(e.target.value)} />
-              </div>
+              <RateInput
+                label={FEE_TYPE_LABELS.insurance_fee}
+                value={pctInsurance}
+                onChange={setPctInsurance}
+                current={existingRateQ.data.current.insurance_fee}
+                disabled={!canSetRates || !existingRateQ.data.subjectUsable}
+              />
+              <RateInput
+                label={FEE_TYPE_LABELS.other_fee}
+                value={pctOther}
+                onChange={setPctOther}
+                current={existingRateQ.data.current.other_fee}
+                disabled={!canSetRates || !existingRateQ.data.subjectUsable}
+              />
             </>
           )}
           {(rateRole === "introducer" || rateRole === "admin") && (
@@ -814,41 +920,109 @@ export function OwnerFinanceReport() {
           )}
         </div>
         )}
-        {rateRole === "advisor" && (
+        {rateRole === "advisor" && existingIntroRateQ.data?.subjectAvailable && (
           <div className="grid sm:grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-4">
             <div className="sm:col-span-2 text-sm font-medium">
               Introducer commission % (when this advisor is the customer&apos;s introducer)
             </div>
-            <div className="space-y-1">
-              <Label>{FEE_TYPE_LABELS.fee} %</Label>
-              <Input type="number" min="0" max="100" step="0.1" value={introPctFee} onChange={(e) => setIntroPctFee(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label>{FEE_TYPE_LABELS.mortgage_fee} %</Label>
-              <Input type="number" min="0" max="100" step="0.1" value={introPctMortgage} onChange={(e) => setIntroPctMortgage(e.target.value)} />
-            </div>
+            <RateInput
+              label={FEE_TYPE_LABELS.fee}
+              value={introPctFee}
+              onChange={setIntroPctFee}
+              current={existingIntroRateQ.data.current.fee}
+              disabled={!canSetRates || !existingIntroRateQ.data.subjectUsable}
+            />
+            <RateInput
+              label={FEE_TYPE_LABELS.mortgage_fee}
+              value={introPctMortgage}
+              onChange={setIntroPctMortgage}
+              current={existingIntroRateQ.data.current.mortgage_fee}
+              disabled={!canSetRates || !existingIntroRateQ.data.subjectUsable}
+            />
             <p className="sm:col-span-2 text-xs text-muted-foreground">
               Fee + mortgage fee only — insurance / other commission stays on the advisor rates above.
             </p>
           </div>
         )}
+        {canSetRates && existingRateQ.data?.subjectAvailable && (
+          <div className="grid sm:grid-cols-2 gap-3 rounded-lg border p-4">
+            <div className="space-y-1">
+              <Label>Takes effect</Label>
+              <select
+                className="w-full h-9 rounded-md border bg-background px-2 text-sm"
+                value={effectiveMode}
+                onChange={(e) => {
+                  setEffectiveMode(e.target.value as "" | "now" | "date");
+                  setConfirmBackdate(false);
+                }}
+              >
+                <option value="">Choose…</option>
+                <option value="now">Effective now</option>
+                <option value="date">From a specific date and time</option>
+              </select>
+            </div>
+            {effectiveMode === "date" && (
+              <div className="space-y-1">
+                <Label>Effective from</Label>
+                <Input
+                  type="datetime-local"
+                  value={effectiveDate}
+                  onChange={(e) => {
+                    setEffectiveDate(e.target.value);
+                    setConfirmBackdate(false);
+                  }}
+                />
+              </div>
+            )}
+            {effectiveIsBackdated && (
+              <label className="sm:col-span-2 flex items-start gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={confirmBackdate}
+                  onChange={(e) => setConfirmBackdate(e.target.checked)}
+                />
+                This date is in the past. I confirm the rate applies to fees received from this date.
+                It cannot start before the latest rate already recorded.
+              </label>
+            )}
+            <div className="space-y-1 sm:col-span-2">
+              <Label>Reason{effectiveIsBackdated ? " (required for a backdated rate)" : " (optional)"}</Label>
+              <Input
+                maxLength={500}
+                value={rateReason}
+                onChange={(e) => setRateReason(e.target.value)}
+                placeholder="Why the rate is changing"
+              />
+            </div>
+          </div>
+        )}
         </>
       )}
-      <Button disabled={!rateUserId || setRate.isPending} onClick={() => setRate.mutate()}>
-        Save commission rates
-      </Button>
+      {canSetRates ? (
+        <Button
+          disabled={!rateUserId || !existingRateQ.data?.subjectAvailable || setRate.isPending}
+          onClick={() => setRate.mutate()}
+        >
+          Save commission rates
+        </Button>
+      ) : (
+        <p className="text-xs text-muted-foreground">Only the company owner can change commission rates.</p>
+      )}
       {rateUserId && (historyQ.data ?? []).length > 0 && (
         <div className="rounded-lg border p-4 space-y-2">
           <h4 className="text-sm font-medium">Rate change history</h4>
           <ReportTableScroll visibleRows={5}>
             <ul className="text-xs space-y-1.5 text-muted-foreground p-1">
-              {(historyQ.data ?? []).map((h, i) => (
-                <li key={i}>
-                  {safeFormat(h.created_at, "d MMM yyyy HH:mm")} ·{" "}
+              {(historyQ.data ?? []).map((h) => (
+                <li key={h.id}>
+                  Effective {safeFormat(h.effective_from, "d MMM yyyy HH:mm")} ·{" "}
                   <span className="capitalize">{h.role}</span> ·{" "}
                   {FEE_TYPE_LABELS[h.fee_type as keyof typeof FEE_TYPE_LABELS] ?? h.fee_type}:{" "}
-                  {h.pct_from != null ? `${h.pct_from}% → ` : "new "}
+                  {h.pct_from != null ? `${h.pct_from}% → ` : "first rate "}
                   {h.pct_to}%
+                  {h.reason ? ` · ${h.reason}` : ""}
+                  {" "}(recorded {safeFormat(h.created_at, "d MMM yyyy HH:mm")})
                 </li>
               ))}
             </ul>
@@ -926,10 +1100,10 @@ export function OwnerFinanceReport() {
                 <td className="p-2 font-medium max-w-[8rem] truncate">{a.name}</td>
                 <td className="p-2 capitalize">{a.role}</td>
                 <td className="p-2 font-mono text-xs">{a.referenceCode ?? "—"}</td>
-                <td className="p-2 text-right">{a.pctFee}%</td>
-                <td className="p-2 text-right">{a.pctMortgageFee}%</td>
-                <td className="p-2 text-right">{a.pctInsuranceFee}%</td>
-                <td className="p-2 text-right">{a.pctOtherFee}%</td>
+                <td className="p-2 text-right">{formatRatePct(a.pctFee)}</td>
+                <td className="p-2 text-right">{formatRatePct(a.pctMortgageFee)}</td>
+                <td className="p-2 text-right">{formatRatePct(a.pctInsuranceFee)}</td>
+                <td className="p-2 text-right">{formatRatePct(a.pctOtherFee)}</td>
               </tr>
             ))}
           </tbody>
@@ -1065,7 +1239,13 @@ export function OwnerFinanceReport() {
         Standard reward paid to referrers when a friend completes their fact-find and the bonus is
         marked eligible or paid.
       </p>
-      <p className="text-2xl font-semibold">£{rafBonusPounds.toFixed(0)}</p>
+      {rafBonusPounds != null ? (
+        <p className="text-2xl font-semibold">£{rafBonusPounds.toFixed(0)}</p>
+      ) : (
+        <p className="text-sm font-medium">
+          {rafBonusQ.isLoading ? "Loading…" : "Not configured for this company."}
+        </p>
+      )}
     </div>
 
     <div className="rounded-2xl border bg-card p-6 space-y-4">

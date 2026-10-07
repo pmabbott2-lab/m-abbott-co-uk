@@ -188,23 +188,27 @@ export function customerReportToSheet(rows: OwnerCustomerExportRow[]): ExportShe
 export function rateHistoryToSheet(
   rows: Array<{
     created_at: string;
+    effective_from?: string | null;
     fee_type: string;
     pct_from: number | null;
     pct_to: number;
     role?: string | null;
     user_name?: string | null;
+    reason?: string | null;
   }>,
 ): ExportSheet {
   return {
     name: "Rate history",
-    headers: ["When", "Name", "Role", "Fee type", "From %", "To %"],
+    headers: ["When", "Effective from", "Name", "Role", "Fee type", "From %", "To %", "Reason"],
     rows: rows.map((h) => [
       safeFormat(h.created_at, "yyyy-MM-dd HH:mm"),
+      h.effective_from ? safeFormat(h.effective_from, "yyyy-MM-dd HH:mm") : "",
       h.user_name ?? "",
       h.role ?? "",
       FEE_TYPE_LABELS[h.fee_type as keyof typeof FEE_TYPE_LABELS] ?? h.fee_type,
       h.pct_from != null ? String(h.pct_from) : "new",
       String(h.pct_to),
+      h.reason ?? "",
     ]),
   };
 }

@@ -903,6 +903,16 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
       : [];
     if (!owned) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
 
+    // An eligible bonus posts a commission row at this tenant's configured amount; with no
+    // configured amount the status is not changed.
+    if (data.bonusStatus === "eligible" && owned.tenant_id) {
+      const { getRafBonusPence, RAF_BONUS_NOT_CONFIGURED_MESSAGE } =
+        await import("@/lib/finance.functions");
+      if ((await getRafBonusPence(supabaseAdmin, tenantId)) == null) {
+        throw new Error(RAF_BONUS_NOT_CONFIGURED_MESSAGE);
+      }
+    }
+
     const patch: {
       updated_at: string;
       bonus_status?: string;
