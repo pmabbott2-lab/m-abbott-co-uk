@@ -73,6 +73,10 @@ Removing the gate at public launch needs no rebuild: delete the Access applicati
 canonical domain from its destinations and keep `pages.dev` gated). Only do this with explicit
 launch approval.
 
+**The owner-only admin area (`/admin`, `/api/admin`) has its own separate Access application and
+must never be removed with the site gate.** Launching the public site removes only the site gate.
+See `ADMIN-CALCULATOR.md`.
+
 ## 6. Custom domain and redirects
 
 - Attach the canonical domain and `www` as Pages custom domains; Pages adds the proxied CNAMEs.

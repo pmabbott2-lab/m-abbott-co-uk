@@ -8,6 +8,8 @@ publish the website on mortgageeasy.uk.
 Private domain stage: the site is connected to `https://mortgageeasy.uk` but kept private behind
 Cloudflare Access (email one-time code, explicit allow-list). This is not the public launch; the
 gate stays until public launch is explicitly approved. See `TENANT-WEBSITE-ARCHITECTURE.md`.
+At launch, remove only the site gate: the separate owner-only admin Access application
+(`/admin`, `/api/admin`) stays permanently. See `ADMIN-CALCULATOR.md`.
 
 ## 1. Mortgage Hub tenant routing (separate Hub work — not implemented in `mortgageeasy-site`)
 

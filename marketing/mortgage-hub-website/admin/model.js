@@ -1,0 +1,341 @@
+/**
+ * Mortgage Easy earnings model. Formulas only: every rate and default is loaded at runtime
+ * from the protected assumptions store, never hard-coded here.
+ */
+
+export const CASE_TYPES = [
+  { key: "remortgage", label: "Remortgage" },
+  { key: "purchase", label: "Purchase" },
+];
+
+export const SCENARIOS = [
+  { key: "base", label: "Base" },
+  { key: "conservative", label: "Conservative" },
+  { key: "ambitious", label: "Ambitious" },
+];
+
+export const RATE_FIELDS = [
+  { key: "procRatePct", label: "Procuration fee paid by lender", hint: "% of loan", unit: "%", min: 0, max: 5, step: 0.005 },
+  { key: "procRetainedPct", label: "Share of procuration received after HLP", hint: "HLP's share is already removed here", unit: "%", min: 0, max: 100, step: 0.5 },
+  { key: "protectionMultiplePct", label: "Protection commission", hint: "% of annual premium, indemnity, as received", unit: "%", min: 0, max: 500, step: 1 },
+  { key: "giCommissionPct", label: "GI commission", hint: "% of annual premium, as received", unit: "%", min: 0, max: 100, step: 1 },
+  { key: "protectionNtuPct", label: "Protection and GI NTU after completion", hint: "Mortgage completes but the policy never starts", unit: "%", min: 0, max: 100, step: 0.5 },
+  { key: "cancellationPct", label: "Protection and GI cancellations", hint: "Policies lost after starting (clawback)", unit: "%", min: 0, max: 100, step: 0.5 },
+  { key: "adviserMortgagePct", label: "Adviser commission: procuration and broker fees", hint: "% of what Mortgage Easy receives", unit: "%", min: 0, max: 100, step: 0.5 },
+  { key: "adviserIntroPct", label: "Adviser commission: own-customer introductions", hint: "Extra % of procuration and fees on the adviser's own customers", unit: "%", min: 0, max: 100, step: 0.5 },
+  { key: "adviserProtectionPct", label: "Adviser commission: protection and GI", hint: "% of what Mortgage Easy receives", unit: "%", min: 0, max: 100, step: 0.5 },
+  { key: "introducerPct", label: "External introducer commission", hint: "% of procuration and fees on introduced customers", unit: "%", min: 0, max: 100, step: 0.5 },
+];
+
+/** Appointments are entered per week; a year has 52 weeks less holiday, spread evenly over 12 months. */
+export const HOLIDAY_WEEKS = 5;
+export const WORKING_WEEKS = 52 - HOLIDAY_WEEKS;
+export const WEEKS_PER_MONTH = WORKING_WEEKS / 12;
+
+export const CASE_FIELDS = [
+  { key: "seenOwnWeek", label: "Appointments seen per week: own customers", hint: "Per week", unit: "count", min: 0, max: 150, step: 1 },
+  { key: "seenIntroducedWeek", label: "Appointments seen per week: introduced", hint: "Per week", unit: "count", min: 0, max: 150, step: 1 },
+  { key: "conversionPct", label: "Seen to written", hint: "Same rate for both sources", unit: "%", min: 0, max: 100, step: 1 },
+  { key: "lapsePct", label: "NTU rate", hint: "Written but mortgage not completed; protection and GI fall away too", unit: "%", min: 0, max: 100, step: 1 },
+  { key: "avgLoan", label: "Average mortgage", unit: "gbp", min: 0, max: 5000000, step: 5000 },
+  { key: "brokerFee", label: "Broker fee", hint: "Taken at application, not refunded", unit: "gbp", min: 0, max: 10000, step: 1 },
+  { key: "feeCollectedPct", label: "Written cases paying a broker fee", unit: "%", min: 0, max: 100, step: 1 },
+  { key: "protectionConvPct", label: "Written cases with protection", unit: "%", min: 0, max: 100, step: 1 },
+  { key: "protectionMonthlyPremium", label: "Average monthly protection premium", unit: "gbp", min: 0, max: 5000, step: 1 },
+  { key: "giConvPct", label: "Written cases with GI", unit: "%", min: 0, max: 100, step: 1 },
+  { key: "giAnnualPremium", label: "Average annual GI premium", hint: "Leave at 0 until known", unit: "gbp", min: 0, max: 20000, step: 5 },
+  { key: "lagMonths", label: "Months from written to paid", hint: "Procuration, protection and GI", unit: "months", min: 1, max: 6, step: 1, integer: true },
+];
+
+export const SEEN_FIELDS = CASE_FIELDS.filter((f) => f.key === "seenOwnWeek" || f.key === "seenIntroducedWeek");
+const LEGACY_MONTHLY_SEEN = { seenOwnWeek: "seenOwn", seenIntroducedWeek: "seenIntroduced" };
+
+const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const pct = (v) => num(v) / 100;
+
+export function lagOf(caseInputs) {
+  const lag = Math.round(num(caseInputs && caseInputs.lagMonths));
+  return Math.min(6, Math.max(1, lag || 1));
+}
+
+/** Splits one bucket of money received between the adviser, the external introducer and Mortgage Easy. */
+export function allocate(bucket, rates) {
+  const potOwn = num(bucket.procOwn) + num(bucket.feesOwn);
+  const potIntro = num(bucket.procIntro) + num(bucket.feesIntro);
+  const policies = num(bucket.protection) + num(bucket.gi);
+  const adviserMortgage = pct(rates.adviserMortgagePct) * (potOwn + potIntro);
+  const adviserIntro = pct(rates.adviserIntroPct) * potOwn;
+  const adviserProtection = pct(rates.adviserProtectionPct) * policies;
+  const adviser = adviserMortgage + adviserIntro + adviserProtection;
+  const introducer = pct(rates.introducerPct) * potIntro;
+  const total = potOwn + potIntro + policies;
+  return { adviserMortgage, adviserIntro, adviserProtection, adviser, introducer, me: total - adviser - introducer, total };
+}
+
+function policyLine(written, convPct, lapsePct, ntuPct, perPolicy, cancellationPct) {
+  const sold = written * pct(convPct);
+  const completed = sold * (1 - pct(lapsePct));
+  const onRisk = completed * (1 - pct(ntuPct));
+  const gross = onRisk * perPolicy;
+  const cancelled = gross * pct(cancellationPct);
+  return { sold, completed, onRisk, perPolicy, gross, cancelled, net: gross - cancelled };
+}
+
+/** One month of activity for one case type, in steady state (before timing). */
+export function computeCase(c, rates) {
+  const seenOwnWeek = num(c.seenOwnWeek);
+  const seenIntroWeek = num(c.seenIntroducedWeek);
+  const seenOwn = seenOwnWeek * WEEKS_PER_MONTH;
+  const seenIntro = seenIntroWeek * WEEKS_PER_MONTH;
+  const conv = pct(c.conversionPct);
+  const keep = 1 - pct(c.lapsePct);
+  const writtenOwn = seenOwn * conv;
+  const writtenIntro = seenIntro * conv;
+  const completionsOwn = writtenOwn * keep;
+  const completionsIntro = writtenIntro * keep;
+  const avgLoan = num(c.avgLoan);
+  const procRate = pct(rates.procRatePct) * pct(rates.procRetainedPct);
+  const procOwn = completionsOwn * avgLoan * procRate;
+  const procIntro = completionsIntro * avgLoan * procRate;
+  const feeTake = pct(c.feeCollectedPct) * num(c.brokerFee);
+  const feesOwn = writtenOwn * feeTake;
+  const feesIntro = writtenIntro * feeTake;
+  const written = writtenOwn + writtenIntro;
+  const completions = completionsOwn + completionsIntro;
+
+  const protection = policyLine(
+    written, c.protectionConvPct, c.lapsePct, rates.protectionNtuPct,
+    num(c.protectionMonthlyPremium) * 12 * pct(rates.protectionMultiplePct), rates.cancellationPct,
+  );
+  const gi = policyLine(
+    written, c.giConvPct, c.lapsePct, rates.protectionNtuPct,
+    num(c.giAnnualPremium) * pct(rates.giCommissionPct), rates.cancellationPct,
+  );
+
+  const atWritten = allocate({ feesOwn, feesIntro }, rates);
+  const afterLag = allocate({ procOwn, procIntro, protection: protection.net, gi: gi.net }, rates);
+  const sum = (k) => atWritten[k] + afterLag[k];
+
+  return {
+    seenOwnWeek, seenIntroWeek, seenWeek: seenOwnWeek + seenIntroWeek,
+    seenOwn, seenIntro, seen: seenOwn + seenIntro,
+    writtenOwn, writtenIntro, written,
+    completionsOwn, completionsIntro, completions,
+    lent: completions * avgLoan,
+    procRate,
+    procOwn, procIntro, proc: procOwn + procIntro,
+    hlpMemo: completions * avgLoan * pct(rates.procRatePct) * (1 - pct(rates.procRetainedPct)),
+    feeCases: written * pct(c.feeCollectedPct),
+    feesOwn, feesIntro, fees: feesOwn + feesIntro,
+    protection, gi,
+    atWritten, afterLag,
+    adviserMortgage: sum("adviserMortgage"),
+    adviserIntro: sum("adviserIntro"),
+    adviserProtection: sum("adviserProtection"),
+    adviser: sum("adviser"),
+    introducer: sum("introducer"),
+    me: sum("me"),
+    total: sum("total"),
+    lag: lagOf(c),
+  };
+}
+
+function addInto(target, source) {
+  for (const [k, v] of Object.entries(source)) {
+    if (typeof v === "number") target[k] = (target[k] || 0) + v;
+    else if (v && typeof v === "object") addInto((target[k] = target[k] || {}), v);
+  }
+  return target;
+}
+
+/** Steady-state month for a whole adviser plan: each case type plus the combined total. */
+export function computeMonth(scenario, rates) {
+  const byType = {};
+  const total = {};
+  for (const { key } of CASE_TYPES) {
+    byType[key] = computeCase((scenario && scenario[key]) || {}, rates);
+    addInto(total, byType[key]);
+  }
+  delete total.lag;
+  delete total.procRate;
+  delete total.protection.perPolicy;
+  delete total.gi.perPolicy;
+  return { byType, total };
+}
+
+const emptyMonth = () => ({ written: 0, completions: 0, fees: 0, proc: 0, protection: 0, gi: 0, total: 0, adviser: 0, introducer: 0, me: 0 });
+
+/**
+ * Month-by-month cash received. monthInputs[i] is the scenario for month i. Broker fees land in the
+ * month written; procuration, protection and GI land `lag` months later and drop off the horizon.
+ */
+export function forecast(monthInputs, rates) {
+  const months = monthInputs.map(emptyMonth);
+  monthInputs.forEach((scenario, m) => {
+    for (const { key } of CASE_TYPES) {
+      const r = computeCase((scenario && scenario[key]) || {}, rates);
+      const now = months[m];
+      now.written += r.written;
+      now.fees += r.fees;
+      now.total += r.atWritten.total;
+      now.adviser += r.atWritten.adviser;
+      now.introducer += r.atWritten.introducer;
+      now.me += r.atWritten.me;
+      const paid = months[m + r.lag];
+      if (!paid) continue;
+      paid.completions += r.completions;
+      paid.proc += r.proc;
+      paid.protection += r.protection.net;
+      paid.gi += r.gi.net;
+      paid.total += r.afterLag.total;
+      paid.adviser += r.afterLag.adviser;
+      paid.introducer += r.afterLag.introducer;
+      paid.me += r.afterLag.me;
+    }
+  });
+  return months.map((m, i) => ({ month: i + 1, ...m }));
+}
+
+export function sumMonths(months) {
+  const out = emptyMonth();
+  for (const m of months) for (const k of Object.keys(out)) out[k] += m[k];
+  return out;
+}
+
+/** Year 1 uses the scenario as entered; years 2 and 3 replace only the appointments seen. */
+export function yearScenario(scenario, seenOverride) {
+  const out = {};
+  for (const { key } of CASE_TYPES) {
+    out[key] = { ...((scenario && scenario[key]) || {}) };
+    const o = seenOverride && seenOverride[key];
+    if (o) for (const f of SEEN_FIELDS) if (o[f.key] !== undefined && o[f.key] !== null && o[f.key] !== "") out[key][f.key] = o[f.key];
+  }
+  return out;
+}
+
+export function threeYear(scenario, years, rates) {
+  const y1 = yearScenario(scenario, null);
+  const y2 = yearScenario(scenario, years && years.y2);
+  const y3 = yearScenario(scenario, years && years.y3);
+  const inputs = [...Array(12).fill(y1), ...Array(12).fill(y2), ...Array(12).fill(y3)];
+  const months = forecast(inputs, rates);
+  return {
+    months,
+    years: [0, 1, 2].map((y) => ({ year: y + 1, ...sumMonths(months.slice(y * 12, y * 12 + 12)) })),
+  };
+}
+
+/**
+ * Activity needed for an annual target. Every line scales in proportion to appointments seen,
+ * so the current mix is multiplied by one factor (steady state and first-year-with-lag versions).
+ */
+export function reverseTarget(scenario, rates, who, annualTarget) {
+  const target = num(annualTarget);
+  const steady = computeMonth(scenario, rates).total;
+  const firstYear = sumMonths(forecast(Array(12).fill(scenario), rates));
+  const steadyAnnual = steady[who] * 12;
+  const firstAnnual = firstYear[who];
+  const factor = steadyAnnual > 0 ? target / steadyAnnual : null;
+  const firstYearFactor = firstAnnual > 0 ? target / firstAnnual : null;
+  const scale = (f) => {
+    if (f === null) return null;
+    const out = {};
+    for (const { key } of CASE_TYPES) {
+      const c = (scenario && scenario[key]) || {};
+      out[key] = { seenOwnWeek: num(c.seenOwnWeek) * f, seenIntroducedWeek: num(c.seenIntroducedWeek) * f };
+    }
+    out.totalSeenWeek = steady.seenWeek * f;
+    return out;
+  };
+  return {
+    who, target, steadyAnnual, firstAnnual,
+    perSeen: steady.seen > 0 ? steady[who] / steady.seen : null,
+    factor, firstYearFactor,
+    steadySeen: scale(factor),
+    firstYearSeen: scale(firstYearFactor),
+  };
+}
+
+function checkNumber(field, value, where) {
+  if (value === undefined || value === null || value === "") return 0;
+  const n = Number(value);
+  if (!Number.isFinite(n)) throw new Error(`${where}${field.label} must be a number`);
+  if (n < field.min || n > field.max) throw new Error(`${where}${field.label} must be between ${field.min} and ${field.max}`);
+  return field.integer ? Math.round(n) : n;
+}
+
+export function cleanRates(input) {
+  const out = {};
+  for (const f of RATE_FIELDS) out[f.key] = checkNumber(f, input && input[f.key], "");
+  return out;
+}
+
+/** Plans saved before appointments were weekly hold monthly counts; convert them on load. */
+function weeklySeen(input) {
+  if (!input || typeof input !== "object") return input;
+  const out = { ...input };
+  for (const [weekKey, monthKey] of Object.entries(LEGACY_MONTHLY_SEEN)) {
+    const old = out[monthKey];
+    delete out[monthKey];
+    if ((out[weekKey] === undefined || out[weekKey] === null || out[weekKey] === "") && old !== undefined && old !== null && old !== "") {
+      out[weekKey] = Number.isFinite(Number(old)) ? Number(old) / WEEKS_PER_MONTH : old;
+    }
+  }
+  return out;
+}
+
+export function cleanCase(raw, where = "") {
+  const input = weeklySeen(raw);
+  const out = {};
+  for (const f of CASE_FIELDS) out[f.key] = checkNumber(f, input && input[f.key], where);
+  if (out.lagMonths < 1) out.lagMonths = 1;
+  return out;
+}
+
+export function cleanScenario(input, where = "") {
+  const out = {};
+  for (const t of CASE_TYPES) out[t.key] = cleanCase(input && input[t.key], `${where}${t.label}: `);
+  return out;
+}
+
+export function cleanSeenOverride(input, where = "") {
+  if (!input || typeof input !== "object") return null;
+  const out = {};
+  for (const t of CASE_TYPES) {
+    out[t.key] = {};
+    const caseInput = weeklySeen(input[t.key]);
+    for (const f of SEEN_FIELDS) {
+      const v = caseInput && caseInput[f.key];
+      if (v !== undefined && v !== null && v !== "") out[t.key][f.key] = checkNumber(f, v, `${where}${t.label}: `);
+    }
+  }
+  return out;
+}
+
+const cleanText = (v, max) => String(v === undefined || v === null ? "" : v).replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max);
+
+export function cleanPlan(input) {
+  if (!input || typeof input !== "object") throw new Error("Plan is missing");
+  const name = cleanText(input.name, 80);
+  if (!name) throw new Error("Plan name is required");
+  const scenarios = {};
+  const years = {};
+  for (const s of SCENARIOS) {
+    scenarios[s.key] = cleanScenario(input.scenarios && input.scenarios[s.key], `${s.label} scenario, `);
+    const y = input.years && input.years[s.key];
+    years[s.key] = {
+      y2: cleanSeenOverride(y && y.y2, `${s.label} year 2, `),
+      y3: cleanSeenOverride(y && y.y3, `${s.label} year 3, `),
+    };
+  }
+  return { name, adviser: cleanText(input.adviser, 80), notes: cleanText(input.notes, 2000), scenarios, years };
+}
+
+export function blankScenario() {
+  const out = {};
+  for (const t of CASE_TYPES) {
+    out[t.key] = {};
+    for (const f of CASE_FIELDS) out[t.key][f.key] = f.key === "lagMonths" ? 1 : 0;
+  }
+  return out;
+}

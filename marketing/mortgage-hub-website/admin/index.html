@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow, noarchive" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Earnings and business planning · Mortgage Easy admin</title>
+  <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/admin/admin.css?v=3" />
+  <script type="module" src="/admin/app.js?v=3"></script>
+</head>
+<body>
+  <header class="adm-header">
+    <div class="adm-wrap adm-header-inner">
+      <img class="adm-logo no-print" src="/assets/logo-on-dark.svg" width="150" height="36" alt="Mortgage Easy" />
+      <img class="adm-logo print-only" src="/assets/logo.svg" width="150" height="36" alt="Mortgage Easy" />
+      <div class="adm-title">
+        <strong>Earnings and business planning</strong>
+        <span>Owner only · confidential</span>
+      </div>
+      <div class="adm-user" id="user"></div>
+    </div>
+  </header>
+
+  <div class="adm-status" id="status" role="status" aria-live="polite"></div>
+
+  <main class="adm-wrap adm-main">
+    <section class="card adm-toolbar" aria-label="Plan">
+      <label>Plan name<input type="text" id="plan-name" maxlength="80" autocomplete="off" /></label>
+      <label>Adviser<input type="text" id="plan-adviser" maxlength="80" autocomplete="off" /></label>
+      <label>Saved plans<select id="plan-select"><option value="">New plan</option></select></label>
+      <button type="button" class="btn btn-green" id="btn-save">Save</button>
+      <button type="button" class="btn btn-ghost" id="btn-save-new">Save as new</button>
+      <button type="button" class="btn btn-danger" id="btn-delete">Delete</button>
+      <span class="adm-dirty" id="dirty" hidden>Unsaved changes</span>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-ghost" id="btn-print">Print / PDF</button>
+      <button type="button" class="btn btn-ghost" id="btn-csv">Export CSV</button>
+      <button type="button" class="btn btn-ghost" id="btn-json">Export JSON</button>
+      <label class="btn btn-ghost" for="import-file">Import JSON</label>
+      <input type="file" id="import-file" accept="application/json,.json" hidden />
+    </section>
+
+    <div class="adm-layout">
+      <aside class="card adm-inputs" aria-label="Adviser inputs">
+        <div class="adm-inputs-head">
+          <h2>Adviser inputs</h2>
+          <button type="button" class="btn btn-ghost small" id="btn-copy-base" hidden>Copy Base into this scenario</button>
+        </div>
+        <div class="seg seg-green" id="scenario-tabs" role="tablist" aria-label="Scenario"></div>
+        <div id="case-fields"></div>
+        <p class="note">Shared rates (procuration, commission levels, NTU, cancellations) are under <strong>Assumptions</strong>.</p>
+      </aside>
+
+      <section class="adm-results" aria-label="Results">
+        <div class="kpis" id="kpis"></div>
+        <nav class="adm-nav" id="panel-nav" aria-label="Sections"></nav>
+        <div id="panels"></div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
