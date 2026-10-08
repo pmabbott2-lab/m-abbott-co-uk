@@ -27,6 +27,7 @@ export function emptyStatusAmounts(): StatusAmounts {
     received: { count: 0, amountPence: 0 },
     paid: { count: 0, amountPence: 0 },
     rejected: { count: 0, amountPence: 0 },
+    reversed: { count: 0, amountPence: 0 },
   };
 }
 

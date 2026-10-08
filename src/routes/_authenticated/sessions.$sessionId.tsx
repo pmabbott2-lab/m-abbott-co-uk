@@ -26,13 +26,20 @@ import {
   amendPostedFee,
   listSessionCommissions,
   updateSessionCommissionPayoutStatus,
+  listCommissionExceptions,
+  resolveCommissionException,
+  reassignIntroducerCommission,
+  clawBackCommission,
+  settleCommissionClawback,
   FEE_TYPE_LABELS,
   BENEFICIARY_ROLE_LABELS,
-  type PayoutStatus,
+  RECOVERY_STATUS_LABELS,
+  type CommissionExceptionRow,
 } from "@/lib/finance.functions";
 import {
   canAmend,
   canView,
+  canAmendCommissionPayouts,
   canAmendHistory,
   canAmendIntroducer,
   canRefreshIntroducerCommission,
@@ -377,6 +384,8 @@ export function SessionDetail() {
               <CustomerFinanceCard
                 sessionId={sessionId}
                 canAmendFees={!platformReadOnly && canAmend(adminAccess, "finance_customer")}
+                isOwner={isOwner}
+                canSetPayout={!platformReadOnly && canAmendCommissionPayouts(adminAccess)}
               />
             </TabsContent>
           )}
@@ -1448,19 +1457,52 @@ function CustomerJourneyTab({
   );
 }
 
+type PayoutDecision = "received" | "paid" | "rejected";
+
+type FeeLineView = {
+  id: string;
+  status: string;
+  fee_type: string;
+  amount_pence: number;
+  note?: string | null;
+  fee_event_date?: string | null;
+  corrects_fee_line_id?: string | null;
+};
+
+const EXCEPTION_KIND_LABELS: Record<string, string> = {
+  missing_rate: "No commission rate on the fee date",
+  adviser_capacity_unrated: "Assigned staff member is not an adviser",
+  adviser_entitlement_unproven: "Adviser entitlement not provable on the fee date",
+  prior_commission_held: "Earlier commission on the corrected fee was rejected or adjusted",
+};
+
+function askReason(message: string): string | null {
+  const reason = window.prompt(message)?.trim();
+  return reason ? reason : null;
+}
+
 function CustomerFinanceCard({
   sessionId,
   canAmendFees,
+  isOwner,
+  canSetPayout,
 }: {
   sessionId: string;
   canAmendFees: boolean;
+  isOwner: boolean;
+  canSetPayout: boolean;
 }) {
   const qc = useQueryClient();
   const listFn = useServerFn(listSessionFees);
   const commissionsFn = useServerFn(listSessionCommissions);
+  const exceptionsFn = useServerFn(listCommissionExceptions);
   const submitFn = useServerFn(submitSessionFees);
   const amendFn = useServerFn(amendPostedFee);
   const commissionStatusFn = useServerFn(updateSessionCommissionPayoutStatus);
+  const resolveFn = useServerFn(resolveCommissionException);
+  const reassignFn = useServerFn(reassignIntroducerCommission);
+  const clawBackFn = useServerFn(clawBackCommission);
+  const settleFn = useServerFn(settleCommissionClawback);
 
   const feesQ = useQuery({
     queryKey: ["session-fees", sessionId],
@@ -1472,53 +1514,111 @@ function CustomerFinanceCard({
     queryFn: () => commissionsFn({ data: { sessionId } }),
   });
 
+  const exceptionsQ = useQuery({
+    queryKey: ["session-commission-exceptions", sessionId],
+    queryFn: () => exceptionsFn({ data: { sessionId, status: "open" } }),
+  });
+
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["session-fees", sessionId] });
     qc.invalidateQueries({ queryKey: ["session-commissions", sessionId] });
+    qc.invalidateQueries({ queryKey: ["session-commission-exceptions", sessionId] });
     qc.invalidateQueries({ queryKey: ["commission-payouts"] });
   };
+  const onError = (fallback: string) => (e: unknown) =>
+    toast.error(e instanceof Error ? e.message : fallback);
 
   const commissionRows = commissionsQ.data?.rows ?? [];
+  const clawbacks = commissionsQ.data?.clawbacks ?? [];
+  const exceptions: CommissionExceptionRow[] = exceptionsQ.data?.rows ?? [];
   const pipeline = commissionPipelineTotals(commissionRows);
 
   const updateCommission = useMutation({
-    mutationFn: (vars: { ledgerId: string; payoutStatus: PayoutStatus }) =>
-      commissionStatusFn({
-        data: {
-          sessionId,
-          ledgerId: vars.ledgerId,
-          payoutStatus: vars.payoutStatus,
-        },
-      }),
+    mutationFn: (vars: { ledgerId: string; payoutStatus: PayoutDecision; payoutNote?: string }) =>
+      commissionStatusFn({ data: { sessionId, ...vars } }),
     onSuccess: () => {
       toast.success("Commission status updated");
       refresh();
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not update"),
+    onError: onError("Could not update"),
   });
 
   const submit = useMutation({
-    mutationFn: () => submitFn({ data: { sessionId } }),
+    mutationFn: (feeLineIds: string[]) => submitFn({ data: { sessionId, feeLineIds } }),
     onSuccess: (r) => {
-      toast.success(`Submitted ${r.count} fee(s) — locked to ledger`);
+      toast.success(
+        r.exceptions > 0
+          ? `Posted ${r.posted} fee(s). ${r.exceptions} commission exception(s) need an Owner decision.`
+          : `Posted ${r.posted} fee(s)`,
+      );
       refresh();
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not submit"),
+    onError: onError("Could not post"),
   });
 
-  const amend = useMutation({
-    mutationFn: (vars: { lineId: string; amountPounds?: number; delete?: boolean }) =>
-      amendFn({ data: vars }),
+  const adjust = useMutation({
+    mutationFn: (
+      vars:
+        | { action: "reverse"; lineId: string; reason: string }
+        | { action: "correct"; lineId: string; amountPounds: number; reason: string; evidence: string },
+    ) => amendFn({ data: vars }),
+    onSuccess: (r) => {
+      toast.success(
+        r.action === "reverse"
+          ? `Fee reversed${r.clawbacks > 0 ? ` · ${r.clawbacks} paid commission(s) clawed back` : ""}`
+          : "Correction posted",
+      );
+      refresh();
+    },
+    onError: onError("Could not adjust the fee"),
+  });
+
+  const commissionAction = useMutation({
+    mutationFn: async (
+      vars:
+        | { kind: "reassign"; ledgerId: string; introducerCode: string; reason: string }
+        | { kind: "clawback"; ledgerId: string; reason: string }
+        | { kind: "settle"; ledgerId: string; outcome: "settled" | "written_off"; reason: string },
+    ) => {
+      if (vars.kind === "reassign") {
+        return reassignFn({
+          data: { ledgerId: vars.ledgerId, introducerCode: vars.introducerCode, reason: vars.reason },
+        });
+      }
+      if (vars.kind === "clawback") {
+        return clawBackFn({ data: { ledgerId: vars.ledgerId, reason: vars.reason } });
+      }
+      return settleFn({
+        data: { ledgerId: vars.ledgerId, outcome: vars.outcome, reason: vars.reason },
+      });
+    },
     onSuccess: () => {
-      toast.success("Amendment recorded (red on ledger)");
+      toast.success("Commission adjustment recorded");
       refresh();
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not amend"),
+    onError: onError("Could not record the adjustment"),
   });
 
-  const lines = feesQ.data?.lines ?? [];
+  const resolve = useMutation({
+    mutationFn: (vars: {
+      exceptionId: string;
+      resolution: "event_pct" | "no_commission" | "advisers_determined" | "reinstate";
+      pct?: number;
+      adviserUserIds?: string[];
+      reason: string;
+    }) => resolveFn({ data: vars }),
+    onSuccess: () => {
+      toast.success("Exception resolved");
+      refresh();
+    },
+    onError: onError("Could not resolve the exception"),
+  });
+
+  const lines = (feesQ.data?.lines ?? []) as FeeLineView[];
   const drafts = lines.filter((l) => l.status === "draft");
   const posted = lines.filter((l) => l.status === "posted" || l.status === "amended");
+  const correctedIds = new Set(lines.map((l) => l.corrects_fee_line_id).filter(Boolean));
+  const postableDrafts = drafts.filter((l) => l.fee_event_date);
 
   if (feesQ.data?.migrationRequired) {
     return (
@@ -1534,8 +1634,9 @@ function CustomerFinanceCard({
         <h3 className="font-semibold">Customer fees</h3>
         <p className="text-xs text-muted-foreground mt-1">
           Fee amounts come from the network commission statement. Allocate a line under Finance →
-          Network statements; it appears here as a draft. Submit locks fees and creates payable
-          commission. Amendments to posted fees appear as red ledger transactions.
+          Network statements; it appears here as a draft. Posting locks the fee at its statement date
+          and creates commission. An Owner corrects a posted fee by reversing it and entering a new
+          correction; neither edits the original.
         </p>
       </div>
 
@@ -1584,18 +1685,27 @@ function CustomerFinanceCard({
             No draft fees yet. Allocate from the network statement when commission is received.
           </p>
         )}
-        {drafts.map((l) => (
-          <div key={l.id} className="flex justify-between text-sm border rounded-lg px-3 py-2">
-            <span>
-              {FEE_TYPE_LABELS[l.fee_type as keyof typeof FEE_TYPE_LABELS] ?? l.fee_type}
-              {l.note ? ` · ${l.note}` : ""}
-            </span>
-            <span className="font-medium">£{(l.amount_pence / 100).toFixed(2)}</span>
-          </div>
-        ))}
-        {canAmendFees && drafts.length > 0 && (
-          <Button disabled={submit.isPending} onClick={() => submit.mutate()}>
-            {submit.isPending ? "Submitting…" : "Submit & lock fees"}
+        {drafts.map((l) => {
+          const eventDate = l.fee_event_date;
+          return (
+            <div key={l.id} className="flex justify-between text-sm border rounded-lg px-3 py-2">
+              <span>
+                {FEE_TYPE_LABELS[l.fee_type as keyof typeof FEE_TYPE_LABELS] ?? l.fee_type}
+                {l.note ? ` · ${l.note}` : ""}
+                <span className="block text-xs text-muted-foreground">
+                  {eventDate ? `Fee date ${safeFormat(eventDate, "d MMM yyyy")}` : "No fee date — cannot post"}
+                </span>
+              </span>
+              <span className="font-medium">£{(l.amount_pence / 100).toFixed(2)}</span>
+            </div>
+          );
+        })}
+        {canAmendFees && postableDrafts.length > 0 && (
+          <Button
+            disabled={submit.isPending}
+            onClick={() => submit.mutate(postableDrafts.map((l) => l.id))}
+          >
+            {submit.isPending ? "Posting…" : "Post & lock fees"}
           </Button>
         )}
       </div>
@@ -1603,43 +1713,186 @@ function CustomerFinanceCard({
       <div className="space-y-2">
         <h4 className="text-sm font-medium">Posted</h4>
         {posted.length === 0 && <p className="text-sm text-muted-foreground">No posted fees yet.</p>}
-        {posted.map((l) => (
-          <div
-            key={l.id}
-            className={`flex flex-wrap items-center justify-between gap-2 text-sm border rounded-lg px-3 py-2 ${
-              l.status === "amended" ? "border-destructive/40 text-destructive" : ""
-            }`}
-          >
-            <span>
-              {FEE_TYPE_LABELS[l.fee_type as keyof typeof FEE_TYPE_LABELS] ?? l.fee_type}
-              {l.status === "amended" ? " (amended)" : ""}
-              {l.note ? ` · ${l.note}` : ""}
-            </span>
-            <div className="flex items-center gap-2">
-              <span className="font-medium">£{(l.amount_pence / 100).toFixed(2)}</span>
-              {canAmendFees && l.status === "posted" && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-destructive"
-                  disabled={amend.isPending}
-                  onClick={() => {
-                    const next = prompt("New amount (£) — leave blank to delete", String(l.amount_pence / 100));
-                    if (next === null) return;
-                    if (next.trim() === "") {
-                      amend.mutate({ lineId: l.id, delete: true });
-                    } else {
-                      amend.mutate({ lineId: l.id, amountPounds: Number(next) });
-                    }
-                  }}
-                >
-                  Amend
-                </Button>
-              )}
+        {posted.map((l) => {
+          const reversed = l.status === "amended";
+          const isCorrection = Boolean(l.corrects_fee_line_id);
+          return (
+            <div
+              key={l.id}
+              className={`flex flex-wrap items-center justify-between gap-2 text-sm border rounded-lg px-3 py-2 ${
+                reversed ? "border-destructive/40 text-destructive" : ""
+              }`}
+            >
+              <span>
+                {FEE_TYPE_LABELS[l.fee_type as keyof typeof FEE_TYPE_LABELS] ?? l.fee_type}
+                {reversed ? " (reversed)" : ""}
+                {isCorrection ? " (correction)" : ""}
+                {l.note ? ` · ${l.note}` : ""}
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-medium">£{(l.amount_pence / 100).toFixed(2)}</span>
+                {isOwner && l.status === "posted" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-destructive"
+                    disabled={adjust.isPending}
+                    onClick={() => {
+                      const reason = askReason("Reason for reversing this posted fee");
+                      if (!reason) return;
+                      adjust.mutate({ action: "reverse", lineId: l.id, reason });
+                    }}
+                  >
+                    Reverse
+                  </Button>
+                )}
+                {isOwner && reversed && !correctedIds.has(l.id) && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={adjust.isPending}
+                    onClick={() => {
+                      const amount = Number(window.prompt("Corrected fee amount (£)") ?? "");
+                      if (!Number.isFinite(amount) || amount <= 0) return;
+                      const reason = askReason("Reason for the correction");
+                      if (!reason) return;
+                      const evidence = askReason("Evidence for the corrected amount (e.g. statement reference)");
+                      if (!evidence) return;
+                      adjust.mutate({ action: "correct", lineId: l.id, amountPounds: amount, reason, evidence });
+                    }}
+                  >
+                    Enter correction
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
+
+      {exceptions.length > 0 && (
+        <div className="space-y-2 border-t pt-5">
+          <h4 className="text-sm font-medium">Commission exceptions</h4>
+          <p className="text-xs text-muted-foreground">
+            The fee is posted; this commission is held until an Owner decides.
+          </p>
+          {exceptions.map((ex) => {
+            const recorded = ex.recordedAdviserIds;
+            return (
+              <div key={ex.id} className="text-sm border rounded-lg px-3 py-2 space-y-2">
+                <div>
+                  {EXCEPTION_KIND_LABELS[ex.exceptionKind] ?? ex.exceptionKind}
+                  {ex.beneficiaryName ? ` · ${ex.beneficiaryName}` : ""}
+                  <span className="block text-xs text-muted-foreground">
+                    {BENEFICIARY_ROLE_LABELS[ex.beneficiaryRole] ?? ex.beneficiaryRole} · fee £
+                    {(ex.basisPence / 100).toFixed(2)} · {safeFormat(ex.economicDate, "d MMM yyyy")}
+                  </span>
+                </div>
+                {isOwner && (
+                  <div className="flex flex-wrap gap-2">
+                    {ex.exceptionKind === "prior_commission_held" ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={resolve.isPending}
+                          onClick={() => {
+                            const reason = askReason("Reason to reinstate commission on this fee");
+                            if (!reason) return;
+                            resolve.mutate({ exceptionId: ex.id, resolution: "reinstate", reason });
+                          }}
+                        >
+                          Reinstate at fee-date rate
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={resolve.isPending}
+                          onClick={() => {
+                            const reason = askReason("Reason for no commission");
+                            if (!reason) return;
+                            resolve.mutate({ exceptionId: ex.id, resolution: "no_commission", reason });
+                          }}
+                        >
+                          No commission
+                        </Button>
+                      </>
+                    ) : ex.exceptionKind !== "adviser_entitlement_unproven" ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={resolve.isPending}
+                          onClick={() => {
+                            const pct = Number(window.prompt("Commission % for this fee only") ?? "");
+                            if (!Number.isFinite(pct) || pct <= 0 || pct > 100) return;
+                            const reason = askReason("Reason for this one-off percentage");
+                            if (!reason) return;
+                            resolve.mutate({ exceptionId: ex.id, resolution: "event_pct", pct, reason });
+                          }}
+                        >
+                          Set % for this fee
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={resolve.isPending}
+                          onClick={() => {
+                            const reason = askReason("Reason for no commission");
+                            if (!reason) return;
+                            resolve.mutate({ exceptionId: ex.id, resolution: "no_commission", reason });
+                          }}
+                        >
+                          No commission
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        {recorded.length > 0 && recorded.length <= 3 && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={resolve.isPending}
+                            onClick={() => {
+                              const reason = askReason("Reason the recorded advisers are entitled");
+                              if (!reason) return;
+                              resolve.mutate({
+                                exceptionId: ex.id,
+                                resolution: "advisers_determined",
+                                adviserUserIds: recorded,
+                                reason,
+                              });
+                            }}
+                          >
+                            Confirm recorded advisers ({recorded.length})
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={resolve.isPending}
+                          onClick={() => {
+                            const reason = askReason("Reason no adviser is entitled");
+                            if (!reason) return;
+                            resolve.mutate({
+                              exceptionId: ex.id,
+                              resolution: "advisers_determined",
+                              adviserUserIds: [],
+                              reason,
+                            });
+                          }}
+                        >
+                          No adviser commission
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="space-y-3 border-t pt-5">
         <h4 className="text-sm font-medium">Commission on this case</h4>
@@ -1648,49 +1901,160 @@ function CustomerFinanceCard({
         )}
         {commissionRows.length === 0 && !commissionsQ.isLoading && (
           <p className="text-sm text-muted-foreground">
-            Commission rows appear when fees are submitted and locked.
+            Commission rows appear when fees are posted.
           </p>
         )}
         {commissionRows.length > 0 && (
           <div className="space-y-2">
-            {commissionRows.map((row) => (
-              <div
-                key={row.id}
-                className="flex flex-wrap items-center justify-between gap-2 text-sm border rounded-lg px-3 py-2"
-              >
-                <span>
-                  {BENEFICIARY_ROLE_LABELS[row.beneficiaryRole] ?? row.beneficiaryRole}
-                  {row.beneficiaryName ? ` · ${row.beneficiaryName}` : ""}
-                  {row.commissionPct != null ? ` (${row.commissionPct}%)` : ""}
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">£{(row.amountPence / 100).toFixed(2)}</span>
-                  <PayoutStatusBadge status={row.payoutStatus} />
-                  {canAmendFees && row.payoutStatus !== "rejected" && (
-                    <select
-                      className="h-8 rounded-md border bg-background px-2 text-xs"
-                      value={row.payoutStatus}
-                      disabled={updateCommission.isPending}
-                      onChange={(e) => {
-                        updateCommission.mutate({
-                          ledgerId: row.id,
-                          payoutStatus: e.target.value as PayoutStatus,
-                        });
-                      }}
-                    >
-                      <option value="received">Received</option>
-                      <option value="paid">Paid</option>
-                      <option value="rejected">Rejected</option>
-                    </select>
-                  )}
+            {commissionRows.map((row) => {
+              const editable =
+                canSetPayout && (row.payoutStatus === "received" || row.payoutStatus === "rejected");
+              return (
+                <div
+                  key={row.id}
+                  className="flex flex-wrap items-center justify-between gap-2 text-sm border rounded-lg px-3 py-2"
+                >
+                  <span>
+                    {BENEFICIARY_ROLE_LABELS[row.beneficiaryRole] ?? row.beneficiaryRole}
+                    {row.beneficiaryName ? ` · ${row.beneficiaryName}` : ""}
+                    {row.commissionPct != null ? ` (${row.commissionPct}%)` : ""}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">£{(row.amountPence / 100).toFixed(2)}</span>
+                    <PayoutStatusBadge status={row.payoutStatus} />
+                    {editable && (
+                      <select
+                        className="h-8 rounded-md border bg-background px-2 text-xs"
+                        value={row.payoutStatus}
+                        disabled={updateCommission.isPending}
+                        aria-label="Payout status"
+                        onChange={(e) => {
+                          const to = e.target.value as PayoutDecision;
+                          let payoutNote: string | undefined;
+                          if (to === "paid" && !window.confirm("Mark paid? Paid is final.")) return;
+                          if (row.payoutStatus === "rejected" && to === "received") {
+                            const reason = askReason("Reason for reopening this rejected commission");
+                            if (!reason) return;
+                            payoutNote = reason;
+                          }
+                          updateCommission.mutate({ ledgerId: row.id, payoutStatus: to, payoutNote });
+                        }}
+                      >
+                        {(row.payoutStatus === "rejected"
+                          ? (["rejected", "received"] as const)
+                          : (["received", "paid", "rejected"] as const)
+                        ).map((s) => (
+                          <option key={s} value={s}>
+                            {s === "received" ? "Received" : s === "paid" ? "Paid" : "Rejected"}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {isOwner &&
+                      row.beneficiaryRole === "introducer" &&
+                      (row.payoutStatus === "received" || row.payoutStatus === "rejected") && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={commissionAction.isPending}
+                          onClick={() => {
+                            const code = window.prompt("New introducer's 4-digit code")?.trim();
+                            if (!code) return;
+                            const reason = askReason("Reason for reassigning this commission");
+                            if (!reason) return;
+                            commissionAction.mutate({
+                              kind: "reassign",
+                              ledgerId: row.id,
+                              introducerCode: code,
+                              reason,
+                            });
+                          }}
+                        >
+                          Reassign
+                        </Button>
+                      )}
+                    {isOwner &&
+                      row.payoutStatus === "paid" &&
+                      !clawbacks.some((c) => c.originalEventId === row.id) && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-destructive"
+                          disabled={commissionAction.isPending}
+                          onClick={() => {
+                            const reason = askReason("Reason for clawing back this paid commission");
+                            if (!reason) return;
+                            commissionAction.mutate({ kind: "clawback", ledgerId: row.id, reason });
+                          }}
+                        >
+                          Claw back
+                        </Button>
+                      )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             <div className="flex flex-wrap gap-3 text-xs text-muted-foreground pt-2">
               <span>Received: £{(pipeline.received / 100).toFixed(2)}</span>
               <span>Paid: £{(pipeline.paid / 100).toFixed(2)}</span>
               <span>Rejected: £{(pipeline.rejected / 100).toFixed(2)}</span>
+              {pipeline.reversed > 0 && <span>Reversed: £{(pipeline.reversed / 100).toFixed(2)}</span>}
             </div>
+          </div>
+        )}
+        {clawbacks.length > 0 && (
+          <div className="space-y-2">
+            <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Clawbacks</h5>
+            {clawbacks.map((c) => (
+              <div
+                key={c.id}
+                className="flex flex-wrap items-center justify-between gap-2 text-sm border border-destructive/40 rounded-lg px-3 py-2"
+              >
+                <span>
+                  {c.beneficiaryName || (BENEFICIARY_ROLE_LABELS[c.beneficiaryRole] ?? c.beneficiaryRole)}
+                  {c.reason ? <span className="block text-xs text-muted-foreground">{c.reason}</span> : null}
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-destructive">£{(c.amountPence / 100).toFixed(2)}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {RECOVERY_STATUS_LABELS[c.recoveryStatus] ?? c.recoveryStatus}
+                  </span>
+                  {isOwner && c.recoveryStatus === "due" && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={commissionAction.isPending}
+                        onClick={() => {
+                          const reason = askReason("How was this clawback recovered?");
+                          if (!reason) return;
+                          commissionAction.mutate({ kind: "settle", ledgerId: c.id, outcome: "settled", reason });
+                        }}
+                      >
+                        Recovered
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={commissionAction.isPending}
+                        onClick={() => {
+                          const reason = askReason("Reason for writing off this clawback");
+                          if (!reason) return;
+                          commissionAction.mutate({
+                            kind: "settle",
+                            ledgerId: c.id,
+                            outcome: "written_off",
+                            reason,
+                          });
+                        }}
+                      >
+                        Write off
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

@@ -13,7 +13,6 @@ import {
   TenantContextError,
   assertRowBelongsToTenant,
   requireTenantMembership,
-  withForcedTenantId,
 } from "@/lib/tenant-assert.server";
 import {
   COMMISSION_FEE_TYPES,
@@ -76,14 +75,67 @@ export const FEE_TYPE_LABELS: Record<(typeof FEE_TYPES)[number], string> = {
   other_fee: "Other fee",
 };
 
-export const PAYOUT_STATUSES = ["received", "paid", "rejected"] as const;
+export const PAYOUT_STATUSES = ["received", "paid", "rejected", "reversed"] as const;
 export type PayoutStatus = (typeof PAYOUT_STATUSES)[number];
 
 export const PAYOUT_STATUS_LABELS: Record<PayoutStatus, string> = {
   received: "Received",
   paid: "Paid",
   rejected: "Rejected",
+  reversed: "Reversed",
 };
+
+export const RECOVERY_STATUS_LABELS: Record<string, string> = {
+  due: "Recovery due",
+  settled: "Recovered",
+  written_off: "Written off",
+};
+
+export const LEDGER_EVENT_LABELS: Record<string, string> = {
+  fee_posted: "Fee posted",
+  fee_reversed: "Fee reversed",
+  commission_accrued: "Commission",
+  commission_reversed: "Commission reversed",
+  commission_reassigned: "Commission reassigned",
+  clawback: "Clawback",
+  clawback_settled: "Clawback recovered",
+  clawback_written_off: "Clawback written off",
+};
+
+const FINANCE_RPC_MESSAGES: Array<[string, string]> = [
+  ["finance_forbidden", "Forbidden"],
+  ["finance_resource_not_found", "Not found"],
+  ["finance_fee_selection_invalid", "Select draft fees on this case to post."],
+  ["finance_fee_not_draft", "Only draft fees can be posted."],
+  ["finance_fee_event_date_required", "This fee has no economic date and cannot be posted."],
+  ["finance_statement_not_validated", "Validate the network statement before posting this fee."],
+  ["finance_fee_source_invalid", "This fee's network source does not match; it cannot be posted."],
+  ["finance_session_customer_invalid", "This fee's case and customer do not match."],
+  ["finance_fee_amount_invalid", "Enter an amount greater than zero."],
+  ["finance_fee_already_reversed", "This fee has already been reversed."],
+  ["finance_fee_not_posted", "This fee is not posted (it may have been reversed); it cannot change."],
+  ["finance_fee_not_reversed", "Reverse the posted fee before entering its correction."],
+  ["finance_fee_already_corrected", "This reversed fee already has a correction."],
+  ["finance_reason_required", "A reason is required."],
+  ["finance_commission_paid", "Paid commission cannot be reversed or reassigned; use a clawback."],
+  ["finance_commission_not_paid", "Only paid commission can be clawed back."],
+  ["finance_commission_not_payable", "This commission is not payable."],
+  ["finance_commission_already_adjusted", "This commission has already been adjusted."],
+  ["finance_beneficiary_already_accrued", "That beneficiary already has commission on this fee."],
+  ["finance_reassignment_invalid", "Choose a different introducer in this company."],
+  ["finance_exception_already_resolved", "This exception is already resolved."],
+  ["finance_resolution_invalid", "That resolution is not valid for this exception."],
+  ["finance_payout_terminal", "Paid and reversed commission cannot change status."],
+  ["finance_payout_transition_invalid", "That payout status change is not allowed."],
+  ["finance_recovery_closed", "This clawback is already settled or written off."],
+  ["finance_recovery_invalid", "Choose settled or written off."],
+];
+
+function financeRpcError(error: { message?: string; code?: string } | null): Error {
+  const raw = error?.message ?? "";
+  const hit = FINANCE_RPC_MESSAGES.find(([code]) => raw.includes(code));
+  return new Error(hit ? hit[1] : raw || "The finance action failed.");
+}
 
 /** @deprecated Lost is no longer a payout status — kept only for reading legacy rows. */
 export const LOST_COMMISSION_REASONS = [
@@ -103,6 +155,7 @@ function normalizePayoutStatus(raw: string | null | undefined): PayoutStatus {
 }
 
 const PAYOUT_STATUS_Z = z.enum(["received", "paid", "rejected"]);
+const PAYOUT_FILTER_Z = z.enum(PAYOUT_STATUSES);
 
 export const BENEFICIARY_ROLE_LABELS: Record<string, string> = {
   advisor: "Advisor",
@@ -127,7 +180,51 @@ export type CommissionPayoutRow = {
   payoutAt: string | null;
   lostReason: string | null;
   createdAt: string;
+  economicDate: string | null;
+  beneficiaryCode: string | null;
 };
+
+/** A paid commission clawed back: linked negative event; the original payment stays paid. */
+export type CommissionClawbackRow = {
+  id: string;
+  originalEventId: string;
+  sessionId: string | null;
+  caseRef: string | null;
+  beneficiaryRole: string;
+  beneficiaryUserId: string | null;
+  beneficiaryName: string;
+  amountPence: number;
+  recoveryStatus: string;
+  reason: string | null;
+  createdAt: string;
+  recoveryAt: string | null;
+};
+
+export type CommissionExceptionRow = {
+  id: string;
+  sessionId: string;
+  caseRef: string | null;
+  feeLineId: string;
+  exceptionKind: string;
+  beneficiaryRole: string;
+  beneficiaryUserId: string | null;
+  beneficiaryName: string | null;
+  introducerId: string | null;
+  feeType: string;
+  basisPence: number;
+  economicDate: string;
+  status: string;
+  resolution: string | null;
+  resolutionReason: string | null;
+  recordedAdviserIds: string[];
+  unprovenReason: string | null;
+  createdAt: string;
+};
+
+const COMMISSION_COLUMNS =
+  "id, session_id, fee_type, amount_pence, commission_pct, beneficiary_user_id, beneficiary_role, beneficiary_name, beneficiary_code, referral_id, payout_status, payout_note, payout_at, lost_reason, created_at, note, economic_date";
+const CLAWBACK_COLUMNS =
+  "id, original_event_id, session_id, beneficiary_role, beneficiary_user_id, beneficiary_name, amount_pence, recovery_status, recovery_at, reason, created_at";
 
 export const listSessionFees = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -177,25 +274,180 @@ export const listSessionCommissions = createServerFn({ method: "GET" })
       authorisedTenantId: tenantId,
       select: "id, tenant_id",
     });
-    const { data: rows, error } = await supabaseAdmin
-      .from("finance_ledger")
-      .select(
-        "id, session_id, fee_type, amount_pence, commission_pct, beneficiary_user_id, beneficiary_role, referral_id, payout_status, payout_note, payout_at, lost_reason, created_at, note",
-      )
-      .eq("kind", "commission")
-      .eq("session_id", data.sessionId)
-      .eq("tenant_id", tenantId)
-      .order("created_at", { ascending: true });
-    if (error) {
-      if (isMissingTable(error)) return { rows: [] as CommissionPayoutRow[], migrationRequired: true };
-      throw new Error(error.message);
+    const [{ data: rows, error }, { data: claws, error: clawErr }] = await Promise.all([
+      supabaseAdmin
+        .from("finance_ledger")
+        .select(COMMISSION_COLUMNS)
+        .eq("event_type", "commission_accrued")
+        .eq("session_id", data.sessionId)
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: true }),
+      supabaseAdmin
+        .from("finance_ledger")
+        .select(CLAWBACK_COLUMNS)
+        .eq("event_type", "clawback")
+        .eq("session_id", data.sessionId)
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: true }),
+    ]);
+    const err = error ?? clawErr;
+    if (err) {
+      if (isMissingTable(err)) {
+        return {
+          rows: [] as CommissionPayoutRow[],
+          clawbacks: [] as CommissionClawbackRow[],
+          migrationRequired: true,
+        };
+      }
+      throw new Error(err.message);
     }
     const enriched = await enrichCommissionLedgerRows(
       supabaseAdmin,
       (rows ?? []) as RawCommissionLedgerRow[],
       tenantId,
     );
-    return { rows: enriched, migrationRequired: false };
+    return {
+      rows: enriched,
+      clawbacks: mapClawbackRows((claws ?? []) as RawClawbackRow[], enriched),
+      migrationRequired: false,
+    };
+  });
+
+export const listCommissionExceptions = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        sessionId: z.string().uuid().optional(),
+        status: z.enum(["open", "resolved", "all"]).default("open"),
+      })
+      .parse(d ?? {}),
+  )
+  .handler(async ({ data, context }): Promise<{ rows: CommissionExceptionRow[] }> => {
+    const { tenantId, access } = await resolveFinanceTenant(context.userId);
+    if (!canView(access, "finance_customer")) throw new Error("Forbidden");
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    if (data.sessionId) {
+      await assertRowBelongsToTenant({
+        table: "interview_sessions",
+        id: data.sessionId,
+        authorisedTenantId: tenantId,
+        select: "id, tenant_id",
+      });
+    }
+    let q = supabaseAdmin
+      .from("finance_commission_exceptions")
+      .select(
+        "id, session_id, fee_line_id, exception_kind, beneficiary_role, beneficiary_user_id, introducer_id, fee_type, commission_basis_pence, economic_date, status, resolution, resolution_reason, evidence, created_at",
+      )
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: true })
+      .limit(500);
+    if (data.sessionId) q = q.eq("session_id", data.sessionId);
+    if (data.status !== "all") q = q.eq("status", data.status);
+    const { data: raw, error } = await q;
+    if (error) {
+      if (isMissingTable(error)) return { rows: [] };
+      throw new Error(error.message);
+    }
+    const list = (raw ?? []) as Array<Record<string, unknown>>;
+    const userIds = [
+      ...new Set(list.map((r) => r.beneficiary_user_id as string | null).filter(Boolean) as string[]),
+    ];
+    const sessionIds = [...new Set(list.map((r) => r.session_id as string))];
+    const names = new Map<string, string>();
+    const caseRefs = new Map<string, string | null>();
+    if (userIds.length > 0) {
+      const { data: profiles } = await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", userIds);
+      for (const p of profiles ?? []) names.set(p.id, p.full_name || p.email || "Staff");
+    }
+    if (sessionIds.length > 0) {
+      const { data: sessions } = await supabaseAdmin
+        .from("interview_sessions")
+        .select("id, case_ref")
+        .eq("tenant_id", tenantId)
+        .in("id", sessionIds);
+      for (const s of sessions ?? []) caseRefs.set(s.id, s.case_ref ?? null);
+    }
+    return {
+      rows: list.map((r) => ({
+        id: r.id as string,
+        sessionId: r.session_id as string,
+        caseRef: caseRefs.get(r.session_id as string) ?? null,
+        feeLineId: r.fee_line_id as string,
+        exceptionKind: r.exception_kind as string,
+        beneficiaryRole: r.beneficiary_role as string,
+        beneficiaryUserId: (r.beneficiary_user_id as string | null) ?? null,
+        beneficiaryName: r.beneficiary_user_id ? names.get(r.beneficiary_user_id as string) ?? null : null,
+        introducerId: (r.introducer_id as string | null) ?? null,
+        feeType: r.fee_type as string,
+        basisPence: Number(r.commission_basis_pence) || 0,
+        economicDate: r.economic_date as string,
+        status: r.status as string,
+        resolution: (r.resolution as string | null) ?? null,
+        resolutionReason: (r.resolution_reason as string | null) ?? null,
+        recordedAdviserIds: recordedAdvisers(r.evidence),
+        unprovenReason:
+          typeof (r.evidence as { reason?: unknown } | null)?.reason === "string"
+            ? ((r.evidence as { reason: string }).reason)
+            : null,
+        createdAt: r.created_at as string,
+      })),
+    };
+  });
+
+function recordedAdvisers(evidence: unknown): string[] {
+  const list = (evidence as { advisers?: Array<{ adviser_user_id?: unknown }> } | null)?.advisers;
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((a) => a?.adviser_user_id)
+    .filter((id): id is string => typeof id === "string");
+}
+
+const REASON_Z = z.string().trim().min(1, "A reason is required.").max(500);
+
+export const resolveCommissionException = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        exceptionId: z.string().uuid(),
+        resolution: z.enum(["event_pct", "no_commission", "advisers_determined", "reinstate"]),
+        pct: z.number().positive().max(100).optional(),
+        adviserUserIds: z.array(z.string().uuid()).max(3).optional(),
+        reason: REASON_Z,
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { tenantId, access } = await resolveFinanceTenant(context.userId);
+    if (!access.isOwner) throw new Error("Only an Owner can resolve a commission exception.");
+    await assertRowBelongsToTenant({
+      table: "finance_commission_exceptions",
+      id: data.exceptionId,
+      authorisedTenantId: tenantId,
+      select: "id, tenant_id",
+    });
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    const { data: rows, error } = await supabaseAdmin.rpc("resolve_commission_exception", {
+      p_tenant_id: tenantId,
+      p_actor_user_id: context.userId,
+      p_exception_id: data.exceptionId,
+      p_resolution: data.resolution,
+      p_pct: data.resolution === "event_pct" ? data.pct ?? null : null,
+      p_adviser_user_ids:
+        data.resolution === "advisers_determined" ? data.adviserUserIds ?? [] : null,
+      p_reason: data.reason,
+    });
+    if (error) throw financeRpcError(error);
+    return { ok: true as const, outcomes: ((rows ?? []) as Array<{ outcome: string }>).map((r) => r.outcome) };
   });
 
 export const upsertDraftFee = createServerFn({ method: "POST" })
@@ -230,50 +482,234 @@ export const upsertDraftFee = createServerFn({ method: "POST" })
 
 export const submitSessionFees = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<{ ok: true; count: number }> => {
-    const { tenantId, access } = await resolveFinanceTenant(context.userId);
-    if (!canAmend(access, "finance_customer")) throw new Error("Forbidden");
-    await assertRowBelongsToTenant({
-      table: "interview_sessions",
-      id: data.sessionId,
-      authorisedTenantId: tenantId,
-      select: "id, tenant_id",
-    });
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        sessionId: z.string().uuid(),
+        feeLineIds: z.array(z.string().uuid()).min(1).max(50),
+      })
+      .parse(d),
+  )
+  .handler(
+    async ({
+      data,
+      context,
+    }): Promise<{ ok: true; count: number; posted: number; exceptions: number }> => {
+      const { tenantId, access } = await resolveFinanceTenant(context.userId);
+      if (!canAmend(access, "finance_customer")) throw new Error("Forbidden");
+      await assertRowBelongsToTenant({
+        table: "interview_sessions",
+        id: data.sessionId,
+        authorisedTenantId: tenantId,
+        select: "id, tenant_id",
+      });
+      const { supabaseAdminUntyped: supabaseAdmin } = await import(
+        "@/integrations/supabase/client.server"
+      );
+      const { data: rows, error } = await supabaseAdmin.rpc("post_session_fees", {
+        p_tenant_id: tenantId,
+        p_actor_user_id: context.userId,
+        p_session_id: data.sessionId,
+        p_fee_line_ids: data.feeLineIds,
+      });
+      if (error) throw financeRpcError(error);
+      const list = (rows ?? []) as Array<{ created: boolean; exceptions: number | null }>;
+      return {
+        ok: true,
+        count: list.length,
+        posted: list.filter((r) => r.created).length,
+        exceptions: list.reduce((n, r) => n + (r.exceptions ?? 0), 0),
+      };
+    },
+  );
 
-    // A fee may only post with its economic date from a validated network statement, and the
-    // database refuses every draft→posted transition until that posting path exists.
-    throw new Error(
-      "Posting fees is not available yet. Draft fees stay on the case until economic-date posting is enabled.",
-    );
-  });
-
+/** Owner-only typed adjustments: a posted fee is reversed, then optionally corrected as a new event. */
 export const amendPostedFee = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z
-      .object({
-        lineId: z.string().uuid(),
-        amountPounds: z.number().min(0).optional(),
-        note: z.string().max(500).optional(),
-        delete: z.boolean().optional(),
-      })
+      .discriminatedUnion("action", [
+        z.object({ action: z.literal("reverse"), lineId: z.string().uuid(), reason: REASON_Z }),
+        z.object({
+          action: z.literal("correct"),
+          lineId: z.string().uuid(),
+          amountPounds: z.number().positive().max(10_000_000),
+          reason: REASON_Z,
+          evidence: z.string().trim().min(1, "Evidence is required.").max(1000),
+        }),
+      ])
       .parse(d),
   )
   .handler(async ({ data, context }) => {
     const { tenantId, access } = await resolveFinanceTenant(context.userId);
-    if (!canAmend(access, "finance_customer")) throw new Error("Forbidden");
+    if (!access.isOwner) throw new Error("Only an Owner can reverse or correct a posted fee.");
     await assertRowBelongsToTenant({
       table: "finance_fee_lines",
       id: data.lineId,
       authorisedTenantId: tenantId,
       select: "id, tenant_id",
     });
-
-    // Posted fees are immutable; corrections must be linked reversal events, not edits.
-    throw new Error(
-      "Amending or deleting posted fees is not available yet. Posted fees are unchanged.",
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
     );
+    if (data.action === "reverse") {
+      const { data: rows, error } = await supabaseAdmin.rpc("reverse_posted_fee", {
+        p_tenant_id: tenantId,
+        p_actor_user_id: context.userId,
+        p_fee_line_id: data.lineId,
+        p_reason: data.reason,
+      });
+      if (error) throw financeRpcError(error);
+      const r = ((rows ?? []) as Array<{ commissions_reversed: number; clawbacks: number }>)[0];
+      return {
+        ok: true as const,
+        action: "reverse" as const,
+        commissionsReversed: r?.commissions_reversed ?? 0,
+        clawbacks: r?.clawbacks ?? 0,
+      };
+    }
+    const { data: rows, error } = await supabaseAdmin.rpc("post_fee_correction", {
+      p_tenant_id: tenantId,
+      p_actor_user_id: context.userId,
+      p_reversed_fee_line_id: data.lineId,
+      p_amount_pence: Math.round(data.amountPounds * 100),
+      p_reason: data.reason,
+      p_evidence: data.evidence,
+    });
+    if (error) throw financeRpcError(error);
+    const r = ((rows ?? []) as Array<{ accrued: number; exceptions: number }>)[0];
+    return {
+      ok: true as const,
+      action: "correct" as const,
+      commissionsReversed: 0,
+      clawbacks: 0,
+      accrued: r?.accrued ?? 0,
+      exceptions: r?.exceptions ?? 0,
+    };
+  });
+
+async function resolveIntroducerIdByCode(tenantId: string, code: string | undefined) {
+  if (!code) return null;
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+    "@/integrations/supabase/client.server"
+  );
+  const { data, error } = await supabaseAdmin
+    .from("introducers")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("company_code", code)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("No introducer with that code in this company.");
+  return data.id as string;
+}
+
+export const reassignIntroducerCommission = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        ledgerId: z.string().uuid(),
+        introducerCode: z.string().regex(/^\d{4}$/, "Enter the 4-digit introducer code."),
+        reason: REASON_Z,
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { tenantId, access } = await resolveFinanceTenant(context.userId);
+    if (!access.isOwner) throw new Error("Only an Owner can reassign posted commission.");
+    await assertRowBelongsToTenant({
+      table: "finance_ledger",
+      id: data.ledgerId,
+      authorisedTenantId: tenantId,
+      select: "id, tenant_id",
+    });
+    const introducerId = await resolveIntroducerIdByCode(tenantId, data.introducerCode);
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    const { data: rows, error } = await supabaseAdmin.rpc("reassign_introducer_commission", {
+      p_tenant_id: tenantId,
+      p_actor_user_id: context.userId,
+      p_accrual_id: data.ledgerId,
+      p_new_introducer_id: introducerId,
+      p_reason: data.reason,
+    });
+    if (error) throw financeRpcError(error);
+    const r = ((rows ?? []) as Array<{ outcome: string }>)[0];
+    return { ok: true as const, outcome: r?.outcome ?? null };
+  });
+
+export const clawBackCommission = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        ledgerId: z.string().uuid(),
+        reason: REASON_Z,
+        replacementIntroducerCode: z
+          .string()
+          .regex(/^\d{4}$/, "Enter the 4-digit introducer code.")
+          .optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { tenantId, access } = await resolveFinanceTenant(context.userId);
+    if (!access.isOwner) throw new Error("Only an Owner can claw back paid commission.");
+    await assertRowBelongsToTenant({
+      table: "finance_ledger",
+      id: data.ledgerId,
+      authorisedTenantId: tenantId,
+      select: "id, tenant_id",
+    });
+    const replacementId = await resolveIntroducerIdByCode(tenantId, data.replacementIntroducerCode);
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    const { error } = await supabaseAdmin.rpc("claw_back_commission", {
+      p_tenant_id: tenantId,
+      p_actor_user_id: context.userId,
+      p_accrual_id: data.ledgerId,
+      p_reason: data.reason,
+      p_replacement_introducer_id: replacementId,
+    });
+    if (error) throw financeRpcError(error);
+    return { ok: true as const };
+  });
+
+export const settleCommissionClawback = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        ledgerId: z.string().uuid(),
+        outcome: z.enum(["settled", "written_off"]),
+        reason: REASON_Z,
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { tenantId, access } = await resolveFinanceTenant(context.userId);
+    if (!access.isOwner) throw new Error("Only an Owner can settle or write off a clawback.");
+    await assertRowBelongsToTenant({
+      table: "finance_ledger",
+      id: data.ledgerId,
+      authorisedTenantId: tenantId,
+      select: "id, tenant_id",
+    });
+    const { supabaseAdminUntyped: supabaseAdmin } = await import(
+      "@/integrations/supabase/client.server"
+    );
+    const { error } = await supabaseAdmin.rpc("settle_commission_clawback", {
+      p_tenant_id: tenantId,
+      p_actor_user_id: context.userId,
+      p_clawback_id: data.ledgerId,
+      p_outcome: data.outcome,
+      p_reason: data.reason,
+    });
+    if (error) throw financeRpcError(error);
+    return { ok: true as const };
   });
 
 export type EnrichedLedgerRow = {
@@ -291,6 +727,12 @@ export type EnrichedLedgerRow = {
   caseRef?: string | null;
   receiverName?: string | null;
   receiverRef?: string | null;
+  event_type?: string | null;
+  economic_date?: string | null;
+  reason?: string | null;
+  payout_status?: string | null;
+  recovery_status?: string | null;
+  original_event_id?: string | null;
 };
 
 async function enrichFinanceLedgerRows(
@@ -380,8 +822,16 @@ async function enrichFinanceLedgerRows(
       session_id: sessionId,
       customerName,
       caseRef: sess?.caseRef ?? null,
-      receiverName: beneficiaryId ? profileMap.get(beneficiaryId) ?? null : null,
-      receiverRef,
+      receiverName:
+        (r.beneficiary_name as string | null) ??
+        (beneficiaryId ? profileMap.get(beneficiaryId) ?? null : null),
+      receiverRef: (r.beneficiary_code as string | null) ?? receiverRef,
+      event_type: (r.event_type as string | null) ?? null,
+      economic_date: (r.economic_date as string | null) ?? null,
+      reason: (r.reason as string | null) ?? null,
+      payout_status: (r.payout_status as string | null) ?? null,
+      recovery_status: (r.recovery_status as string | null) ?? null,
+      original_event_id: (r.original_event_id as string | null) ?? null,
     };
   });
 }
@@ -871,7 +1321,7 @@ export const listRafCommissionHighlights = createServerFn({ method: "GET" })
     const { data: rows, error } = await supabaseAdmin
       .from("finance_ledger")
       .select("beneficiary_user_id, amount_pence")
-      .eq("kind", "commission")
+      .in("event_type", ["commission_accrued", "commission_reversed", "commission_reassigned", "clawback"])
       .eq("beneficiary_role", "introducer")
       .eq("tenant_id", tenantId);
     if (error) {
@@ -902,66 +1352,6 @@ export async function getRafBonusPence(
   return typeof value === "number" ? value : null;
 }
 
-/**
- * Creates a received RAF commission ledger row when an Owner/authorised admin marks a referral
- * bonus eligible. Only that explicit action calls this; read paths never do.
- */
-export async function ensureRafCommissionLedgerEntry(
-  referralId: string,
-  createdBy?: string,
-): Promise<void> {
-  const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-
-  const { data: referral, error: refErr } = await supabaseAdmin
-    .from("referrals")
-    .select("id, referrer_user_id, code, referred_email, referral_code_id, tenant_id")
-    .eq("id", referralId)
-    .maybeSingle();
-  if (refErr || !referral?.tenant_id) return;
-  const tenantId = referral.tenant_id as string;
-
-  const { data: existing, error: existingErr } = await supabaseAdmin
-    .from("finance_ledger")
-    .select("id")
-    .eq("referral_id", referralId)
-    .eq("kind", "commission")
-    .eq("tenant_id", tenantId)
-    .limit(1);
-  if (existingErr) throw new Error(existingErr.message);
-  if ((existing ?? []).length > 0) return;
-
-  let referrerName: string | null = null;
-  if (referral.referral_code_id) {
-    const { data: codeRow } = await supabaseAdmin
-      .from("referral_codes")
-      .select("referrer_name, referrer_user_id")
-      .eq("id", referral.referral_code_id)
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
-    referrerName = codeRow?.referrer_name ?? null;
-  }
-
-  const amountPence = await getRafBonusPence(supabaseAdmin, tenantId);
-  if (amountPence == null) throw new Error(RAF_BONUS_NOT_CONFIGURED_MESSAGE);
-  const note = `RAF bonus · friend ${referral.referred_email ?? "unknown"} · code ${referral.code ?? ""}`;
-
-  const { error } = await supabaseAdmin.from("finance_ledger").insert(withForcedTenantId({
-    kind: "commission",
-    fee_type: "fee",
-    amount_pence: amountPence,
-    is_reversal: false,
-    beneficiary_user_id: referral.referrer_user_id,
-    beneficiary_role: "referrer",
-    referral_id: referralId,
-    payout_status: "received",
-    note: referrerName ? `${note} · referrer ${referrerName}` : note,
-    created_by: createdBy ?? null,
-  }, tenantId));
-  if (error) throw new Error(error.message);
-}
-
 type RawCommissionLedgerRow = {
   id: string;
   session_id: string | null;
@@ -977,7 +1367,48 @@ type RawCommissionLedgerRow = {
   lost_reason: string | null;
   created_at: string;
   note?: string | null;
+  beneficiary_name?: string | null;
+  beneficiary_code?: string | null;
+  economic_date?: string | null;
 };
+
+type RawClawbackRow = {
+  id: string;
+  original_event_id: string;
+  session_id: string | null;
+  beneficiary_role: string | null;
+  beneficiary_user_id: string | null;
+  beneficiary_name: string | null;
+  amount_pence: number;
+  recovery_status: string | null;
+  recovery_at: string | null;
+  reason: string | null;
+  created_at: string;
+};
+
+function mapClawbackRows(
+  rows: RawClawbackRow[],
+  accruals: CommissionPayoutRow[],
+): CommissionClawbackRow[] {
+  const byId = new Map(accruals.map((a) => [a.id, a]));
+  return rows.map((r) => {
+    const original = byId.get(r.original_event_id);
+    return {
+      id: r.id,
+      originalEventId: r.original_event_id,
+      sessionId: r.session_id,
+      caseRef: original?.caseRef ?? null,
+      beneficiaryRole: r.beneficiary_role ?? original?.beneficiaryRole ?? "advisor",
+      beneficiaryUserId: r.beneficiary_user_id,
+      beneficiaryName: r.beneficiary_name ?? original?.beneficiaryName ?? "",
+      amountPence: r.amount_pence,
+      recoveryStatus: r.recovery_status ?? "due",
+      reason: r.reason,
+      createdAt: r.created_at,
+      recoveryAt: r.recovery_at,
+    };
+  });
+}
 
 async function enrichCommissionLedgerRows(
   supabaseAdmin: Awaited<
@@ -1033,7 +1464,7 @@ async function enrichCommissionLedgerRows(
   return rows.map((r) => {
     const role = r.beneficiary_role ?? "advisor";
     let beneficiaryName =
-      (r.beneficiary_user_id && profileMap.get(r.beneficiary_user_id)) || "";
+      r.beneficiary_name || (r.beneficiary_user_id && profileMap.get(r.beneficiary_user_id)) || "";
     if (!beneficiaryName && role === "referrer" && r.note) {
       const match = String(r.note).match(/referrer ([^·]+)/i);
       beneficiaryName = match?.[1]?.trim() ?? "RAF referrer";
@@ -1057,6 +1488,8 @@ async function enrichCommissionLedgerRows(
       payoutAt: r.payout_at ?? null,
       lostReason: r.lost_reason ?? null,
       createdAt: r.created_at,
+      economicDate: r.economic_date ?? null,
+      beneficiaryCode: r.beneficiary_code ?? null,
     };
   });
 }
@@ -1067,7 +1500,7 @@ export const listMyCommissionStatement = createServerFn({ method: "GET" })
   .inputValidator((d: unknown) =>
     z
       .object({
-        payoutStatus: PAYOUT_STATUS_Z.optional(),
+        payoutStatus: PAYOUT_FILTER_Z.optional(),
         viewAsUserId: z.string().uuid().optional(),
       })
       .parse(d ?? {}),
@@ -1087,10 +1520,8 @@ export const listMyCommissionStatement = createServerFn({ method: "GET" })
 
     let query = supabaseAdmin
       .from("finance_ledger")
-      .select(
-        "id, session_id, fee_type, amount_pence, commission_pct, beneficiary_user_id, beneficiary_role, referral_id, payout_status, payout_note, payout_at, lost_reason, created_at, note",
-      )
-      .eq("kind", "commission")
+      .select(COMMISSION_COLUMNS)
+      .eq("event_type", "commission_accrued")
       .eq("beneficiary_user_id", beneficiaryUserId)
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false })
@@ -1098,10 +1529,27 @@ export const listMyCommissionStatement = createServerFn({ method: "GET" })
 
     if (data.payoutStatus) query = query.eq("payout_status", data.payoutStatus);
 
-    const { data: rows, error } = await query;
-    if (error) {
-      if (isMissingTable(error)) return { rows: [] as CommissionPayoutRow[], migrationRequired: true };
-      throw new Error(error.message);
+    const [{ data: rows, error }, { data: claws, error: clawErr }] = await Promise.all([
+      query,
+      supabaseAdmin
+        .from("finance_ledger")
+        .select(CLAWBACK_COLUMNS)
+        .eq("event_type", "clawback")
+        .eq("beneficiary_user_id", beneficiaryUserId)
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .limit(500),
+    ]);
+    const err = error ?? clawErr;
+    if (err) {
+      if (isMissingTable(err)) {
+        return {
+          rows: [] as CommissionPayoutRow[],
+          clawbacks: [] as CommissionClawbackRow[],
+          migrationRequired: true,
+        };
+      }
+      throw new Error(err.message);
     }
 
     const enriched = await enrichCommissionLedgerRows(
@@ -1109,7 +1557,11 @@ export const listMyCommissionStatement = createServerFn({ method: "GET" })
       (rows ?? []) as RawCommissionLedgerRow[],
       tenantId,
     );
-    return { rows: enriched, migrationRequired: false };
+    return {
+      rows: enriched,
+      clawbacks: mapClawbackRows((claws ?? []) as RawClawbackRow[], enriched),
+      migrationRequired: false,
+    };
   });
 
 export const listCommissionPayouts = createServerFn({ method: "GET" })
@@ -1118,7 +1570,7 @@ export const listCommissionPayouts = createServerFn({ method: "GET" })
     z
       .object({
         beneficiaryRole: z.enum(["advisor", "introducer", "referrer"]).optional(),
-        payoutStatus: PAYOUT_STATUS_Z.optional(),
+        payoutStatus: PAYOUT_FILTER_Z.optional(),
         beneficiaryUserId: z.string().uuid().optional(),
         caseRefQuery: z.string().max(64).optional(),
         sessionId: z.string().uuid().optional(),
@@ -1153,29 +1605,57 @@ export const listCommissionPayouts = createServerFn({ method: "GET" })
       if (sessErr) throw new Error(sessErr.message);
       sessionFilterIds = (sessions ?? []).map((s) => s.id);
       if (sessionFilterIds.length === 0) {
-        return { rows: [] as CommissionPayoutRow[], migrationRequired: false };
+        return {
+          rows: [] as CommissionPayoutRow[],
+          clawbacks: [] as CommissionClawbackRow[],
+          migrationRequired: false,
+        };
       }
     }
 
     let query = supabaseAdmin
       .from("finance_ledger")
-      .select(
-        "id, session_id, fee_type, amount_pence, commission_pct, beneficiary_user_id, beneficiary_role, referral_id, payout_status, payout_note, payout_at, lost_reason, created_at, note",
-      )
-      .eq("kind", "commission")
+      .select(COMMISSION_COLUMNS)
+      .eq("event_type", "commission_accrued")
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false })
       .limit(sessionFilterIds ? 200 : 500);
+    let clawQuery = supabaseAdmin
+      .from("finance_ledger")
+      .select(CLAWBACK_COLUMNS)
+      .eq("event_type", "clawback")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false })
+      .limit(200);
 
-    if (sessionFilterIds) query = query.in("session_id", sessionFilterIds);
-    if (data.beneficiaryRole) query = query.eq("beneficiary_role", data.beneficiaryRole);
+    if (sessionFilterIds) {
+      query = query.in("session_id", sessionFilterIds);
+      clawQuery = clawQuery.in("session_id", sessionFilterIds);
+    }
+    if (data.beneficiaryRole) {
+      query = query.eq("beneficiary_role", data.beneficiaryRole);
+      clawQuery = clawQuery.eq("beneficiary_role", data.beneficiaryRole);
+    }
     if (data.payoutStatus && !sessionFilterIds) query = query.eq("payout_status", data.payoutStatus);
-    if (data.beneficiaryUserId) query = query.eq("beneficiary_user_id", data.beneficiaryUserId);
+    if (data.beneficiaryUserId) {
+      query = query.eq("beneficiary_user_id", data.beneficiaryUserId);
+      clawQuery = clawQuery.eq("beneficiary_user_id", data.beneficiaryUserId);
+    }
 
-    const { data: rows, error } = await query;
-    if (error) {
-      if (isMissingTable(error)) return { rows: [] as CommissionPayoutRow[], migrationRequired: true };
-      throw new Error(error.message);
+    const [{ data: rows, error }, { data: claws, error: clawErr }] = await Promise.all([
+      query,
+      clawQuery,
+    ]);
+    const err = error ?? clawErr;
+    if (err) {
+      if (isMissingTable(err)) {
+        return {
+          rows: [] as CommissionPayoutRow[],
+          clawbacks: [] as CommissionClawbackRow[],
+          migrationRequired: true,
+        };
+      }
+      throw new Error(err.message);
     }
 
     const enriched = await enrichCommissionLedgerRows(
@@ -1184,7 +1664,11 @@ export const listCommissionPayouts = createServerFn({ method: "GET" })
       tenantId,
     );
 
-    return { rows: enriched, migrationRequired: false };
+    return {
+      rows: enriched,
+      clawbacks: mapClawbackRows((claws ?? []) as RawClawbackRow[], enriched),
+      migrationRequired: false,
+    };
   });
 
 export const updateCommissionPayoutStatus = createServerFn({ method: "POST" })
@@ -1225,7 +1709,7 @@ export const updateSessionCommissionPayoutStatus = createServerFn({ method: "POS
   )
   .handler(async ({ data, context }) => {
     const { tenantId, access } = await resolveFinanceTenant(context.userId);
-    if (!canAmend(access, "finance_customer")) throw new Error("Forbidden");
+    if (!canAmendCommissionPayouts(access)) throw new Error("Forbidden");
     await assertRowBelongsToTenant({
       table: "interview_sessions",
       id: data.sessionId,
@@ -1238,74 +1722,41 @@ export const updateSessionCommissionPayoutStatus = createServerFn({ method: "POS
     );
     const { data: row, error } = await supabaseAdmin
       .from("finance_ledger")
-      .select("id, session_id, kind")
+      .select("id, session_id, event_type")
       .eq("id", data.ledgerId)
       .eq("tenant_id", tenantId)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    if (!row || row.kind !== "commission" || row.session_id !== data.sessionId) {
+    if (!row || row.event_type !== "commission_accrued" || row.session_id !== data.sessionId) {
       throw new Error("Commission row not found for this case");
     }
 
     return await applyCommissionPayoutStatusPatch(data, context.userId, tenantId);
   });
 
+/** RAF bonus payout decisions use the same recorded transition as every other commission. */
+/** Every payout change is a recorded transition; paid is terminal and the DB enforces the order. */
 async function applyCommissionPayoutStatusPatch(
   data: {
     ledgerId: string;
-    payoutStatus: PayoutStatus;
+    payoutStatus: "received" | "paid" | "rejected";
     payoutNote?: string;
   },
   userId: string,
   tenantId: string,
 ) {
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-    const { data: row, error: readErr } = await supabaseAdmin
-      .from("finance_ledger")
-      .select("id, kind, referral_id, beneficiary_role")
-      .eq("id", data.ledgerId)
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
-    if (readErr) throw new Error(readErr.message);
-    if (!row || row.kind !== "commission") throw new Error("Commission row not found");
-
-    const now = new Date().toISOString();
-    const patch: Record<string, unknown> = {
-      payout_status: data.payoutStatus,
-      payout_note: data.payoutNote ?? null,
-      lost_reason: null,
-      payout_at: data.payoutStatus === "received" ? null : now,
-      payout_by: data.payoutStatus === "received" ? null : userId,
-    };
-
-    const { error } = await supabaseAdmin
-      .from("finance_ledger")
-      .update(patch)
-      .eq("id", data.ledgerId)
-      .eq("tenant_id", tenantId);
-    if (error) {
-      if (isMissingTable(error)) {
-        throw new Error("Run supabase/RUN_COMMISSION_PAYOUTS.sql in Supabase first.");
-      }
-      throw new Error(error.message);
-    }
-
-    if (row.referral_id && row.beneficiary_role === "referrer") {
-      const bonusMap: Record<PayoutStatus, string> = {
-        received: "eligible",
-        paid: "paid",
-        rejected: "rejected",
-      };
-      await supabaseAdmin
-        .from("referrals")
-        .update({ bonus_status: bonusMap[data.payoutStatus], updated_at: now })
-        .eq("id", row.referral_id)
-        .eq("tenant_id", tenantId);
-    }
-
-    return { ok: true };
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+    "@/integrations/supabase/client.server"
+  );
+  const { error } = await supabaseAdmin.rpc("set_commission_payout_status", {
+    p_tenant_id: tenantId,
+    p_actor_user_id: userId,
+    p_event_id: data.ledgerId,
+    p_to_status: data.payoutStatus,
+    p_note: data.payoutNote?.trim() || null,
+  });
+  if (error) throw financeRpcError(error);
+  return { ok: true };
 }
 
 export type FinanceAuditRow = {

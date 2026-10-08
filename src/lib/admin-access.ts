@@ -128,14 +128,10 @@ export function canViewCommissionPayouts(access: AdminAccess | null | undefined)
   );
 }
 
+/** Payout decisions (paid / rejected / reopen) are Owner or Supervisor only; the DB rechecks. */
 export function canAmendCommissionPayouts(access: AdminAccess | null | undefined): boolean {
   if (!access?.isAdmin) return false;
-  if (access.isOwner || access.isSupervisor) return true;
-  return (
-    canAmend(access, "finance_raf") ||
-    canAmend(access, "finance_advisor_pct") ||
-    canAmend(access, "finance_introducer_pct")
-  );
+  return access.isOwner || access.isSupervisor;
 }
 
 /** Relationship / renewal pipeline — owner, supervisor, or relationship permission. */

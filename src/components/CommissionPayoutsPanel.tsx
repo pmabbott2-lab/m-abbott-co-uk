@@ -7,6 +7,7 @@ import {
   updateCommissionPayoutStatus,
   PAYOUT_STATUS_LABELS,
   BENEFICIARY_ROLE_LABELS,
+  RECOVERY_STATUS_LABELS,
   type PayoutStatus,
   type CommissionPayoutRow,
 } from "@/lib/finance.functions";
@@ -21,6 +22,22 @@ import { PayoutStatusBadge } from "@/components/PayoutStatusBadge";
 
 type RoleFilter = "all" | "advisor" | "introducer" | "referrer";
 type StatusFilter = "all" | PayoutStatus;
+type PayoutDecision = "received" | "paid" | "rejected";
+
+/** Paid is final; a rejected payout reopens only with a reason. */
+function confirmPayoutDecision(
+  from: PayoutStatus,
+  to: PayoutDecision,
+): { ok: boolean; note?: string } {
+  if (to === "paid") {
+    return { ok: window.confirm("Mark this commission paid? Paid is final and cannot be undone.") };
+  }
+  if (from === "rejected" && to === "received") {
+    const note = window.prompt("Reason for reopening this rejected commission")?.trim();
+    return note ? { ok: true, note } : { ok: false };
+  }
+  return { ok: true };
+}
 
 export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
   const qc = useQueryClient();
@@ -53,7 +70,7 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
   });
 
   const update = useMutation({
-    mutationFn: (vars: { ledgerId: string; payoutStatus: PayoutStatus }) =>
+    mutationFn: (vars: { ledgerId: string; payoutStatus: PayoutDecision; payoutNote?: string }) =>
       updateFn({ data: vars }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["commission-payouts"] });
@@ -165,6 +182,7 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
               ["received", "Received"],
               ["paid", "Paid"],
               ["rejected", "Rejected"],
+              ["reversed", "Reversed"],
             ] as const
           ).map(([value, label]) => (
             <Button
@@ -224,13 +242,43 @@ export function CommissionPayoutsPanel({ canAmend }: { canAmend: boolean }) {
                   row={row}
                   canAmend={canAmend}
                   pending={update.isPending && update.variables?.ledgerId === row.id}
-                  onStatusChange={(payoutStatus) => update.mutate({ ledgerId: row.id, payoutStatus })}
+                  onStatusChange={(payoutStatus) => {
+                    const decision = confirmPayoutDecision(row.payoutStatus, payoutStatus);
+                    if (!decision.ok) return;
+                    update.mutate({ ledgerId: row.id, payoutStatus, payoutNote: decision.note });
+                  }}
                 />
               ))}
             </tbody>
           </table>
         )}
       </ReportTableScroll>
+      {(payoutsQ.data?.clawbacks ?? []).length > 0 && (
+        <div className="rounded-xl border p-3 space-y-2">
+          <p className="text-sm font-medium">Clawbacks</p>
+          <p className="text-xs text-muted-foreground">
+            Paid commission recovered by the Owner. The original payment stays paid; the clawback is a
+            separate negative entry.
+          </p>
+          <ul className="text-sm divide-y">
+            {(payoutsQ.data?.clawbacks ?? []).map((c) => (
+              <li key={c.id} className="py-1.5 flex flex-wrap justify-between gap-2">
+                <span>
+                  {c.beneficiaryName || (BENEFICIARY_ROLE_LABELS[c.beneficiaryRole] ?? c.beneficiaryRole)}
+                  {c.caseRef ? ` · ${c.caseRef}` : ""}
+                  {c.reason ? <span className="block text-xs text-muted-foreground">{c.reason}</span> : null}
+                </span>
+                <span className="text-right whitespace-nowrap">
+                  £{(c.amountPence / 100).toFixed(2)}
+                  <span className="block text-xs text-muted-foreground">
+                    {RECOVERY_STATUS_LABELS[c.recoveryStatus] ?? c.recoveryStatus}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       </div>
       <div className="self-start pt-1">
         <ReportExportBox
@@ -257,7 +305,7 @@ function PayoutRow({
   row: CommissionPayoutRow;
   canAmend: boolean;
   pending: boolean;
-  onStatusChange: (status: PayoutStatus) => void;
+  onStatusChange: (status: PayoutDecision) => void;
 }) {
   const context =
     row.beneficiaryRole === "referrer"
@@ -295,17 +343,20 @@ function PayoutRow({
         £{(row.amountPence / 100).toFixed(2)}
       </td>
       <td className="p-3">
-        {canAmend ? (
+        {canAmend && (row.payoutStatus === "received" || row.payoutStatus === "rejected") ? (
           <div className="flex flex-wrap items-center gap-2">
             <PayoutStatusBadge status={row.payoutStatus} />
             <select
               className="h-8 rounded-md border bg-background px-2 text-xs"
               value={row.payoutStatus}
               disabled={pending}
-              onChange={(e) => onStatusChange(e.target.value as PayoutStatus)}
+              onChange={(e) => onStatusChange(e.target.value as PayoutDecision)}
               aria-label="Payout status"
             >
-              {(["received", "paid", "rejected"] as const).map((s) => (
+              {(row.payoutStatus === "rejected"
+                ? (["rejected", "received"] as const)
+                : (["received", "paid", "rejected"] as const)
+              ).map((s) => (
                 <option key={s} value={s}>
                   {PAYOUT_STATUS_LABELS[s]}
                 </option>

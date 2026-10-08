@@ -869,7 +869,7 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE } =
       await import("@/lib/tenant-assert.server");
-    const { tenantId } = await resolveActingTenantForList(
+    const { tenantId, view } = await resolveActingTenantForList(
       context.userId,
       rafBonusAmendCapability(),
     );
@@ -877,11 +877,10 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const { ensureRafCommissionLedgerEntry } = await import("@/lib/finance.functions");
 
     const { data: referralRow, error: loadErr } = await supabaseAdmin
       .from("referrals")
-      .select("id, tenant_id, referral_code_id")
+      .select("id, tenant_id, referral_code_id, bonus_status")
       .eq("id", data.id)
       .maybeSingle();
     if (loadErr) {
@@ -896,6 +895,7 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
               id: string;
               tenant_id: string | null;
               referral_code_id: string | null;
+              bonus_status: string | null;
             },
           ],
           tenantId,
@@ -903,9 +903,25 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
       : [];
     if (!owned) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
 
-    // An eligible bonus posts a commission row at this tenant's configured amount; with no
-    // configured amount the status is not changed.
-    if (data.bonusStatus === "eligible" && owned.tenant_id) {
+    // RAF has no authoritative economic date until B4c, so no ledger commission is created: the
+    // referral's bonus status is the RAF record. Paid and rejected are Owner/Supervisor decisions,
+    // paid is final, and reopening a rejected bonus needs an Owner/Supervisor and a reason.
+    const current = owned.bonus_status ?? null;
+    const changing = data.bonusStatus !== undefined && data.bonusStatus !== current;
+    const payoutActor = view.adminAccess.isOwner || view.adminAccess.isSupervisor;
+    if (changing && current === "paid") {
+      throw new Error("A paid referral bonus cannot be changed.");
+    }
+    if (changing && (data.bonusStatus === "paid" || data.bonusStatus === "rejected") && !payoutActor) {
+      throw new Error("Only an Owner or Supervisor can mark a referral bonus paid or rejected.");
+    }
+    if (changing && current === "rejected") {
+      if (!payoutActor) throw new Error("Only an Owner or Supervisor can reopen a referral bonus.");
+      if (!data.notes?.trim()) {
+        throw new Error("A reason is required to reopen a rejected referral bonus.");
+      }
+    }
+    if (changing && data.bonusStatus === "eligible" && owned.tenant_id) {
       const { getRafBonusPence, RAF_BONUS_NOT_CONFIGURED_MESSAGE } =
         await import("@/lib/finance.functions");
       if ((await getRafBonusPence(supabaseAdmin, tenantId)) == null) {
@@ -924,40 +940,17 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
     if (data.notes !== undefined) patch.notes = data.notes || null;
 
     // Legacy tenantless referrals stay tenantless; they are matched through their owned code.
-    const scopedUpdate = supabaseAdmin.from("referrals").update(patch).eq("id", data.id);
+    // The update applies only while the bonus status is still the one checked above, so a bonus
+    // paid in the meantime is never overwritten.
+    const unchanged = supabaseAdmin.from("referrals").update(patch).eq("id", data.id);
+    const scopedUpdate =
+      current === null ? unchanged.is("bonus_status", null) : unchanged.eq("bonus_status", current);
     const { error } = owned.tenant_id
       ? await scopedUpdate.eq("tenant_id", tenantId)
       : await scopedUpdate.is("tenant_id", null).eq("referral_code_id", owned.referral_code_id);
     if (error) {
       if (isMissingTableError(error)) throw new Error("Run the Refer-a-friend migration first.");
       throw new Error(error.message);
-    }
-
-    if (data.bonusStatus === "eligible") {
-      await ensureRafCommissionLedgerEntry(data.id, context.userId);
-    }
-
-    if (data.bonusStatus === "paid" || data.bonusStatus === "rejected") {
-      const payoutStatus = data.bonusStatus === "paid" ? "paid" : "rejected";
-      const { data: ledgerRow } = await supabaseAdmin
-        .from("finance_ledger")
-        .select("id")
-        .eq("referral_id", data.id)
-        .eq("tenant_id", tenantId)
-        .eq("kind", "commission")
-        .maybeSingle();
-      if (ledgerRow) {
-        await supabaseAdmin
-          .from("finance_ledger")
-          .update({
-            payout_status: payoutStatus,
-            payout_at: new Date().toISOString(),
-            payout_by: context.userId,
-          })
-          .eq("id", ledgerRow.id)
-          .eq("referral_id", data.id)
-          .eq("tenant_id", tenantId);
-      }
     }
 
     return { ok: true };

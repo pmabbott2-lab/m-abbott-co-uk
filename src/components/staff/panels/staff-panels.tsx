@@ -36,6 +36,7 @@ import {
   listCurrentCommissionArrangements,
   listCommissionPayouts,
   FEE_TYPE_LABELS,
+  LEDGER_EVENT_LABELS,
   type CurrentRateValue,
   type EnrichedLedgerRow,
 } from "@/lib/finance.functions";
@@ -1282,7 +1283,14 @@ export function OwnerFinanceReport({ canSetRates = false }: { canSetRates?: bool
                   <td className="p-2 whitespace-nowrap">
                     {safeFormat(r.created_at, "d MMM yy HH:mm")}
                   </td>
-                  <td className="p-2 capitalize">{r.kind}</td>
+                  <td className="p-2">
+                    {(r.event_type && LEDGER_EVENT_LABELS[r.event_type]) ?? r.kind}
+                    {r.economic_date && (
+                      <span className="block text-[10px] text-muted-foreground">
+                        {safeFormat(r.economic_date, "d MMM yy")}
+                      </span>
+                    )}
+                  </td>
                   <td className="p-2 max-w-[7rem] truncate">{r.customerName ?? "—"}</td>
                   <td className="p-2 font-mono text-[10px] sm:text-xs max-w-[5rem] truncate">
                     {r.caseRef ?? "—"}

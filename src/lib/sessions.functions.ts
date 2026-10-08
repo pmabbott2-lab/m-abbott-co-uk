@@ -3965,6 +3965,7 @@ export const exportOwnerCustomerReport = createServerFn({ method: "GET" })
       const { data: ledger, error: ledErr } = await supabaseAdmin
         .from("finance_ledger")
         .select("session_id, kind, amount_pence, beneficiary_role, payout_status, is_reversal")
+        .eq("tenant_id", view.tenantId)
         .in("session_id", sessionIds);
       if (ledErr && !isMissingTableError(ledErr)) throw new Error(ledErr.message);
 
