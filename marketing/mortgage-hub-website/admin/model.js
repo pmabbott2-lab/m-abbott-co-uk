@@ -21,16 +21,22 @@ export const RATE_FIELDS = [
   { key: "giCommissionPct", label: "GI commission", hint: "% of annual premium, as received", unit: "%", min: 0, max: 100, step: 1 },
   { key: "protectionNtuPct", label: "Protection and GI NTU after completion", hint: "Mortgage completes but the policy never starts", unit: "%", min: 0, max: 100, step: 0.5 },
   { key: "cancellationPct", label: "Protection and GI cancellations", hint: "Policies lost after starting (clawback)", unit: "%", min: 0, max: 100, step: 0.5 },
-  { key: "adviserMortgagePct", label: "Adviser commission: procuration and broker fees", hint: "% of what Mortgage Easy receives", unit: "%", min: 0, max: 100, step: 0.5 },
-  { key: "adviserIntroPct", label: "Adviser commission: own-customer introductions", hint: "Extra % of procuration and fees on the adviser's own customers", unit: "%", min: 0, max: 100, step: 0.5 },
-  { key: "adviserProtectionPct", label: "Adviser commission: protection and GI", hint: "% of what Mortgage Easy receives", unit: "%", min: 0, max: 100, step: 0.5 },
-  { key: "introducerPct", label: "External introducer commission", hint: "% of procuration and fees on introduced customers", unit: "%", min: 0, max: 100, step: 0.5 },
+  { key: "adviserMortgagePct", label: "Adviser commission: procuration and broker fees", hint: "% of what Mortgage Easy receives", unit: "%", min: 0, max: 100, step: 0.5, commission: true },
+  { key: "adviserIntroPct", label: "Adviser commission: own-customer introductions", hint: "Extra % of procuration and fees on the adviser's own customers", unit: "%", min: 0, max: 100, step: 0.5, commission: true },
+  { key: "adviserProtectionPct", label: "Adviser commission: protection and GI", hint: "% of what Mortgage Easy receives", unit: "%", min: 0, max: 100, step: 0.5, commission: true },
+  { key: "introducerPct", label: "External introducer commission", hint: "% of procuration and fees on introduced customers", unit: "%", min: 0, max: 100, step: 0.5, commission: true },
 ];
+
+export const COMMISSION_FIELDS = RATE_FIELDS.filter((f) => f.commission);
+export const BUSINESS_RATE_FIELDS = RATE_FIELDS.filter((f) => !f.commission);
 
 /** Appointments are entered per week; a year has 52 weeks less holiday, spread evenly over 12 months. */
 export const HOLIDAY_WEEKS = 5;
 export const WORKING_WEEKS = 52 - HOLIDAY_WEEKS;
 export const WEEKS_PER_MONTH = WORKING_WEEKS / 12;
+/** Introducer leads keep arriving through adviser holidays, so they use the full 52-week year. */
+export const LEAD_WEEKS = 52;
+export const LEAD_WEEKS_PER_MONTH = LEAD_WEEKS / 12;
 
 export const CASE_FIELDS = [
   { key: "seenOwnWeek", label: "Appointments seen per week: own customers", hint: "Per week", unit: "count", min: 0, max: 150, step: 1 },
@@ -314,10 +320,16 @@ export function cleanSeenOverride(input, where = "") {
 
 const cleanText = (v, max) => String(v === undefined || v === null ? "" : v).replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max);
 
+/** Plans carry their own rates (each adviser or introducer can be on different terms). */
 export function cleanPlan(input) {
   if (!input || typeof input !== "object") throw new Error("Plan is missing");
   const name = cleanText(input.name, 80);
   if (!name) throw new Error("Plan name is required");
+  const rates = input.rates && typeof input.rates === "object" ? cleanRates(input.rates) : null;
+  const notes = cleanText(input.notes, 2000);
+  if (input.kind === "introducer") {
+    return { kind: "introducer", name, introducer: cleanText(input.introducer, 80), notes, inputs: cleanIntroInputs(input.inputs), rates };
+  }
   const scenarios = {};
   const years = {};
   for (const s of SCENARIOS) {
@@ -328,7 +340,7 @@ export function cleanPlan(input) {
       y3: cleanSeenOverride(y && y.y3, `${s.label} year 3, `),
     };
   }
-  return { name, adviser: cleanText(input.adviser, 80), notes: cleanText(input.notes, 2000), scenarios, years };
+  return { kind: "adviser", name, adviser: cleanText(input.adviser, 80), notes, scenarios, years, rates };
 }
 
 export function blankScenario() {
@@ -337,5 +349,122 @@ export function blankScenario() {
     out[t.key] = {};
     for (const f of CASE_FIELDS) out[t.key][f.key] = f.key === "lagMonths" ? 1 : 0;
   }
+  return out;
+}
+
+/* ---------- introducer plans ---------- */
+
+export const INTRO_FIELDS = [
+  { key: "leadsWeek", label: "Leads sent per week", unit: "count", min: 0, max: 500, step: 1 },
+  { key: "showRatePct", label: "Show rate", hint: "Leads who attend an appointment", unit: "%", min: 0, max: 100, step: 1 },
+  { key: "signUpPct", label: "Seen to sign-up", unit: "%", min: 0, max: 100, step: 1 },
+  { key: "completionPct", label: "Sign-up to completion", unit: "%", min: 0, max: 100, step: 1 },
+  { key: "avgLoan", label: "Average mortgage", unit: "gbp", min: 0, max: 5000000, step: 5000 },
+  { key: "brokerFee", label: "Broker fee", hint: "Purchase broker fee, taken at sign-up, not refunded", unit: "gbp", min: 0, max: 10000, step: 1 },
+  { key: "lagMonths", label: "Months from sign-up to completion", hint: "When procuration is paid", unit: "months", min: 1, max: 6, step: 1, integer: true },
+  { key: "renewalRetainedPct", label: "Completions retained at renewal", unit: "%", min: 0, max: 100, step: 1 },
+  { key: "renewal2yPct", label: "Retained cases on 2-year terms", hint: "The rest are on 5-year terms", unit: "%", min: 0, max: 100, step: 1 },
+  { key: "renewalFee", label: "Renewal fee", hint: "Per renewal", unit: "gbp", min: 0, max: 10000, step: 1 },
+];
+
+export const INTRO_COMMISSION_FIELDS = RATE_FIELDS.filter((f) => f.key === "introducerPct" || f.key === "adviserMortgagePct");
+
+/** Months after completion that each product term comes up for renewal. */
+export const RENEWAL_TERMS = [{ key: "renewals2y", months: 24, label: "2-year" }, { key: "renewals5y", months: 60, label: "5-year" }];
+
+const sumAlloc = (...parts) => {
+  const out = {};
+  for (const p of parts) for (const [k, v] of Object.entries(p)) out[k] = (out[k] || 0) + v;
+  return out;
+};
+
+/**
+ * One steady month of leads from an introducer. Every lead counts as introduced business, so the
+ * adviser earns the procuration-and-fees rate and the introducer earns the introducer rate.
+ * Renewal figures are what each month's completions produce when they come up for renewal.
+ */
+export function computeIntroducer(inp, rates) {
+  const c = inp || {};
+  const leadsWeek = num(c.leadsWeek);
+  const leads = leadsWeek * LEAD_WEEKS_PER_MONTH;
+  const seen = leads * pct(c.showRatePct);
+  const signUps = seen * pct(c.signUpPct);
+  const completions = signUps * pct(c.completionPct);
+  const avgLoan = num(c.avgLoan);
+  const procRate = pct(rates.procRatePct) * pct(rates.procRetainedPct);
+  const proc = completions * avgLoan * procRate;
+  const fees = signUps * num(c.brokerFee);
+  const renewals = completions * pct(c.renewalRetainedPct);
+  const renewals2y = renewals * pct(c.renewal2yPct);
+  const renewals5y = renewals - renewals2y;
+  const renewalFees = renewals * num(c.renewalFee);
+  const atSignUp = allocate({ feesIntro: fees }, rates);
+  const atCompletion = allocate({ procIntro: proc }, rates);
+  const newBusiness = sumAlloc(atSignUp, atCompletion);
+  return {
+    leadsWeek, seenWeek: leadsWeek * pct(c.showRatePct),
+    leads, seen, signUps, completions,
+    lent: completions * avgLoan, procRate, proc, fees,
+    hlpMemo: completions * avgLoan * pct(rates.procRatePct) * (1 - pct(rates.procRetainedPct)),
+    renewals, renewals2y, renewals5y, renewalFees,
+    atSignUp, atCompletion, newBusiness,
+    renewal: allocate({ feesIntro: renewalFees }, rates),
+    lag: lagOf(c),
+  };
+}
+
+/** Month by month from a standing start: fees at sign-up, procuration at completion, renewals 2 and 5 years after completion. */
+export function introducerForecast(inp, rates, months) {
+  const r = computeIntroducer(inp, rates);
+  const out = Array.from({ length: months }, (_, i) => ({
+    month: i + 1, signUps: 0, completions: 0, renewals: 0,
+    adviser: 0, introducer: 0, me: 0, renewalAdviser: 0, renewalIntroducer: 0, renewalMe: 0,
+  }));
+  const add = (o, alloc, share = 1) => {
+    o.adviser += alloc.adviser * share;
+    o.introducer += alloc.introducer * share;
+    o.me += alloc.me * share;
+  };
+  for (let m = 0; m < months; m++) {
+    out[m].signUps += r.signUps;
+    add(out[m], r.atSignUp);
+    const done = m + r.lag;
+    if (!out[done]) continue;
+    out[done].completions += r.completions;
+    add(out[done], r.atCompletion);
+    for (const term of RENEWAL_TERMS) {
+      const o = out[done + term.months];
+      if (!o || !(r.renewals > 0)) continue;
+      const share = r[term.key] / r.renewals;
+      o.renewals += r[term.key];
+      add(o, r.renewal, share);
+      o.renewalAdviser += r.renewal.adviser * share;
+      o.renewalIntroducer += r.renewal.introducer * share;
+      o.renewalMe += r.renewal.me * share;
+    }
+  }
+  return out;
+}
+
+export function sumByYear(months) {
+  const years = [];
+  months.forEach((m, i) => {
+    const y = Math.floor(i / 12);
+    const into = (years[y] = years[y] || { year: y + 1 });
+    for (const [k, v] of Object.entries(m)) if (k !== "month") into[k] = (into[k] || 0) + v;
+  });
+  return years;
+}
+
+export function cleanIntroInputs(input, where = "") {
+  const out = {};
+  for (const f of INTRO_FIELDS) out[f.key] = checkNumber(f, input && input[f.key], where);
+  if (out.lagMonths < 1) out.lagMonths = 1;
+  return out;
+}
+
+export function blankIntroducer() {
+  const out = {};
+  for (const f of INTRO_FIELDS) out[f.key] = f.key === "lagMonths" ? 1 : 0;
   return out;
 }

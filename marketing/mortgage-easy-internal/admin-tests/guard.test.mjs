@@ -120,8 +120,13 @@ test("storage API: plans round trip", async () => {
   const e = { ADMIN_KV: memoryKv() };
   const saved = await (await scenarios.onRequestPut({ request: put("/api/admin/scenarios", { plan: { name: "Adviser A" } }), env: e, data })).json();
   assert.ok(saved.ok);
+  await scenarios.onRequestPut({ request: put("/api/admin/scenarios", { plan: { kind: "introducer", name: "Agent B", introducer: "B Estates", rates: { introducerPct: 15 } } }), env: e, data });
   const list = await (await scenarios.onRequestGet({ request: new Request(ORIGIN + "/api/admin/scenarios"), env: e })).json();
-  assert.equal(list.plans[0].name, "Adviser A");
+  assert.deepEqual(list.plans.map((p) => [p.name, p.kind, p.who]), [["Adviser A", "adviser", ""], ["Agent B", "introducer", "B Estates"]]);
+  const all = await (await scenarios.onRequestGet({ request: new Request(ORIGIN + "/api/admin/scenarios?all=1"), env: e })).json();
+  assert.equal(all.plans.find((p) => p.kind === "introducer").rates.introducerPct, 15, "introducer plan keeps its own rates");
+  const delB = all.plans.find((p) => p.kind === "introducer").id;
+  await scenarios.onRequestDelete({ request: new Request(`${ORIGIN}/api/admin/scenarios?id=${delB}`, { method: "DELETE", headers: { origin: ORIGIN } }), env: e });
   const one = await scenarios.onRequestGet({ request: new Request(`${ORIGIN}/api/admin/scenarios?id=${saved.plan.id}`), env: e });
   assert.equal(one.status, 200);
   assert.equal((await scenarios.onRequestGet({ request: new Request(`${ORIGIN}/api/admin/scenarios?id=../x`), env: e })).status, 404);

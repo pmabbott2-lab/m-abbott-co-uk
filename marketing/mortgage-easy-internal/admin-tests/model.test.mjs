@@ -4,7 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   computeCase, computeMonth, forecast, sumMonths, threeYear, reverseTarget,
-  cleanRates, cleanPlan, cleanScenario, blankScenario, WORKING_WEEKS, WEEKS_PER_MONTH,
+  cleanRates, cleanPlan, cleanScenario, blankScenario, WORKING_WEEKS, WEEKS_PER_MONTH, LEAD_WEEKS_PER_MONTH,
+  computeIntroducer, introducerForecast, sumByYear,
 } from "../../mortgage-hub-website/admin/model.js";
 
 const perWeek = (monthly) => monthly / WEEKS_PER_MONTH;
@@ -96,6 +97,53 @@ test("reverse target scales the current mix", () => {
   close(res.steadySeen.remortgage.seenOwnWeek, perWeek(20), "own seen per week");
   close(res.steadySeen.totalSeenWeek, perWeek(40), "total seen per week");
   close(res.perSeen, 1854.4 / 20, "per seen");
+});
+
+test("plans keep their own rates; plans without rates stay null for the page to fill", () => {
+  const a = cleanPlan({ name: "A", rates: { ...rates, adviserMortgagePct: 40 } });
+  const b = cleanPlan({ name: "B", rates: { ...rates, adviserMortgagePct: 55 } });
+  assert.equal(a.rates.adviserMortgagePct, 40);
+  assert.equal(b.rates.adviserMortgagePct, 55);
+  assert.equal(cleanPlan({ name: "Old" }).rates, null);
+  assert.equal(cleanPlan({ name: "A" }).kind, "adviser");
+  assert.throws(() => cleanPlan({ name: "X", rates: { introducerPct: 120 } }));
+});
+
+const introInputs = {
+  leadsWeek: 10 / LEAD_WEEKS_PER_MONTH, showRatePct: 50, signUpPct: 80, completionPct: 50, avgLoan: 100000, brokerFee: 100,
+  lagMonths: 2, renewalRetainedPct: 50, renewal2yPct: 25, renewalFee: 10,
+};
+
+test("introducer funnel, income split and renewals", () => {
+  const r = computeIntroducer(introInputs, rates);
+  close(r.leads, 10, "leads per month");
+  close(computeIntroducer({ ...introInputs, leadsWeek: 3 }, rates).leads * 12, 156, "yearly leads = 3 a week x 52 weeks");
+  close(r.seen, 5, "seen");
+  close(r.signUps, 4, "sign-ups");
+  close(r.completions, 2, "completions");
+  close(r.fees, 400, "fee on every sign-up");
+  close(r.proc, 1000, "procuration on completions");
+  close(r.newBusiness.adviser, 700, "adviser 50% of fees and procuration, no own-customer extra");
+  close(r.newBusiness.introducer, 140, "introducer 10%");
+  close(r.newBusiness.me, 560, "Mortgage Easy remainder");
+  close(r.renewals, 1, "retained from completions");
+  close(r.renewals2y, 0.25, "2-year share");
+  close(r.renewals5y, 0.75, "5-year share");
+  close(r.renewal.introducer + r.renewal.adviser + r.renewal.me, 10, "renewal fees split in full");
+});
+
+test("introducer forecast: fees at sign-up, procuration after the lag, renewals 2 and 5 years after completion", () => {
+  const months = introducerForecast(introInputs, rates, 84);
+  const r = computeIntroducer(introInputs, rates);
+  close(months[0].me, r.atSignUp.me, "month 1 fees only");
+  close(months[2].completions, 2, "first completions in month 3");
+  close(months[2 + 24].renewals, 0.25, "first 2-year renewals");
+  close(months[2 + 23].renewals, 0, "none before");
+  close(months[2 + 60].renewals, 1, "5-year renewals join");
+  const years = sumByYear(months);
+  assert.equal(years.length, 7);
+  close(years[0].signUps, 48, "year 1 sign-ups");
+  close(years[1].renewals, 0, "no renewals in year 2");
 });
 
 test("validation rejects bad numbers and requires a plan name", () => {

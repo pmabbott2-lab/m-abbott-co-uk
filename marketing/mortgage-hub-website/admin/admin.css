@@ -88,6 +88,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 /* Input grid: label | remortgage | purchase */
 .in-grid { display: grid; grid-template-columns: minmax(0, 1fr) 7.25rem 7.25rem; gap: 0.3rem 0.5rem; align-items: center; }
 .in-grid-one { grid-template-columns: minmax(0, 1fr) 8.5rem; max-width: 640px; gap: 0.45rem 0.75rem; }
+.in-grid-intro { grid-template-columns: minmax(0, 1fr) 9rem; }
+.in-span { grid-column: 2 / -1; }
+.in-calc { display: block; text-align: right; padding: 0.42rem 0.55rem; font-size: 0.875rem; font-weight: 700; color: var(--navy); background: var(--navy-tint); border-radius: 8px; font-variant-numeric: tabular-nums; }
+.mode-tabs { margin-bottom: 0.75rem; }
+.mode-tabs button { padding: 0.45rem 1.1rem; font-size: 0.88rem; }
 .in-colhead { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--navy); text-align: center; padding: 0.35rem 0; background: var(--navy-tint); border-radius: 6px; }
 .in-group { grid-column: 1 / -1; display: flex; align-items: center; gap: 0.45rem; margin-top: 0.8rem; padding-bottom: 0.3rem; border-bottom: 2px solid var(--green-soft); font-size: 0.78rem; font-weight: 700; color: var(--navy); text-transform: uppercase; letter-spacing: 0.03em; }
 .in-group .icon { width: 18px; height: 18px; color: var(--green); flex-shrink: 0; }
@@ -136,7 +141,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .panel h3 { font-size: 0.9rem; color: var(--navy); margin: 1.1rem 0 0.4rem; }
 .grid-2 { display: grid; gap: 1rem; grid-template-columns: 1fr; }
 @media (min-width: 900px) { .grid-2 { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); } }
-
 /* Tables */
 .table-wrap { overflow-x: auto; }
 .adm-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
@@ -178,6 +182,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 0.35rem; vertical-align: -1px; background: var(--navy); }
 .legend .l-introducer::before { background: var(--slate); }
 .legend .l-me::before { background: var(--green); }
+.legend .l-fees::before { background: var(--amber); }
 
 /* Formulas */
 .formula { padding: 0.55rem 0; border-bottom: 1px solid var(--line); font-size: 0.84rem; }

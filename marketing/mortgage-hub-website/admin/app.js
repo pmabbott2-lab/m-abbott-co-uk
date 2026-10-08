@@ -1,47 +1,16 @@
 import * as M from "./model.js";
 import { lineChart, donut, groupedBars, funnel } from "./charts.js";
 import { icon } from "./icons.js";
+import { h, gbp, gbp0, count, pctTxt, clone, fmtField, numInput, tableEl, download, toCsv, HOLIDAY_NOTE, SPLIT } from "./ui.js";
+import { createIntroducerView } from "./introducer.js";
 
 const $ = (id) => document.getElementById(id);
 
-function h(tag, attrs, ...children) {
-  const el = document.createElement(tag);
-  if (attrs) {
-    for (const [k, v] of Object.entries(attrs)) {
-      if (v === undefined || v === null || v === false) continue;
-      if (k === "class") el.className = v;
-      else if (k === "text") el.textContent = v;
-      else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
-      else el.setAttribute(k, v === true ? "" : String(v));
-    }
-  }
-  for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) el.append(c instanceof Node ? c : String(c));
-  return el;
-}
-
-const gbpFmt = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const gbp0Fmt = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
-const gbp = (v) => gbpFmt.format(v || 0);
-const gbp0 = (v) => gbp0Fmt.format(v || 0);
-const count = (v) => (v || 0).toLocaleString("en-GB", { maximumFractionDigits: 2 });
-const pctTxt = (v) => `${(Number(v) || 0).toLocaleString("en-GB", { maximumFractionDigits: 4 })}%`;
-const clone = (v) => JSON.parse(JSON.stringify(v));
-const HOLIDAY_NOTE = `Appointments are entered per week. Monthly and yearly figures allow for ${M.HOLIDAY_WEEKS} weeks' holiday a year ` +
-  `(${M.WORKING_WEEKS} working weeks), so one month = weekly × ${M.WORKING_WEEKS} ÷ 12, about ${M.WEEKS_PER_MONTH.toFixed(2)} weeks.`;
-
-function fmtField(f, v) {
-  if (f.unit === "gbp") return Number(v) >= 1000 ? gbp0(v) : gbp(v);
-  if (f.unit === "%") return pctTxt(v);
-  if (f.unit === "months") return `${v} mo`;
-  return count(Number(v));
-}
-
 const state = {
   user: null,
-  rates: M.cleanRates({}),
-  savedRates: null,
+  mode: "adviser",
+  defaultRates: M.cleanRates({}),
   assumptions: null,
-  ratesDirty: false,
   plan: null,
   planId: null,
   plans: [],
@@ -92,13 +61,26 @@ function emptyYears() {
   return y;
 }
 
-function newPlan() {
+/** Starting inputs for a new introducer plan: the saved template, else blank with the purchase mortgage, fee and timing. */
+function introducerStart() {
+  const a = state.assumptions || {};
+  if (a.introducerTemplate) return M.cleanIntroInputs(a.introducerTemplate);
+  const out = M.blankIntroducer();
+  const purchase = a.adviserTemplate && M.cleanScenario(a.adviserTemplate).purchase;
+  if (purchase) Object.assign(out, { avgLoan: purchase.avgLoan, brokerFee: purchase.brokerFee, lagMonths: purchase.lagMonths });
+  return out;
+}
+
+function newPlan(kind = state.mode) {
+  const rates = clone(state.defaultRates);
+  if (kind === "introducer") return { kind, name: "New introducer plan", introducer: "", notes: "", inputs: introducerStart(), rates };
   const start = state.assumptions && state.assumptions.adviserTemplate ? state.assumptions.adviserTemplate : M.blankScenario();
   const scenarios = {};
   for (const s of M.SCENARIOS) scenarios[s.key] = M.cleanScenario(clone(start));
-  return { name: "New plan", adviser: "", notes: "", scenarios, years: emptyYears() };
+  return { kind: "adviser", name: "New plan", adviser: "", notes: "", scenarios, years: emptyYears(), rates };
 }
 
+const whoKey = () => (state.mode === "introducer" ? "introducer" : "adviser");
 const currentScenario = () => state.plan.scenarios[state.scenario];
 const currentYears = () => state.plan.years[state.scenario] || (state.plan.years[state.scenario] = { y2: null, y3: null });
 
@@ -124,28 +106,15 @@ function scheduleRender() {
 
 /* ---------- input controls ---------- */
 
-let inputSeq = 0;
+/** A plan input: every change marks the plan unsaved and redraws. */
+const field = (f, get, set, label) => numInput(f, get, (v) => { set(v); markDirty(); scheduleRender(); }, label);
 
-/** Number box with a £ / % / mo marker. Returns the wrapper, the input and a sync function. */
-function numInput(f, get, set, label) {
-  const input = h("input", { type: "number", id: `in-${++inputSeq}`, min: f.min, max: f.max, step: "any", inputmode: "decimal", "aria-label": label });
-  input.addEventListener("input", () => {
-    const raw = input.value.trim();
-    if (raw === "") return;
-    let v = Number(raw);
-    if (!Number.isFinite(v)) return;
-    v = Math.min(f.max, Math.max(f.min, f.integer ? Math.round(v) : v));
-    set(v);
-    scheduleRender();
-  });
-  const shown = () => String(Math.round((Number(get()) || 0) * 100) / 100);
-  input.addEventListener("change", () => { input.value = shown(); });
-  const unit = f.unit === "gbp" ? "£" : f.unit === "%" ? "%" : f.unit === "months" ? "mo" : "";
-  const wrap = h("span", { class: `num-wrap${f.unit === "gbp" ? " has-prefix" : unit ? " has-suffix" : ""}` },
-    input, unit ? h("span", { class: "adorn", text: unit }) : null);
-  const sync = () => { if (document.activeElement !== input) input.value = shown(); };
-  return { wrap, input, sync };
-}
+const COMMISSION_LABELS = {
+  adviserMortgagePct: "Adviser: procuration and fees",
+  adviserIntroPct: "Adviser: own-customer introductions",
+  adviserProtectionPct: "Adviser: protection and GI",
+  introducerPct: "External introducer",
+};
 
 const INPUT_GROUPS = [
   { label: "Appointments seen per week", icon: "calendar", keys: { seenOwnWeek: "Own customers", seenIntroducedWeek: "Introduced" } },
@@ -170,7 +139,7 @@ function buildInputs() {
     for (const [key, short] of Object.entries(g.keys)) {
       const f = fields[key];
       const cells = M.CASE_TYPES.map((t) => {
-        const c = numInput(f, () => currentScenario()[t.key][key], (v) => { currentScenario()[t.key][key] = v; markDirty(); }, `${t.label}: ${f.label}`);
+        const c = field(f, () => currentScenario()[t.key][key], (v) => { currentScenario()[t.key][key] = v; }, `${t.label}: ${f.label}`);
         inputSyncs.push(c.sync);
         return c;
       });
@@ -178,6 +147,13 @@ function buildInputs() {
       grid.append(h("label", { class: "in-label", for: cells[0].input.id }, short, hint ? h("span", { class: "field-hint", text: hint }) : null),
         ...cells.map((c) => c.wrap));
     }
+  }
+  grid.append(h("div", { class: "in-group" }, icon("user"), h("span", { text: "Commission (this adviser's terms)" })));
+  for (const f of M.COMMISSION_FIELDS) {
+    const c = field(f, () => state.plan.rates[f.key], (v) => { state.plan.rates[f.key] = v; }, f.label);
+    inputSyncs.push(c.sync);
+    c.wrap.classList.add("in-span");
+    grid.append(h("label", { class: "in-label", for: c.input.id }, COMMISSION_LABELS[f.key], h("span", { class: "field-hint", text: f.hint })), c.wrap);
   }
   $("case-fields").append(grid, h("p", { class: "field-hint holiday-note", text: HOLIDAY_NOTE }));
   $("btn-copy-base").addEventListener("click", () => {
@@ -198,6 +174,7 @@ function syncTabs(boxId, active) {
 }
 
 function syncInputs() {
+  if (state.mode === "introducer") return intro.sync();
   syncTabs("scenario-tabs", state.scenario);
   $("btn-copy-base").hidden = state.scenario === "base";
   for (const sync of inputSyncs) sync();
@@ -206,30 +183,16 @@ function syncInputs() {
 
 function syncToolbar() {
   $("plan-name").value = state.plan.name;
-  $("plan-adviser").value = state.plan.adviser;
+  $("plan-adviser").value = state.plan[whoKey()] || "";
   $("plan-select").value = state.planId || "";
 }
 
 /* ---------- tables ---------- */
 
-function tableEl(columns, rows) {
-  return h("div", { class: "table-wrap" },
-    h("table", { class: "adm-table" },
-      h("thead", null, h("tr", null, columns.map((c, i) => h("th", { scope: "col", class: i ? "num" : null, text: c })))),
-      h("tbody", null, rows.map((r) => h("tr", { class: r.cls || null },
-        r.cells.map((c, i) => (i === 0 ? h("th", { scope: "row" }, c) : h("td", { class: "num" }, c))))))));
-}
-
 const typeCols = ["", "Remortgage", "Purchase", "Total"];
 function byTypeRow(month, label, fn, fmt = gbp, cls) {
   return { cls, cells: [label, fmt(fn(month.byType.remortgage)), fmt(fn(month.byType.purchase)), fmt(fn(month.total))] };
 }
-
-const SPLIT = [
-  { key: "adviser", label: "Adviser", cls: "c-adviser" },
-  { key: "introducer", label: "External introducer", cls: "c-introducer" },
-  { key: "me", label: "Mortgage Easy", cls: "c-me" },
-];
 
 function pipeline(el, t) {
   funnel(el, [
@@ -529,7 +492,7 @@ const panels = [
   {
     key: "scenarios",
     label: "Scenario comparison",
-    intro: "Base, Conservative and Ambitious side by side, using the same shared rates. Actual-versus-projection tracking is planned for later.",
+    intro: "Base, Conservative and Ambitious side by side, using this adviser's rates and commission. Actual-versus-projection tracking is planned for later.",
     build(body) {
       this.table = h("div");
       this.chart = h("div", { class: "chart" });
@@ -559,13 +522,13 @@ const panels = [
   {
     key: "firm",
     label: "Firm view",
-    intro: "Adds up saved plans (one per adviser) using each plan's Base scenario and the current shared rates.",
+    intro: "Adds up saved adviser plans (one per adviser) using each plan's Base scenario and its own rates and commission. Introducer plans are left out because their leads are already counted as advisers' introduced appointments.",
     build(body) {
       this.load = h("button", { type: "button", class: "btn btn-ghost no-print", text: "Load saved plans", onclick: () => loadFirm() });
       this.result = h("div");
       body.append(this.load, this.result);
     },
-    update({ rates }) {
+    update() {
       if (!state.firmPlans) {
         this.result.replaceChildren(h("p", { class: "note", text: "Save a plan for each adviser, then load them here." }));
         return;
@@ -574,8 +537,8 @@ const panels = [
       const sum = { adviser: 0, introducer: 0, me: 0, meY1: 0 };
       for (const p of state.firmPlans) {
         const on = !state.firmOff.has(p.id);
-        const m = M.computeMonth(p.scenarios.base, rates).total;
-        const y1 = M.sumMonths(M.forecast(Array(12).fill(p.scenarios.base), rates));
+        const m = M.computeMonth(p.scenarios.base, p.rates).total;
+        const y1 = M.sumMonths(M.forecast(Array(12).fill(p.scenarios.base), p.rates));
         if (on) {
           sum.adviser += m.adviser * 12; sum.introducer += m.introducer * 12; sum.me += m.me * 12; sum.meY1 += y1.me;
         }
@@ -591,35 +554,28 @@ const panels = [
   {
     key: "assumptions",
     label: "Assumptions",
-    intro: "Shared rates used for every adviser and scenario. Changes apply straight away to this page; save them to make them the stored defaults.",
+    intro: "Rates for this adviser's plan, saved with the plan, so each adviser can be on different terms. Commission levels are with the inputs. The stored defaults are only the starting point for new plans.",
     build(body) {
-      this.controls = M.RATE_FIELDS.map((f) => numInput(f, () => state.rates[f.key], (v) => {
-        state.rates[f.key] = v;
-        state.ratesDirty = true;
-      }, f.label));
+      this.controls = M.BUSINESS_RATE_FIELDS.map((f) => field(f, () => state.plan.rates[f.key], (v) => { state.plan.rates[f.key] = v; }, f.label));
       const grid = h("div", { class: "in-grid in-grid-one" });
-      M.RATE_FIELDS.forEach((f, i) => grid.append(
+      M.BUSINESS_RATE_FIELDS.forEach((f, i) => grid.append(
         h("label", { class: "in-label", for: this.controls[i].input.id }, f.label, f.hint ? h("span", { class: "field-hint", text: f.hint }) : null),
         this.controls[i].wrap));
       this.derived = h("p", { class: "note" });
       this.saved = h("p", { class: "note" });
-      const saveRates = h("button", { type: "button", class: "btn btn-green", text: "Save rates as defaults", onclick: () => saveAssumptions(false) });
-      const saveTemplate = h("button", { type: "button", class: "btn btn-ghost", text: "Use this scenario as starting inputs", onclick: () => saveAssumptions(true) });
-      const revert = h("button", { type: "button", class: "btn btn-ghost", text: "Revert to saved rates", onclick: () => {
-        if (state.savedRates) { state.rates = clone(state.savedRates); state.ratesDirty = false; syncInputs(); renderAll(); }
-      } });
       body.append(grid, this.derived,
-        h("div", { class: "adm-toolbar no-print" }, saveRates, saveTemplate, revert), this.saved);
+        h("div", { class: "adm-toolbar no-print" },
+          h("button", { type: "button", class: "btn btn-green", text: "Save these rates as defaults for new plans", onclick: () => saveDefaultRates() }),
+          h("button", { type: "button", class: "btn btn-ghost", text: "Use this scenario as starting inputs", onclick: () => saveTemplate() }),
+          h("button", { type: "button", class: "btn btn-ghost", text: "Reset this plan's rates to defaults", onclick: () => resetRates() })),
+        this.saved);
     },
     sync() { for (const c of this.controls) c.sync(); },
     update({ rates }) {
       const procRate = M.computeCase({}, rates).procRate * 100;
       this.derived.textContent = `Procuration received: ${pctTxt(rates.procRatePct)} × ${pctTxt(rates.procRetainedPct)} = ${pctTxt(procRate)} of the loan. ` +
         `HLP's share (${pctTxt(100 - rates.procRetainedPct)}) is already removed and is never deducted again.`;
-      const a = state.assumptions;
-      this.saved.textContent = (state.ratesDirty ? "Rates on this page differ from the saved defaults. " : "") +
-        (a && a.updatedAt ? `Defaults last saved ${new Date(a.updatedAt).toLocaleString("en-GB")}${a.updatedBy ? ` by ${a.updatedBy}` : ""}.`
-          : a ? "Defaults loaded from the initial setup and not changed here since." : "No defaults saved yet.");
+      this.saved.textContent = defaultsNote();
     },
   },
   {
@@ -692,7 +648,7 @@ function showPanel() {
 
 function computeContext() {
   const sc = currentScenario();
-  const rates = state.rates;
+  const rates = state.plan.rates;
   const months12 = M.forecast(Array(12).fill(sc), rates);
   return { sc, rates, month: M.computeMonth(sc, rates), months12, year1: M.sumMonths(months12) };
 }
@@ -710,6 +666,7 @@ function renderKpis({ month, year1 }) {
 }
 
 function renderAll() {
+  if (state.mode === "introducer") return intro.render();
   const ctx = computeContext();
   renderKpis(ctx);
   for (const p of panels) p.update(ctx);
@@ -726,19 +683,42 @@ function setPlan(plan, id) {
   renderAll();
 }
 
+/** Plans saved before rates were per plan pick up the current defaults. */
 function normalisePlan(record) {
   const clean = M.cleanPlan(record);
-  for (const s of M.SCENARIOS) if (!record.scenarios || !record.scenarios[s.key]) clean.scenarios[s.key] = clone(clean.scenarios.base);
+  if (!clean.rates) clean.rates = clone(state.defaultRates);
+  if (clean.kind === "adviser") {
+    for (const s of M.SCENARIOS) if (!record.scenarios || !record.scenarios[s.key]) clean.scenarios[s.key] = clone(clean.scenarios.base);
+  }
   return clean;
 }
+
+const planKind = (p) => p.kind || "adviser";
 
 async function refreshPlanList() {
   const data = await api("/api/admin/scenarios");
   state.plans = data.plans;
   const select = $("plan-select");
-  select.replaceChildren(h("option", { value: "", text: "New plan" }),
-    ...state.plans.map((p) => h("option", { value: p.id, text: p.adviser ? `${p.name} (${p.adviser})` : p.name })));
+  const mine = state.plans.filter((p) => planKind(p) === state.mode);
+  select.replaceChildren(h("option", { value: "", text: state.mode === "introducer" ? "New introducer plan" : "New plan" }),
+    ...mine.map((p) => { const who = p.who ?? p.adviser; return h("option", { value: p.id, text: who ? `${p.name} (${who})` : p.name }); }));
   select.value = state.planId || "";
+}
+
+function setMode(mode) {
+  if (mode === state.mode) return;
+  if (!confirmDiscard()) return;
+  state.mode = mode;
+  for (const b of $("mode-tabs").children) {
+    const on = b.dataset.mode === mode;
+    b.classList.toggle("is-active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  }
+  $("layout-adviser").hidden = mode !== "adviser";
+  $("layout-introducer").hidden = mode !== "introducer";
+  $("who-label").textContent = mode === "introducer" ? "Introducer" : "Adviser";
+  setPlan(newPlan(mode), null);
+  refreshPlanList().catch((err) => setStatus(err.message, "error"));
 }
 
 const confirmDiscard = () => !state.dirty || window.confirm("Discard unsaved changes to this plan?");
@@ -772,50 +752,66 @@ async function deletePlan() {
 async function loadFirm() {
   try {
     const data = await api("/api/admin/scenarios?all=1");
-    state.firmPlans = data.plans.map((p) => ({ id: p.id, ...normalisePlan(p) }));
+    state.firmPlans = data.plans.filter((p) => planKind(p) === "adviser").map((p) => ({ id: p.id, ...normalisePlan(p) }));
     renderAll();
   } catch (err) {
     setStatus(err.message, "error");
   }
 }
 
-async function saveAssumptions(withTemplate) {
+/* ---------- defaults for new plans ---------- */
+
+async function putAssumptions(body, message) {
   try {
-    const body = withTemplate
-      ? { rates: state.savedRates || state.rates, adviserTemplate: M.cleanScenario(currentScenario()) }
-      : { rates: M.cleanRates(state.rates) };
-    const data = await api("/api/admin/assumptions", { method: "PUT", body });
+    const data = await api("/api/admin/assumptions", { method: "PUT", body: { rates: state.defaultRates, ...body } });
     state.assumptions = data.assumptions;
-    state.savedRates = clone(data.assumptions.rates);
-    if (!withTemplate) state.ratesDirty = false;
+    state.defaultRates = M.cleanRates(data.assumptions.rates);
     renderAll();
-    setStatus(withTemplate ? "Starting inputs saved for new plans." : "Rates saved as defaults.", "ok");
+    setStatus(message, "ok");
   } catch (err) {
     setStatus(err.message, "error");
   }
 }
+
+const saveDefaultRates = () => putAssumptions({ rates: M.cleanRates(state.plan.rates) }, "These rates are now the defaults for new plans. Existing plans keep their own.");
+const saveTemplate = () => (state.mode === "introducer"
+  ? putAssumptions({ introducerTemplate: M.cleanIntroInputs(state.plan.inputs) }, "Starting inputs saved for new introducer plans.")
+  : putAssumptions({ adviserTemplate: M.cleanScenario(currentScenario()) }, "Starting inputs saved for new adviser plans."));
+
+function resetRates() {
+  state.plan.rates = clone(state.defaultRates);
+  markDirty();
+  syncInputs();
+  renderAll();
+}
+
+function defaultsNote() {
+  const a = state.assumptions;
+  const same = JSON.stringify(M.cleanRates(state.plan.rates)) === JSON.stringify(state.defaultRates);
+  return `${same ? "This plan uses the default rates." : "This plan has its own rates, different from the defaults."} ` +
+    (a && a.updatedAt ? `Defaults last saved ${new Date(a.updatedAt).toLocaleString("en-GB")}${a.updatedBy ? ` by ${a.updatedBy}` : ""}.`
+      : a ? "Defaults are from the initial setup." : "No defaults saved yet.");
+}
+
+const intro = createIntroducerView({
+  els: { fields: $("intro-fields"), kpis: $("intro-kpis"), nav: $("intro-nav"), panels: $("intro-panels") },
+  field,
+  getPlan: () => state.plan,
+  markDirty,
+  actions: { saveDefaultRates, saveTemplate, resetRates, defaultsNote },
+});
 
 /* ---------- export / import ---------- */
-
-function csvCell(v) {
-  if (typeof v === "number") return Number.isFinite(v) ? v.toFixed(2) : "";
-  let s = String(v ?? "");
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-function download(name, type, text) {
-  const url = URL.createObjectURL(new Blob([text], { type }));
-  const a = h("a", { href: url, download: name });
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 const fileStem = () => `mortgage-easy-plan-${(state.plan.name || "plan").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${new Date().toISOString().slice(0, 10)}`;
 
 function exportCsv() {
+  if (state.mode === "introducer") {
+    const head = [["Mortgage Easy introducer plan (confidential)"], ["Plan", state.plan.name], ["Introducer", state.plan.introducer],
+      ["Exported", new Date().toISOString()], ["Note", HOLIDAY_NOTE], []];
+    download(`${fileStem()}.csv`, "text/csv;charset=utf-8", toCsv([...head, ...intro.csvRows()]));
+    return;
+  }
   const ctx = computeContext();
   const { month, months12, year1, sc, rates } = ctx;
   const T = month.total;
@@ -850,13 +846,13 @@ function exportCsv() {
   }
   rows.push([], ["Inputs", "Remortgage", "Purchase"]);
   for (const f of M.CASE_FIELDS) rows.push([f.label, Number(sc.remortgage[f.key]), Number(sc.purchase[f.key])]);
-  rows.push([], ["Shared rates", "Value"]);
+  rows.push([], ["This adviser's rates and commission", "Value"]);
   for (const f of M.RATE_FIELDS) rows.push([f.label, Number(rates[f.key])]);
-  download(`${fileStem()}.csv`, "text/csv;charset=utf-8", `\ufeff${rows.map((r) => r.map(csvCell).join(",")).join("\r\n")}\r\n`);
+  download(`${fileStem()}.csv`, "text/csv;charset=utf-8", toCsv(rows));
 }
 
 function exportJson() {
-  const body = { type: "mortgage-easy-plan", version: 1, exportedAt: new Date().toISOString(), plan: M.cleanPlan(state.plan), rates: M.cleanRates(state.rates) };
+  const body = { type: "mortgage-easy-plan", version: 2, exportedAt: new Date().toISOString(), plan: M.cleanPlan(state.plan) };
   download(`${fileStem()}.json`, "application/json", JSON.stringify(body, null, 2));
 }
 
@@ -865,12 +861,9 @@ async function importJson(file) {
     if (file.size > 200 * 1024) throw new Error("File too large.");
     const data = JSON.parse(await file.text());
     if (!data || data.type !== "mortgage-easy-plan" || !data.plan) throw new Error("Not a Mortgage Easy plan export.");
+    if (planKind(data.plan) !== state.mode) throw new Error(`This is ${state.mode === "introducer" ? "an adviser" : "an introducer"} plan: switch calculator first.`);
     if (!confirmDiscard()) return;
-    const plan = normalisePlan(data.plan);
-    if (data.rates && window.confirm("Also use the rates from this file on this page? (They won't be saved as defaults unless you save them.)")) {
-      state.rates = M.cleanRates(data.rates);
-      state.ratesDirty = true;
-    }
+    const plan = normalisePlan({ ...data.plan, rates: data.plan.rates || data.rates });
     setPlan(plan, null);
     markDirty();
     setStatus(`Imported “${plan.name}” as a new unsaved plan.`, "ok");
@@ -883,7 +876,8 @@ async function importJson(file) {
 
 function wireToolbar() {
   $("plan-name").addEventListener("input", (e) => { state.plan.name = e.target.value; markDirty(); });
-  $("plan-adviser").addEventListener("input", (e) => { state.plan.adviser = e.target.value; markDirty(); });
+  $("plan-adviser").addEventListener("input", (e) => { state.plan[whoKey()] = e.target.value; markDirty(); });
+  for (const b of $("mode-tabs").children) b.addEventListener("click", () => setMode(b.dataset.mode));
   $("plan-select").addEventListener("change", async (e) => {
     const id = e.target.value;
     if (!confirmDiscard()) { e.target.value = state.planId || ""; return; }
@@ -915,6 +909,7 @@ function wireToolbar() {
 async function start() {
   buildInputs();
   buildPanels();
+  intro.build();
   wireToolbar();
   showPanel();
   state.plan = newPlan();
@@ -923,10 +918,9 @@ async function start() {
     state.user = data.user;
     state.assumptions = data.assumptions;
     if (data.assumptions && data.assumptions.rates) {
-      state.rates = M.cleanRates(data.assumptions.rates);
-      state.savedRates = clone(state.rates);
+      state.defaultRates = M.cleanRates(data.assumptions.rates);
     } else {
-      setStatus("No default rates are stored yet. Enter them under Assumptions and choose “Save rates as defaults”.");
+      setStatus("No default rates are stored yet. Enter them under Assumptions and choose “Save these rates as defaults for new plans”.");
     }
     $("user").textContent = state.user ? `Signed in as ${state.user}` : "";
     state.plan = newPlan();

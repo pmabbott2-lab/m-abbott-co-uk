@@ -1,5 +1,5 @@
-/** GET/PUT /api/admin/assumptions: shared rates and the starting adviser inputs (KV key "assumptions"). */
-import { cleanRates, cleanScenario } from "../../../marketing/mortgage-hub-website/admin/model.js";
+/** GET/PUT /api/admin/assumptions: default rates and starting inputs for new plans (KV key "assumptions"). */
+import { cleanRates, cleanScenario, cleanIntroInputs } from "../../../marketing/mortgage-hub-website/admin/model.js";
 import { json, fail, kvOf, readJsonBody, errorResponse } from "../../_lib/admin-store.js";
 
 const KEY = "assumptions";
@@ -20,6 +20,7 @@ export async function onRequestPut({ request, env, data }) {
       version: 1,
       rates: cleanRates(body && body.rates),
       adviserTemplate: body && body.adviserTemplate ? cleanScenario(body.adviserTemplate, "Starting inputs, ") : current.adviserTemplate || null,
+      introducerTemplate: body && body.introducerTemplate ? cleanIntroInputs(body.introducerTemplate, "Introducer starting inputs, ") : current.introducerTemplate || null,
       updatedAt: new Date().toISOString(),
       updatedBy: data.adminEmail || null,
     };

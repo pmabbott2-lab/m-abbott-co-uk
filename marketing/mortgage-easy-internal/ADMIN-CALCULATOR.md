@@ -46,11 +46,17 @@ Plus the KV binding `ADMIN_KV` → the admin KV namespace.
 
 ## The model
 
-Per case type (remortgage, purchase), per adviser, per month:
+Each saved plan (adviser or introducer) holds its own rates and commission, so people on different
+terms can sit side by side. The rates stored under `assumptions` in KV only seed new plans; plans
+saved before this change pick them up when opened. Adviser appointments are entered per week and
+converted with a 47-week working year (52 less 5 weeks' holiday): month = weekly × 47 ÷ 12.
+Introducer leads are also weekly but use all 52 weeks: month = weekly × 52 ÷ 12.
+
+Adviser plans, per case type (remortgage, purchase), per month:
 
 ```
 Written       = (own seen + introduced seen) × seen-to-written
-Completions   = Written × (1 − not completed)
+Completions   = Written × (1 − NTU rate)
 Procuration   = Completions × average mortgage × procuration rate × share received after HLP
 Broker fees   = Written × fee-paying % × broker fee                  (month written, no refunds)
 Protection    = Written × protection % × (1 − not completed) × (1 − NTU)
@@ -66,6 +72,25 @@ Mortgage Easy = total − adviser − introducer         (no costs; the residual
 
 Timing: broker fees in the month written; procuration, protection and GI after each case type's
 lag (1 to 6 months). HLP's share of procuration is shown as a memo line only.
+
+Introducer plans (one introducer's weekly leads), per month:
+
+```
+Seen          = leads × show rate
+Sign-ups      = Seen × seen-to-sign-up
+Completions   = Sign-ups × sign-up-to-completion
+Broker fees   = Sign-ups × broker fee (purchase fee)          (at sign-up, no refunds)
+Procuration   = Completions × average mortgage × procuration rate × share received after HLP
+Introducer    = introducer % × (fees + procuration)
+Adviser       = adviser procuration-and-fees % × (fees + procuration)
+Mortgage Easy = remainder
+Renewals      = Completions × retained %, split between 2-year and 5-year terms,
+                renewing 24 / 60 months after completion, each paying the renewal fee,
+                shared on the same commission terms (first renewal only, no procuration)
+```
+
+The forecast runs 7 years so both renewal waves show. Starting inputs for new introducer plans are
+stored as `introducerTemplate` in the `assumptions` KV record.
 
 ## Running locally
 

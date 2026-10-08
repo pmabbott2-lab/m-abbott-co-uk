@@ -1,6 +1,6 @@
 /**
- * /api/admin/scenarios: saved adviser plans (KV keys "plan:<uuid>").
- *   GET            list (name, adviser, updatedAt)
+ * /api/admin/scenarios: saved adviser and introducer plans (KV keys "plan:<uuid>").
+ *   GET            list (name, kind, who, updatedAt)
  *   GET ?all=1     every plan in full (firm view)
  *   GET ?id=…      one plan
  *   PUT            { id?, plan } create or update
@@ -57,7 +57,8 @@ export async function onRequestPut({ request, env, data }) {
     const plan = cleanPlan(body && body.plan);
     const updatedAt = new Date().toISOString();
     const record = { id, ...plan, updatedAt, updatedBy: data.adminEmail || null };
-    await kv.put(PREFIX + id, JSON.stringify(record), { metadata: { name: plan.name, adviser: plan.adviser, updatedAt } });
+    const who = plan.kind === "introducer" ? plan.introducer : plan.adviser;
+    await kv.put(PREFIX + id, JSON.stringify(record), { metadata: { name: plan.name, kind: plan.kind, who, updatedAt } });
     return json({ ok: true, plan: record });
   } catch (err) {
     return errorResponse(err);
