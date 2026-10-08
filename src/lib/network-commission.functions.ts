@@ -6,9 +6,13 @@
  * scopes all reads/writes to it. A statementId / lineId / sessionId / period
  * is never authority on its own: unknown, foreign and tenantless resources all
  * fail closed with the same "Not found.". New rows are stamped with the acting
- * tenant. The global UNIQUE(period_month) remains a B4 structural blocker, so
- * same-month collisions across tenants fail closed with a generic message and
- * never expose the other tenant's statement.
+ * tenant.
+ *
+ * G7F-4S4C4-B4b1 — one statement per tenant and month. Allocation, deallocation,
+ * skip, dates, re-parse, validation and unlock run as single database operations
+ * that re-check the actor in the acting tenant. The economic date of a network
+ * fee is the line transaction date, else the staff-confirmed statement received
+ * date; it is never inferred. Validation reconciles and freezes; it never posts.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -18,14 +22,54 @@ import type { ResourceCapability } from "@/lib/tenant-assert.server";
 
 const FEE_TYPES = ["fee", "mortgage_fee", "insurance_fee", "other_fee"] as const;
 
-/**
- * Shown when a statement cannot be opened for the acting tenant because the
- * global UNIQUE(period_month) constraint is already occupied (by any tenant).
- * Deliberately generic: never reveals the foreign statement id, tenant, creator
- * or any financial data. Full per-tenant same-month support is B4.
- */
-const PERIOD_MONTH_UNAVAILABLE_MESSAGE =
-  "This month can't be opened here yet. Please contact support if this continues.";
+const STATEMENT_UNAVAILABLE_MESSAGE = "This month can't be opened right now. Please try again.";
+
+const VALIDATION_BLOCKER_MESSAGES: Record<string, string> = {
+  statement_not_open: "the statement is already validated",
+  no_lines: "the statement has no lines",
+  line_tenant_mismatch: "a line does not belong to this company",
+  line_unresolved: "every line must be allocated or skipped",
+  skip_reason_missing: "every skipped line needs a reason",
+  declared_total_missing: "enter the statement's declared total",
+  total_mismatch: "the line amounts do not add up to the declared total",
+  allocation_inconsistent: "an allocated line does not match its draft fee",
+  duplicate_allocation: "a line has more than one active fee",
+  economic_date_missing: "an allocated fee has no economic date",
+  received_date_unconfirmed: "the statement received date is not confirmed",
+  economic_date_mismatch: "an allocated fee's date no longer matches its source",
+  session_unavailable: "an allocated case is no longer available",
+};
+
+const NETWORK_ERROR_MESSAGES: Record<string, string> = {
+  network_finance_forbidden: "Forbidden",
+  network_statement_frozen: "This statement is validated. An Owner must unlock it before changes.",
+  network_line_superseded: "This line was replaced by a newer parse. Reload the statement.",
+  network_allocation_session_required: "Select a customer case/session to allocate this line.",
+  network_line_already_allocated:
+    "This line is already allocated to a different case. Deallocate it first.",
+  network_line_skipped: "This line is skipped. Remove the skip before allocating.",
+  network_line_amount_invalid: "Line has no amount to allocate.",
+  network_allocation_date_required:
+    "This line has no transaction date and the statement received date is not confirmed. Add one before allocating.",
+  network_line_not_allocated: "This line is not allocated.",
+  network_deallocation_reason_required: "Give a reason for deallocating this line.",
+  network_deallocation_fee_not_draft: "This fee is no longer a draft and cannot be deallocated.",
+  network_line_allocated_immutable: "Deallocate this line before changing it.",
+  network_line_date_invalid: "Enter a valid transaction date that is not in the future.",
+  network_skip_reason_required: "Give a reason for skipping this line.",
+  network_line_skip_invalid: "This line can't be skipped or unskipped in its current state.",
+  network_received_date_unconfirmed: "Confirm the received date before saving it.",
+  network_received_date_invalid: "Enter a valid received date that is not in the future.",
+  network_received_date_in_use:
+    "Allocated lines use the received date. Deallocate them before changing it.",
+  network_declared_total_invalid: "Enter a declared total of zero or more.",
+  network_reparse_active_allocation:
+    "Deallocate every allocated line before re-parsing this statement.",
+  network_lines_invalid: "The parsed statement lines are not valid.",
+  network_statement_not_validated: "This statement is not validated.",
+  network_unlock_reason_required: "Give a reason for unlocking this statement.",
+  network_unlock_posted_fee: "This statement has posted fees and cannot be unlocked.",
+};
 
 function isMissing(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
@@ -46,6 +90,27 @@ function isUniqueViolation(error: { code?: string; message?: string } | null): b
   const code = error.code ?? "";
   const msg = (error.message ?? "").toLowerCase();
   return code === "23505" || msg.includes("duplicate key") || msg.includes("unique constraint");
+}
+
+/** Database operation errors map to fixed messages; anything else stays generic. */
+function networkError(
+  error: { code?: string; message?: string } | null,
+  notFoundMessage: string,
+): Error {
+  const raw = String(error?.message ?? "");
+  if (raw === "network_resource_not_found") return new Error(notFoundMessage);
+  if (raw.startsWith("network_validation_blocked")) {
+    const codes = raw.split(":")[1]?.split(",").filter(Boolean) ?? [];
+    const reasons = codes.map((c) => VALIDATION_BLOCKER_MESSAGES[c]).filter(Boolean);
+    return new Error(
+      reasons.length
+        ? `This statement can't be validated yet: ${reasons.join("; ")}.`
+        : "This statement can't be validated yet.",
+    );
+  }
+  const known = NETWORK_ERROR_MESSAGES[raw];
+  if (known) return new Error(known);
+  return new Error("The network statement change could not be completed.");
 }
 
 function canViewNetwork(access: AdminAccess): boolean {
@@ -93,6 +158,28 @@ function periodLabel(periodMonth: string): string {
   if (Number.isNaN(d.getTime())) return periodMonth;
   return d.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
 }
+
+function londonToday(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+/** A real calendar date in YYYY-MM-DD that is not after today (London); otherwise null. */
+function statedDate(value: unknown): string | null {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const d = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== value) return null;
+  return value <= londonToday() ? value : null;
+}
+
+const isoDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((v) => statedDate(v) === v, "Enter a valid date that is not in the future.");
 
 export const listNetworkStatementMonths = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -147,13 +234,17 @@ export const getOrCreateNetworkStatement = createServerFn({ method: "POST" })
     const period = monthStart(data.periodMonth);
     const { supabaseAdminUntyped: supabaseAdmin } =
       await import("@/integrations/supabase/client.server");
-    // Same-tenant lookup only: never read another tenant's same-month statement.
-    const { data: existing } = await supabaseAdmin
-      .from("network_commission_statements")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .eq("period_month", period)
-      .maybeSingle();
+    const findOwn = async () => {
+      const { data: existing, error } = await supabaseAdmin
+        .from("network_commission_statements")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("period_month", period)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      return existing;
+    };
+    const existing = await findOwn();
     if (existing) return { statement: existing, created: false };
 
     const { data: inserted, error } = await supabaseAdmin
@@ -173,10 +264,12 @@ export const getOrCreateNetworkStatement = createServerFn({ method: "POST" })
     if (error) {
       if (isMissing(error))
         throw new Error("Run supabase/RUN_NETWORK_COMMISSION.sql in Supabase first.");
-      // B4 blocker: global UNIQUE(period_month). Another tenant already holds
-      // this month. Fail closed with a generic message — do not fetch, return,
-      // reassign or reveal the other tenant's statement.
-      if (isUniqueViolation(error)) throw new Error(PERIOD_MONTH_UNAVAILABLE_MESSAGE);
+      // One statement per tenant and month: a concurrent open of the same month wins.
+      if (isUniqueViolation(error)) {
+        const raced = await findOwn();
+        if (raced) return { statement: raced, created: false };
+        throw new Error(STATEMENT_UNAVAILABLE_MESSAGE);
+      }
       throw new Error(error.message);
     }
     return { statement: inserted, created: true };
@@ -202,12 +295,13 @@ export const getNetworkStatementDetail = createServerFn({ method: "GET" })
     // Unknown, foreign and tenantless statements are indistinguishable here.
     if (!statement) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
 
-    // Ownership proven above; lines are additionally constrained to the tenant.
+    // Ownership proven above; current (not superseded) lines, constrained to the tenant.
     const { data: lines, error: lineErr } = await supabaseAdmin
       .from("network_commission_lines")
       .select("*")
       .eq("statement_id", data.statementId)
       .eq("tenant_id", tenantId)
+      .is("superseded_at", null)
       .order("line_no", { ascending: true });
     if (lineErr) throw new Error(lineErr.message);
 
@@ -221,12 +315,11 @@ export const parseNetworkStatementWithAi = createServerFn({ method: "POST" })
       .object({
         statementId: z.string().uuid(),
         rawText: z.string().min(20).max(200_000),
-        replaceExisting: z.boolean().optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE, withForcedTenantId } =
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE } =
       await import("@/lib/tenant-assert.server");
     const { tenantId } = await resolveActingTenantForList(context.userId, networkAmendCapability());
 
@@ -252,9 +345,10 @@ export const parseNetworkStatementWithAi = createServerFn({ method: "POST" })
         {
           role: "system",
           content: `You extract mortgage network commission statement lines into JSON.
-Return {"lines":[{"customerName":string|null,"customerEmail":string|null,"caseRef":string|null,"feeType":"fee"|"mortgage_fee"|"insurance_fee"|"other_fee","amountPounds":number,"networkProduct":string|null,"notes":string|null}]}
+Return {"lines":[{"customerName":string|null,"customerEmail":string|null,"caseRef":string|null,"feeType":"fee"|"mortgage_fee"|"insurance_fee"|"other_fee","amountPounds":number,"transactionDate":string|null,"networkProduct":string|null,"notes":string|null}]}
 Rules:
 - amountPounds is the commission/fee amount received from the network (positive number, pounds).
+- transactionDate is the date printed on that line for the transaction/payment, as YYYY-MM-DD. Use null when the line shows no date. Never use the statement month, a header date or today's date in its place.
 - Prefer feeType "fee" for procuration / advice / main case fee. Use mortgage_fee, insurance_fee, other_fee when clearly labelled.
 - Skip totals, headers, and subtotals.
 - caseRef is any case/policy/application reference if present.`,
@@ -270,6 +364,7 @@ Rules:
         caseRef?: string | null;
         feeType?: string | null;
         amountPounds?: number | null;
+        transactionDate?: string | null;
         networkProduct?: string | null;
         notes?: string | null;
       }>;
@@ -283,32 +378,24 @@ Rules:
     const aiLines = parsed.lines ?? [];
     if (!aiLines.length) throw new Error("No commission lines found in the statement text.");
 
-    if (data.replaceExisting !== false) {
-      await supabaseAdmin
-        .from("network_commission_lines")
-        .delete()
-        .eq("statement_id", data.statementId)
-        .eq("tenant_id", tenantId);
-    }
-
+    // Parser dates are provisional until the statement is validated; an unusable date is dropped,
+    // never replaced.
     const rows = aiLines
-      .map((line, idx) => {
+      .map((line) => {
         const amountPounds = Number(line.amountPounds ?? 0);
         if (!Number.isFinite(amountPounds) || amountPounds <= 0) return null;
         const feeType = FEE_TYPES.includes(line.feeType as (typeof FEE_TYPES)[number])
           ? (line.feeType as (typeof FEE_TYPES)[number])
           : "fee";
         return {
-          statement_id: data.statementId,
-          line_no: idx + 1,
           customer_name: line.customerName?.trim() || null,
           customer_email: line.customerEmail?.trim()?.toLowerCase() || null,
           case_ref: line.caseRef?.trim() || null,
           fee_type: feeType,
           amount_received_pence: Math.round(amountPounds * 100),
           network_product: line.networkProduct?.trim() || null,
+          transaction_date: statedDate(line.transactionDate),
           raw_json: line,
-          allocation_status: "unmatched",
           annotation: line.notes?.trim() || null,
         };
       })
@@ -316,21 +403,14 @@ Rules:
 
     if (!rows.length) throw new Error("AI found lines but none had a usable amount.");
 
-    // Every new line is stamped with the acting tenant.
-    const { error: insErr } = await supabaseAdmin
-      .from("network_commission_lines")
-      .insert(rows.map((r) => withForcedTenantId(r, tenantId)));
-    if (insErr) throw new Error(insErr.message);
-
-    await supabaseAdmin
-      .from("network_commission_statements")
-      .update({
-        raw_source: data.rawText.slice(0, 200_000),
-        status: "draft",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", data.statementId)
-      .eq("tenant_id", tenantId);
+    const { error: replaceErr } = await supabaseAdmin.rpc("replace_network_statement_lines", {
+      p_tenant_id: tenantId,
+      p_actor_user_id: context.userId,
+      p_statement_id: data.statementId,
+      p_lines: rows,
+      p_raw_source: data.rawText.slice(0, 200_000),
+    });
+    if (replaceErr) throw networkError(replaceErr, RESOURCE_NOT_FOUND_MESSAGE);
 
     // Best-effort auto-match — candidates are restricted to the acting tenant.
     // A global profile/case_ref match is never used as authority, and foreign
@@ -339,7 +419,8 @@ Rules:
       .from("network_commission_lines")
       .select("id, customer_email, case_ref, customer_name")
       .eq("statement_id", data.statementId)
-      .eq("tenant_id", tenantId);
+      .eq("tenant_id", tenantId)
+      .is("superseded_at", null);
 
     for (const line of inserted ?? []) {
       let customerId: string | null = null;
@@ -414,7 +495,9 @@ Rules:
             updated_at: new Date().toISOString(),
           })
           .eq("id", line.id)
-          .eq("tenant_id", tenantId);
+          .eq("tenant_id", tenantId)
+          .is("superseded_at", null)
+          .eq("allocation_status", "unmatched");
       }
     }
 
@@ -429,101 +512,186 @@ export const allocateNetworkLine = createServerFn({ method: "POST" })
         lineId: z.string().uuid(),
         sessionId: z.string().uuid().optional(),
         customerId: z.string().uuid().optional(),
-        postFees: z.boolean().optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE, withForcedTenantId } =
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE } =
       await import("@/lib/tenant-assert.server");
     const { tenantId } = await resolveActingTenantForList(context.userId, networkAmendCapability());
 
     const { supabaseAdminUntyped: supabaseAdmin } =
       await import("@/integrations/supabase/client.server");
-    // Prove the line belongs to the acting tenant, and that its statement does
-    // too (line.tenant_id and statement.tenant_id must agree with acting).
-    const { data: line } = await supabaseAdmin
-      .from("network_commission_lines")
-      .select("*, network_commission_statements!inner(id, status, tenant_id)")
-      .eq("id", data.lineId)
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
-    if (!line) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
-    const stmt = (
-      line as { network_commission_statements?: { status?: string; tenant_id?: string | null } }
-    ).network_commission_statements;
-    if (!stmt || stmt.tenant_id !== tenantId) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
-    if (stmt.status === "locked") throw new Error("Statement is locked.");
-
-    let sessionId = data.sessionId ?? (line.matched_session_id as string | null) ?? null;
-    let customerId = data.customerId ?? (line.matched_customer_id as string | null) ?? null;
-
-    if (!sessionId && customerId) {
+    let sessionId = data.sessionId ?? null;
+    if (!sessionId && data.customerId) {
       const { data: latest } = await supabaseAdmin
         .from("interview_sessions")
         .select("id")
-        .eq("customer_id", customerId)
+        .eq("customer_id", data.customerId)
         .eq("tenant_id", tenantId)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      sessionId = latest?.id ?? null;
+      if (!latest) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+      sessionId = latest.id as string;
     }
-    if (!sessionId) throw new Error("Select a customer case/session to allocate this line.");
 
-    // The session must belong to the acting tenant. A supplied foreign/unknown
-    // session id is indistinguishable: both are "Not found.".
-    const { data: session } = await supabaseAdmin
-      .from("interview_sessions")
-      .select("id, customer_id, tenant_id")
-      .eq("id", sessionId)
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
-    if (!session) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
-    customerId = session.customer_id;
+    // Line, statement and session are proven in the acting tenant inside the operation; a
+    // foreign or unknown id is "Not found.". A repeat for the same case returns the same fee.
+    const { data: rows, error } = await supabaseAdmin.rpc("allocate_network_line", {
+      p_tenant_id: tenantId,
+      p_actor_user_id: context.userId,
+      p_line_id: data.lineId,
+      p_session_id: sessionId,
+    });
+    if (error) throw networkError(error, RESOURCE_NOT_FOUND_MESSAGE);
+    const row = (
+      rows as Array<{
+        fee_line_id: string;
+        created: boolean;
+        fee_event_date: string;
+        fee_event_source: string;
+      }> | null
+    )?.[0];
+    if (!row) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+    return {
+      ok: true,
+      feeLineId: row.fee_line_id,
+      created: row.created,
+      feeEventDate: row.fee_event_date,
+      feeEventSource: row.fee_event_source,
+      draft: true,
+    };
+  });
 
-    const feeType = FEE_TYPES.includes(line.fee_type as (typeof FEE_TYPES)[number])
-      ? line.fee_type
-      : "fee";
-    const amountPence = Number(line.amount_received_pence ?? 0);
-    if (amountPence <= 0) throw new Error("Line has no amount to allocate.");
+export const deallocateNetworkLine = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ lineId: z.string().uuid(), reason: z.string().trim().min(1).max(500) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, networkAmendCapability());
 
-    const { data: feeLine, error: feeErr } = await supabaseAdmin
-      .from("finance_fee_lines")
-      .insert(
-        withForcedTenantId(
-          {
-            session_id: sessionId,
-            fee_type: feeType,
-            amount_pence: amountPence,
-            note: `Network statement ${String(line.statement_id).slice(0, 8)} · ${line.case_ref ?? line.customer_name ?? "line"}`,
-            status: "draft",
-            created_by: context.userId,
-          },
-          tenantId,
-        ),
-      )
-      .select("id")
-      .single();
-    if (feeErr) throw new Error(feeErr.message);
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    const { data: feeLineId, error } = await supabaseAdmin.rpc("deallocate_network_line", {
+      p_tenant_id: tenantId,
+      p_actor_user_id: context.userId,
+      p_line_id: data.lineId,
+      p_reason: data.reason,
+    });
+    if (error) throw networkError(error, RESOURCE_NOT_FOUND_MESSAGE);
+    return { ok: true, voidedFeeLineId: feeLineId as string };
+  });
 
-    await supabaseAdmin
-      .from("network_commission_lines")
-      .update({
-        matched_customer_id: customerId,
-        matched_session_id: sessionId,
-        fee_line_id: feeLine.id,
-        allocation_status: "allocated",
-        allocated_by: context.userId,
-        allocated_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+export const setNetworkLineSkip = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        lineId: z.string().uuid(),
+        skip: z.boolean(),
+        reason: z.string().trim().max(500).optional(),
       })
-      .eq("id", data.lineId)
-      .eq("tenant_id", tenantId);
+      .refine((v) => !v.skip || Boolean(v.reason), "Give a reason for skipping this line.")
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, networkAmendCapability());
 
-    // Draft fee line on the customer case — submit from case finance to drive payable commissions.
-    return { ok: true, feeLineId: feeLine.id, sessionId, customerId, draft: true };
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    const { data: status, error } = await supabaseAdmin.rpc("set_network_line_skip", {
+      p_tenant_id: tenantId,
+      p_actor_user_id: context.userId,
+      p_line_id: data.lineId,
+      p_skip: data.skip,
+      p_reason: data.reason ?? null,
+    });
+    if (error) throw networkError(error, RESOURCE_NOT_FOUND_MESSAGE);
+    return { ok: true, status: status as string };
+  });
+
+export const setNetworkLineTransactionDate = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ lineId: z.string().uuid(), transactionDate: isoDate.nullable() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, networkAmendCapability());
+
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.rpc("set_network_line_transaction_date", {
+      p_tenant_id: tenantId,
+      p_actor_user_id: context.userId,
+      p_line_id: data.lineId,
+      p_transaction_date: data.transactionDate,
+    });
+    if (error) throw networkError(error, RESOURCE_NOT_FOUND_MESSAGE);
+    return { ok: true };
+  });
+
+export const confirmNetworkStatementReceivedDate = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        statementId: z.string().uuid(),
+        receivedDate: isoDate,
+        confirmed: z.literal(true),
+        evidence: z.string().trim().max(500).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, networkAmendCapability());
+
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.rpc("confirm_network_statement_received_date", {
+      p_tenant_id: tenantId,
+      p_actor_user_id: context.userId,
+      p_statement_id: data.statementId,
+      p_received_date: data.receivedDate,
+      p_confirmed: data.confirmed,
+      p_evidence: data.evidence || null,
+    });
+    if (error) throw networkError(error, RESOURCE_NOT_FOUND_MESSAGE);
+    return { ok: true };
+  });
+
+export const setNetworkStatementDeclaredTotal = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({ statementId: z.string().uuid(), declaredTotalPence: z.number().int().min(0) })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { resolveActingTenantForList, RESOURCE_NOT_FOUND_MESSAGE } =
+      await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, networkAmendCapability());
+
+    const { supabaseAdminUntyped: supabaseAdmin } =
+      await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.rpc("set_network_statement_declared_total", {
+      p_tenant_id: tenantId,
+      p_actor_user_id: context.userId,
+      p_statement_id: data.statementId,
+      p_declared_total_pence: data.declaredTotalPence,
+    });
+    if (error) throw networkError(error, RESOURCE_NOT_FOUND_MESSAGE);
+    return { ok: true };
   });
 
 export const annotateNetworkLine = createServerFn({ method: "POST" })
@@ -538,33 +706,31 @@ export const annotateNetworkLine = createServerFn({ method: "POST" })
 
     const { supabaseAdminUntyped: supabaseAdmin } =
       await import("@/integrations/supabase/client.server");
-    // Prove line ownership through its own tenant and its owned statement.
+    // Prove line ownership through its own tenant; its statement is owned by the same tenant.
     const { data: line } = await supabaseAdmin
       .from("network_commission_lines")
-      .select("id, statement_id, tenant_id, network_commission_statements!inner(id, tenant_id)")
+      .select("id, statement_id, tenant_id")
       .eq("id", data.lineId)
       .eq("tenant_id", tenantId)
+      .is("superseded_at", null)
       .maybeSingle();
     if (!line) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
-    const stmt = (line as { network_commission_statements?: { tenant_id?: string | null } })
-      .network_commission_statements;
-    if (!stmt || stmt.tenant_id !== tenantId) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
 
+    // A validated statement refuses the change (frozen).
     const { error } = await supabaseAdmin
       .from("network_commission_lines")
       .update({ annotation: data.annotation, updated_at: new Date().toISOString() })
       .eq("id", data.lineId)
       .eq("tenant_id", tenantId);
-    if (error) throw new Error(error.message);
+    if (error) throw networkError(error, RESOURCE_NOT_FOUND_MESSAGE);
 
-    if (line.statement_id) {
-      await supabaseAdmin
-        .from("network_commission_statements")
-        .update({ status: "annotated", updated_at: new Date().toISOString() })
-        .eq("id", line.statement_id)
-        .eq("tenant_id", tenantId)
-        .in("status", ["draft", "annotated"]);
-    }
+    const { error: stmtErr } = await supabaseAdmin
+      .from("network_commission_statements")
+      .update({ status: "annotated", updated_at: new Date().toISOString() })
+      .eq("id", line.statement_id)
+      .eq("tenant_id", tenantId)
+      .eq("status", "draft");
+    if (stmtErr) throw networkError(stmtErr, RESOURCE_NOT_FOUND_MESSAGE);
     return { ok: true };
   });
 
@@ -575,8 +741,12 @@ export const validateNetworkStatement = createServerFn({ method: "POST" })
       .object({
         statementId: z.string().uuid(),
         action: z.enum(["validate", "unlock"]),
-        notes: z.string().max(2000).optional(),
+        reason: z.string().trim().max(500).optional(),
       })
+      .refine(
+        (v) => v.action !== "unlock" || Boolean(v.reason),
+        "Give a reason for unlocking this statement.",
+      )
       .parse(d),
   )
   .handler(async ({ data, context }) => {
@@ -589,45 +759,27 @@ export const validateNetworkStatement = createServerFn({ method: "POST" })
 
     const { supabaseAdminUntyped: supabaseAdmin } =
       await import("@/integrations/supabase/client.server");
-    // Prove the statement belongs to the acting tenant before any status change.
-    const { data: statement } = await supabaseAdmin
-      .from("network_commission_statements")
-      .select("id, tenant_id")
-      .eq("id", data.statementId)
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
-    if (!statement) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
 
     if (data.action === "unlock") {
-      if (!view.adminAccess.isOwner && !view.adminAccess.isSupervisor) {
-        throw new Error("Only owner or supervisor can unlock a validated statement.");
+      if (!view.adminAccess.isOwner) {
+        throw new Error("Only an Owner can unlock a validated statement.");
       }
-      const { error } = await supabaseAdmin
-        .from("network_commission_statements")
-        .update({
-          status: "draft",
-          validated_by: null,
-          validated_at: null,
-          notes: data.notes ?? null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", data.statementId)
-        .eq("tenant_id", tenantId);
-      if (error) throw new Error(error.message);
+      const { error } = await supabaseAdmin.rpc("unlock_network_statement", {
+        p_tenant_id: tenantId,
+        p_actor_user_id: context.userId,
+        p_statement_id: data.statementId,
+        p_reason: data.reason ?? null,
+      });
+      if (error) throw networkError(error, RESOURCE_NOT_FOUND_MESSAGE);
       return { ok: true, status: "draft" };
     }
 
-    const { error } = await supabaseAdmin
-      .from("network_commission_statements")
-      .update({
-        status: "validated",
-        validated_by: context.userId,
-        validated_at: new Date().toISOString(),
-        notes: data.notes ?? null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", data.statementId)
-      .eq("tenant_id", tenantId);
-    if (error) throw new Error(error.message);
+    // Reconciles and freezes; nothing is posted.
+    const { error } = await supabaseAdmin.rpc("validate_network_statement", {
+      p_tenant_id: tenantId,
+      p_actor_user_id: context.userId,
+      p_statement_id: data.statementId,
+    });
+    if (error) throw networkError(error, RESOURCE_NOT_FOUND_MESSAGE);
     return { ok: true, status: "validated" };
   });

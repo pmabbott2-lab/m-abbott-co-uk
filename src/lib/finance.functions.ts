@@ -55,24 +55,6 @@ async function resolveFinanceTenant(userId: string): Promise<FinanceActing> {
   return acting;
 }
 
-/** Percentage of the rate version effective at `eventAt`, or null when no rate is set. */
-async function commissionPctAsOf(
-  supabaseAdmin: UntypedAdmin,
-  tenantId: string,
-  subject: CommissionRateSubject,
-  feeType: CommissionFeeType,
-  eventAt: Date,
-): Promise<number | null> {
-  if (!feeTypesForSubject(subject).includes(feeType)) return null;
-  const version = await resolveCommissionRateAsOf(supabaseAdmin, {
-    tenantId,
-    subject,
-    feeType,
-    eventAt,
-  });
-  return version ? version.percentage : null;
-}
-
 function isMissingTable(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
   const code = error.code ?? "";
@@ -249,186 +231,21 @@ export const upsertDraftFee = createServerFn({ method: "POST" })
 export const submitSessionFees = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data, context }): Promise<{ ok: true; count: number }> => {
     const { tenantId, access } = await resolveFinanceTenant(context.userId);
     if (!canAmend(access, "finance_customer")) throw new Error("Forbidden");
-
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-    const session = await assertRowBelongsToTenant<{
-      tenant_id: string;
-      customer_id: string | null;
-    }>({
+    await assertRowBelongsToTenant({
       table: "interview_sessions",
       id: data.sessionId,
       authorisedTenantId: tenantId,
-      select: "id, tenant_id, customer_id",
+      select: "id, tenant_id",
     });
-    const batchId = crypto.randomUUID();
-    const now = new Date().toISOString();
 
-    const { data: drafts, error } = await supabaseAdmin
-      .from("finance_fee_lines")
-      .select("*")
-      .eq("session_id", data.sessionId)
-      .eq("tenant_id", tenantId)
-      .eq("status", "draft");
-    if (error) throw new Error(error.message);
-    if (!drafts?.length) throw new Error("No draft fees to submit.");
-
-    const { resolveIntroducerIdForCustomerAtDate } = await import("@/lib/introducer-attribution");
-    const resolvedIntroducerId = session.customer_id
-      ? await resolveIntroducerIdForCustomerAtDate(
-          supabaseAdmin,
-          session.customer_id,
-          new Date(now),
-          data.sessionId,
-        )
-      : null;
-
-    // Commission subjects: advisors allocated to this session and the introducer registration
-    // attributed to the customer. Rates are resolved as versions effective at posting time, all
-    // before any write, so a resolver failure leaves nothing half-posted.
-    // B4b replaces `now` with the fee's economic fee_event_at.
-    const allocRes = await supabaseAdmin
-      .from("session_advisors")
-      .select("advisor_id")
-      .eq("session_id", data.sessionId)
-      .eq("tenant_id", tenantId);
-    const allocations = (
-      allocRes.error && isMissingTable(allocRes.error) ? [] : (allocRes.data ?? [])
-    ) as Array<{ advisor_id: string }>;
-    let introducerUserId: string | null = null;
-    if (resolvedIntroducerId) {
-      const { data: intro } = await supabaseAdmin
-        .from("introducers")
-        .select("user_id")
-        .eq("id", resolvedIntroducerId)
-        .eq("tenant_id", tenantId)
-        .maybeSingle();
-      introducerUserId = (intro?.user_id as string | null | undefined) ?? null;
-    }
-    const rateAt = new Date(now);
-    const pctByKey = new Map<string, number | null>();
-    for (const line of drafts) {
-      const feeType = line.fee_type as CommissionFeeType;
-      for (const a of allocations) {
-        const key = `advisor:${a.advisor_id}:${feeType}`;
-        if (pctByKey.has(key)) continue;
-        pctByKey.set(
-          key,
-          await commissionPctAsOf(
-            supabaseAdmin,
-            tenantId,
-            { kind: "adviser", adviserUserId: a.advisor_id },
-            feeType,
-            rateAt,
-          ),
-        );
-      }
-      if (resolvedIntroducerId && introducerUserId) {
-        const key = `introducer:${resolvedIntroducerId}:${feeType}`;
-        if (!pctByKey.has(key)) {
-          pctByKey.set(
-            key,
-            await commissionPctAsOf(
-              supabaseAdmin,
-              tenantId,
-              { kind: "introducer", introducerId: resolvedIntroducerId },
-              feeType,
-              rateAt,
-            ),
-          );
-        }
-      }
-    }
-
-    for (const line of drafts) {
-      await supabaseAdmin
-        .from("finance_fee_lines")
-        .update({ status: "posted", batch_id: batchId, posted_at: now, updated_at: now })
-        .eq("id", line.id)
-        .eq("tenant_id", tenantId);
-
-      await supabaseAdmin.from("finance_ledger").insert(
-        withForcedTenantId(
-          {
-            session_id: data.sessionId,
-            fee_line_id: line.id,
-            kind: "post",
-            fee_type: line.fee_type,
-            amount_pence: line.amount_pence,
-            is_reversal: false,
-            note: line.note,
-            created_by: context.userId,
-          },
-          tenantId,
-        ),
-      );
-
-      // Commission pull-through for advisors allocated to this session.
-      for (const a of allocations) {
-        const pct = pctByKey.get(`advisor:${a.advisor_id}:${line.fee_type}`) ?? null;
-        if (pct == null || pct <= 0) continue;
-        const commissionPence = Math.round((line.amount_pence * pct) / 100);
-        if (commissionPence <= 0) continue;
-        await supabaseAdmin.from("finance_ledger").insert(
-          withForcedTenantId(
-            {
-              session_id: data.sessionId,
-              fee_line_id: line.id,
-              kind: "commission",
-              fee_type: line.fee_type,
-              amount_pence: commissionPence,
-              is_reversal: false,
-              beneficiary_user_id: a.advisor_id,
-              beneficiary_role: "advisor",
-              commission_pct: pct,
-              payout_status: "received",
-              created_by: context.userId,
-            },
-            tenantId,
-          ),
-        );
-      }
-
-      // Introducer commission: case → customer → introducer registration.
-      // Introducers earn on fee + mortgage fee only — never insurance/other.
-      if (
-        resolvedIntroducerId &&
-        (line.fee_type === "fee" || line.fee_type === "mortgage_fee")
-      ) {
-        if (introducerUserId) {
-          const pct = pctByKey.get(`introducer:${resolvedIntroducerId}:${line.fee_type}`) ?? null;
-          if (pct != null && pct > 0) {
-            const commissionPence = Math.round((line.amount_pence * pct) / 100);
-            if (commissionPence > 0) {
-              await supabaseAdmin.from("finance_ledger").insert(
-                withForcedTenantId(
-                  {
-                    session_id: data.sessionId,
-                    fee_line_id: line.id,
-                    kind: "commission",
-                    fee_type: line.fee_type,
-                    amount_pence: commissionPence,
-                    is_reversal: false,
-                    beneficiary_user_id: introducerUserId,
-                    beneficiary_role: "introducer",
-                    commission_pct: pct,
-                    payout_status: "received",
-                    created_by: context.userId,
-                  },
-                  tenantId,
-                ),
-              );
-            }
-          }
-        }
-      }
-    }
-
-    return { ok: true, batchId, count: drafts.length };
+    // A fee may only post with its economic date from a validated network statement, and the
+    // database refuses every draft→posted transition until that posting path exists.
+    throw new Error(
+      "Posting fees is not available yet. Draft fees stay on the case until economic-date posting is enabled.",
+    );
   });
 
 export const amendPostedFee = createServerFn({ method: "POST" })
@@ -446,81 +263,17 @@ export const amendPostedFee = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { tenantId, access } = await resolveFinanceTenant(context.userId);
     if (!canAmend(access, "finance_customer")) throw new Error("Forbidden");
-
-    const { supabaseAdminUntyped: supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-    const line = await assertRowBelongsToTenant<Record<string, unknown> & {
-      tenant_id: string;
-      status: string;
-      session_id: string;
-      id: string;
-      fee_type: string;
-      amount_pence: number;
-      note: string | null;
-    }>({
+    await assertRowBelongsToTenant({
       table: "finance_fee_lines",
       id: data.lineId,
       authorisedTenantId: tenantId,
+      select: "id, tenant_id",
     });
-    if (line.status !== "posted") throw new Error("Only posted fees can be amended.");
 
-    // Red reversal of original.
-    await supabaseAdmin.from("finance_ledger").insert(
-      withForcedTenantId(
-        {
-          session_id: line.session_id,
-          fee_line_id: line.id,
-          kind: data.delete ? "delete" : "amend",
-          fee_type: line.fee_type,
-          amount_pence: -line.amount_pence,
-          is_reversal: true,
-          note: data.delete ? "Deleted posted fee" : "Amended posted fee (reversal)",
-          created_by: context.userId,
-        },
-        tenantId,
-      ),
+    // Posted fees are immutable; corrections must be linked reversal events, not edits.
+    throw new Error(
+      "Amending or deleting posted fees is not available yet. Posted fees are unchanged.",
     );
-
-    if (data.delete) {
-      await supabaseAdmin
-        .from("finance_fee_lines")
-        .update({ status: "deleted", updated_at: new Date().toISOString() })
-        .eq("id", line.id)
-        .eq("tenant_id", tenantId);
-      return { ok: true };
-    }
-
-    const newPence =
-      data.amountPounds != null ? Math.round(data.amountPounds * 100) : line.amount_pence;
-    await supabaseAdmin
-      .from("finance_fee_lines")
-      .update({
-        amount_pence: newPence,
-        note: data.note ?? line.note,
-        status: "amended",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", line.id)
-      .eq("tenant_id", tenantId);
-
-    await supabaseAdmin.from("finance_ledger").insert(
-      withForcedTenantId(
-        {
-          session_id: line.session_id,
-          fee_line_id: line.id,
-          kind: "amend",
-          fee_type: line.fee_type,
-          amount_pence: newPence,
-          is_reversal: false,
-          note: data.note ?? "Amended posted fee",
-          created_by: context.userId,
-        },
-        tenantId,
-      ),
-    );
-
-    return { ok: true };
   });
 
 export type EnrichedLedgerRow = {

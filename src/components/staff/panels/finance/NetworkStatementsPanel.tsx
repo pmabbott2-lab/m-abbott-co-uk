@@ -3,16 +3,22 @@ import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   allocateNetworkLine,
   annotateNetworkLine,
+  confirmNetworkStatementReceivedDate,
+  deallocateNetworkLine,
   getNetworkStatementDetail,
   getOrCreateNetworkStatement,
   listNetworkStatementMonths,
   parseNetworkStatementWithAi,
+  setNetworkLineSkip,
+  setNetworkLineTransactionDate,
+  setNetworkStatementDeclaredTotal,
   validateNetworkStatement,
 } from "@/lib/network-commission.functions";
 import { FEE_TYPE_LABELS } from "@/lib/finance.functions";
@@ -58,6 +64,11 @@ export function NetworkStatementsPanel() {
   const detailFn = useServerFn(getNetworkStatementDetail);
   const parseFn = useServerFn(parseNetworkStatementWithAi);
   const allocateFn = useServerFn(allocateNetworkLine);
+  const deallocateFn = useServerFn(deallocateNetworkLine);
+  const skipFn = useServerFn(setNetworkLineSkip);
+  const lineDateFn = useServerFn(setNetworkLineTransactionDate);
+  const receivedFn = useServerFn(confirmNetworkStatementReceivedDate);
+  const declaredFn = useServerFn(setNetworkStatementDeclaredTotal);
   const annotateFn = useServerFn(annotateNetworkLine);
   const validateFn = useServerFn(validateNetworkStatement);
 
@@ -73,6 +84,13 @@ export function NetworkStatementsPanel() {
   const [showPaste, setShowPaste] = useState(false);
   const [sessionByLine, setSessionByLine] = useState<Record<string, string>>({});
   const [noteByLine, setNoteByLine] = useState<Record<string, string>>({});
+  const [dateByLine, setDateByLine] = useState<Record<string, string>>({});
+  const [reasonByLine, setReasonByLine] = useState<Record<string, string>>({});
+  const [receivedDate, setReceivedDate] = useState("");
+  const [receivedConfirmed, setReceivedConfirmed] = useState(false);
+  const [receivedEvidence, setReceivedEvidence] = useState("");
+  const [declaredPounds, setDeclaredPounds] = useState("");
+  const [unlockReason, setUnlockReason] = useState("");
 
   const effectivePeriod = periodMonth || monthsQ.data?.months?.[0]?.periodMonth || "";
 
@@ -96,7 +114,7 @@ export function NetworkStatementsPanel() {
   const parse = useMutation({
     mutationFn: (text: string) =>
       parseFn({
-        data: { statementId: statementId!, rawText: text, replaceExisting: true },
+        data: { statementId: statementId!, rawText: text },
       }),
     onSuccess: (res) => {
       toast.success(`Parsed ${res.lineCount} line(s)`);
@@ -106,8 +124,13 @@ export function NetworkStatementsPanel() {
   });
 
   const lines = detailQ.data?.lines ?? [];
-  const status = detailQ.data?.statement?.status as string | undefined;
+  const statement = detailQ.data?.statement;
+  const status = statement?.status as string | undefined;
   const locked = status === "validated" || status === "locked";
+  const refreshDetail = () =>
+    qc.invalidateQueries({ queryKey: ["network-statement-detail", statementId] });
+  const errorToast = (fallback: string) => (e: unknown) =>
+    toast.error(e instanceof Error ? e.message : fallback);
 
   const onFileChosen = async (file: File | null) => {
     if (!file || !statementId || locked) return;
@@ -131,11 +154,80 @@ export function NetworkStatementsPanel() {
           sessionId: sessionByLine[lineId] || undefined,
         },
       }),
-    onSuccess: () => {
-      toast.success("Allocated as draft fee on customer case — submit fees there to pay commission");
-      qc.invalidateQueries({ queryKey: ["network-statement-detail", statementId] });
+    onSuccess: (res) => {
+      toast.success(
+        res.created
+          ? `Allocated as a draft fee on the customer case (fee date ${res.feeEventDate})`
+          : "Already allocated to this case",
+      );
+      refreshDetail();
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Allocate failed"),
+    onError: errorToast("Allocate failed"),
+  });
+
+  const deallocate = useMutation({
+    mutationFn: (lineId: string) =>
+      deallocateFn({ data: { lineId, reason: reasonByLine[lineId] ?? "" } }),
+    onSuccess: () => {
+      toast.success("Deallocated — the draft fee was voided");
+      refreshDetail();
+    },
+    onError: errorToast("Deallocate failed"),
+  });
+
+  const skip = useMutation({
+    mutationFn: (v: { lineId: string; skip: boolean }) =>
+      skipFn({
+        data: { lineId: v.lineId, skip: v.skip, reason: reasonByLine[v.lineId] || undefined },
+      }),
+    onSuccess: (res) => {
+      toast.success(res.status === "skipped" ? "Line skipped" : "Skip removed");
+      refreshDetail();
+    },
+    onError: errorToast("Could not update skip"),
+  });
+
+  const lineDate = useMutation({
+    mutationFn: (lineId: string) =>
+      lineDateFn({ data: { lineId, transactionDate: dateByLine[lineId] || null } }),
+    onSuccess: () => {
+      toast.success("Transaction date saved");
+      refreshDetail();
+    },
+    onError: errorToast("Could not save the date"),
+  });
+
+  const confirmReceived = useMutation({
+    mutationFn: () =>
+      receivedFn({
+        data: {
+          statementId: statementId!,
+          receivedDate,
+          confirmed: true,
+          evidence: receivedEvidence || undefined,
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Received date confirmed");
+      setReceivedConfirmed(false);
+      refreshDetail();
+    },
+    onError: errorToast("Could not confirm the received date"),
+  });
+
+  const saveDeclared = useMutation({
+    mutationFn: () =>
+      declaredFn({
+        data: {
+          statementId: statementId!,
+          declaredTotalPence: Math.round(Number(declaredPounds) * 100),
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Declared total saved");
+      refreshDetail();
+    },
+    onError: errorToast("Could not save the declared total"),
   });
 
   const annotate = useMutation({
@@ -150,9 +242,16 @@ export function NetworkStatementsPanel() {
 
   const validate = useMutation({
     mutationFn: (action: "validate" | "unlock") =>
-      validateFn({ data: { statementId: statementId!, action } }),
+      validateFn({
+        data: {
+          statementId: statementId!,
+          action,
+          reason: action === "unlock" ? unlockReason : undefined,
+        },
+      }),
     onSuccess: (res) => {
       toast.success(res.status === "validated" ? "Statement validated" : "Statement unlocked");
+      setUnlockReason("");
       qc.invalidateQueries({ queryKey: ["network-statement-detail", statementId] });
       qc.invalidateQueries({ queryKey: ["network-statement-months"] });
     },
@@ -165,8 +264,10 @@ export function NetworkStatementsPanel() {
       .filter((l) => l.allocation_status === "allocated")
       .reduce((s, l) => s + Number(l.amount_received_pence ?? 0), 0);
     const unmatched = lines.filter((l) => l.allocation_status === "unmatched").length;
-    return { received, allocated, unmatched };
-  }, [lines]);
+    const declared =
+      statement?.declared_total_pence == null ? null : Number(statement.declared_total_pence);
+    return { received, allocated, unmatched, declared };
+  }, [lines, statement]);
 
   if (monthsQ.data?.migrationRequired) {
     return (
@@ -184,8 +285,9 @@ export function NetworkStatementsPanel() {
           <h3 className="font-semibold text-lg">Network statements</h3>
           <p className="text-sm text-muted-foreground mt-1">
             Upload a monthly network commission file. AI extracts lines, you allocate them onto
-            customer cases as draft fees, then submit fees on the case to drive advisor / introducer
-            payables. Introducers earn on fee and mortgage fee only (not insurance or other).
+            customer cases as draft fees, then validate the month once every line is allocated or
+            skipped and the declared total reconciles. Each fee is dated from its line transaction
+            date, or the confirmed statement received date. Posting is not available yet.
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
@@ -235,13 +337,94 @@ export function NetworkStatementsPanel() {
                   </Button>
                 )}
                 {locked && (
-                  <Button
-                    variant="outline"
-                    disabled={validate.isPending}
-                    onClick={() => validate.mutate("unlock")}
-                  >
-                    Unlock
-                  </Button>
+                  <>
+                    <Input
+                      className="w-64"
+                      placeholder="Reason for unlocking (Owner only)"
+                      value={unlockReason}
+                      onChange={(e) => setUnlockReason(e.target.value)}
+                    />
+                    <Button
+                      variant="outline"
+                      disabled={validate.isPending || unlockReason.trim().length === 0}
+                      onClick={() => validate.mutate("unlock")}
+                    >
+                      Unlock
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-4 rounded-lg border p-3">
+              <div className="space-y-2">
+                <Label htmlFor="network-received-date">Statement received date</Label>
+                <p className="text-xs text-muted-foreground">
+                  {statement?.received_date
+                    ? `Confirmed: ${statement.received_date}`
+                    : "Not confirmed. Used only for lines without their own transaction date."}
+                </p>
+                {!locked && (
+                  <>
+                    <Input
+                      id="network-received-date"
+                      type="date"
+                      value={receivedDate}
+                      onChange={(e) => setReceivedDate(e.target.value)}
+                    />
+                    <Input
+                      placeholder="Evidence (e.g. network email of 3 Nov)"
+                      value={receivedEvidence}
+                      onChange={(e) => setReceivedEvidence(e.target.value)}
+                    />
+                    <label className="flex items-center gap-2 text-xs">
+                      <Checkbox
+                        checked={receivedConfirmed}
+                        onCheckedChange={(v) => setReceivedConfirmed(v === true)}
+                      />
+                      I confirm this is the date the statement was received from the network
+                    </label>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!receivedDate || !receivedConfirmed || confirmReceived.isPending}
+                      onClick={() => confirmReceived.mutate()}
+                    >
+                      Confirm received date
+                    </Button>
+                  </>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="network-declared-total">Declared statement total (£)</Label>
+                <p className="text-xs text-muted-foreground">
+                  {totals.declared == null
+                    ? "Not set. Required before validation."
+                    : `Declared: ${pounds(totals.declared)}`}
+                </p>
+                {!locked && (
+                  <>
+                    <Input
+                      id="network-declared-total"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={declaredPounds}
+                      onChange={(e) => setDeclaredPounds(e.target.value)}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={
+                        declaredPounds.trim() === "" ||
+                        !(Number(declaredPounds) >= 0) ||
+                        saveDeclared.isPending
+                      }
+                      onClick={() => saveDeclared.mutate()}
+                    >
+                      Save declared total
+                    </Button>
+                  </>
                 )}
               </div>
             </div>
@@ -298,7 +481,10 @@ export function NetworkStatementsPanel() {
           <div className="rounded-2xl border bg-card p-6 space-y-3">
             <div className="flex flex-wrap gap-4 text-sm">
               <span>
-                Received <strong>{pounds(totals.received)}</strong>
+                Declared <strong>{totals.declared == null ? "—" : pounds(totals.declared)}</strong>
+              </span>
+              <span>
+                Lines total <strong>{pounds(totals.received)}</strong>
               </span>
               <span>
                 Allocated <strong>{pounds(totals.allocated)}</strong>
@@ -333,34 +519,111 @@ export function NetworkStatementsPanel() {
                           {line.network_product ? ` · ${line.network_product}` : ""}
                           {" · "}
                           <span className="capitalize">{line.allocation_status}</span>
+                          {line.skip_reason ? ` (${line.skip_reason})` : ""}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {line.transaction_date
+                            ? `Transaction date ${line.transaction_date}${
+                                line.transaction_date_source === "statement_parser"
+                                  ? " (from statement, provisional until validated)"
+                                  : " (entered by staff)"
+                              }`
+                            : "No transaction date — the confirmed received date will be used"}
                         </div>
                       </div>
                     </div>
                     {!locked && line.allocation_status !== "allocated" && (
                       <div className="grid sm:grid-cols-[1fr_auto] gap-2 items-end">
                         <div className="space-y-1">
-                          <Label className="text-xs">Session ID (optional if auto-matched)</Label>
+                          <Label className="text-xs">Transaction date</Label>
                           <Input
-                            placeholder={
-                              line.matched_session_id
-                                ? `Matched ${String(line.matched_session_id).slice(0, 8)}…`
-                                : "Paste interview session UUID"
-                            }
-                            value={sessionByLine[id] ?? ""}
+                            type="date"
+                            value={dateByLine[id] ?? line.transaction_date ?? ""}
                             onChange={(e) =>
-                              setSessionByLine((prev) => ({ ...prev, [id]: e.target.value }))
+                              setDateByLine((prev) => ({ ...prev, [id]: e.target.value }))
                             }
                           />
                         </div>
                         <Button
                           size="sm"
-                          disabled={allocate.isPending}
-                          onClick={() => allocate.mutate(id)}
+                          variant="outline"
+                          disabled={lineDate.isPending || dateByLine[id] === undefined}
+                          onClick={() => lineDate.mutate(id)}
                         >
-                          Allocate
+                          Save date
                         </Button>
                       </div>
                     )}
+                    {!locked && (
+                      <div className="grid sm:grid-cols-[1fr_auto] gap-2 items-end">
+                        <Input
+                          placeholder={
+                            line.allocation_status === "allocated"
+                              ? "Reason for deallocating"
+                              : "Reason for skipping"
+                          }
+                          value={reasonByLine[id] ?? ""}
+                          onChange={(e) =>
+                            setReasonByLine((prev) => ({ ...prev, [id]: e.target.value }))
+                          }
+                        />
+                        {line.allocation_status === "allocated" ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={deallocate.isPending || !reasonByLine[id]?.trim()}
+                            onClick={() => deallocate.mutate(id)}
+                          >
+                            Deallocate
+                          </Button>
+                        ) : line.allocation_status === "skipped" ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={skip.isPending}
+                            onClick={() => skip.mutate({ lineId: id, skip: false })}
+                          >
+                            Unskip
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={skip.isPending || !reasonByLine[id]?.trim()}
+                            onClick={() => skip.mutate({ lineId: id, skip: true })}
+                          >
+                            Skip line
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                    {!locked &&
+                      line.allocation_status !== "allocated" &&
+                      line.allocation_status !== "skipped" && (
+                        <div className="grid sm:grid-cols-[1fr_auto] gap-2 items-end">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Session ID (optional if auto-matched)</Label>
+                            <Input
+                              placeholder={
+                                line.matched_session_id
+                                  ? `Matched ${String(line.matched_session_id).slice(0, 8)}…`
+                                  : "Paste interview session UUID"
+                              }
+                              value={sessionByLine[id] ?? ""}
+                              onChange={(e) =>
+                                setSessionByLine((prev) => ({ ...prev, [id]: e.target.value }))
+                              }
+                            />
+                          </div>
+                          <Button
+                            size="sm"
+                            disabled={allocate.isPending}
+                            onClick={() => allocate.mutate(id)}
+                          >
+                            Allocate
+                          </Button>
+                        </div>
+                      )}
                     <div className="grid sm:grid-cols-[1fr_auto] gap-2 items-end">
                       <Input
                         placeholder="Annotation"
