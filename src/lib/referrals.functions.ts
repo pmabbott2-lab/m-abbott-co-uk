@@ -853,7 +853,32 @@ export const listAllReferrals = createServerFn({ method: "GET" })
 
 // ---------------------------------------------------------------------------
 // ADMIN: update a referral's bonus_status (and optionally its status / notes).
+// Outcomes: "applied" (this request changed the row), "already_applied" (every requested value
+// was already stored; nothing written); a stale request or a refused change throws.
 // ---------------------------------------------------------------------------
+type ReferralBonusRow = {
+  id: string;
+  tenant_id: string | null;
+  referral_code_id: string | null;
+  bonus_status: string | null;
+  status: string | null;
+  notes: string | null;
+};
+
+const REFERRAL_BONUS_CONFLICT_MESSAGE =
+  "This referral bonus was changed by someone else. Refresh and try again.";
+
+function holdsRequestedBonusValues(
+  row: ReferralBonusRow,
+  patch: { bonus_status?: string; status?: string; notes?: string | null },
+): boolean {
+  return (
+    (patch.bonus_status === undefined || row.bonus_status === patch.bonus_status) &&
+    (patch.status === undefined || row.status === patch.status) &&
+    (patch.notes === undefined || (row.notes ?? null) === patch.notes)
+  );
+}
+
 export const updateReferralBonusStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
@@ -880,7 +905,7 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
 
     const { data: referralRow, error: loadErr } = await supabaseAdmin
       .from("referrals")
-      .select("id, tenant_id, referral_code_id, bonus_status")
+      .select("id, tenant_id, referral_code_id, bonus_status, status, notes")
       .eq("id", data.id)
       .maybeSingle();
     if (loadErr) {
@@ -896,6 +921,8 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
               tenant_id: string | null;
               referral_code_id: string | null;
               bonus_status: string | null;
+              status: string | null;
+              notes: string | null;
             },
           ],
           tenantId,
@@ -939,21 +966,43 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
     if (data.status) patch.status = data.status;
     if (data.notes !== undefined) patch.notes = data.notes || null;
 
+    // Only an explicit replay (every requested value already stored) succeeds without a write.
+    if (holdsRequestedBonusValues(owned, patch)) {
+      return { ok: true, outcome: "already_applied" as const };
+    }
+
     // Legacy tenantless referrals stay tenantless; they are matched through their owned code.
     // The update applies only while the bonus status is still the one checked above, so a bonus
     // paid in the meantime is never overwritten.
     const unchanged = supabaseAdmin.from("referrals").update(patch).eq("id", data.id);
     const scopedUpdate =
       current === null ? unchanged.is("bonus_status", null) : unchanged.eq("bonus_status", current);
-    const { error } = owned.tenant_id
-      ? await scopedUpdate.eq("tenant_id", tenantId)
-      : await scopedUpdate.is("tenant_id", null).eq("referral_code_id", owned.referral_code_id);
+    const ownedUpdate = owned.tenant_id
+      ? scopedUpdate.eq("tenant_id", tenantId)
+      : scopedUpdate.is("tenant_id", null).eq("referral_code_id", owned.referral_code_id);
+    const { data: updated, error } = await ownedUpdate.select("id");
     if (error) {
       if (isMissingTableError(error)) throw new Error("Run the Refer-a-friend migration first.");
       throw new Error(error.message);
     }
+    if ((updated ?? []).length === 1) return { ok: true, outcome: "applied" as const };
 
-    return { ok: true };
+    // Nothing matched: the bonus changed after it was read. Success only if the concurrent change
+    // already stored exactly what was requested; otherwise this request is stale.
+    const { data: latestRow, error: reloadErr } = await supabaseAdmin
+      .from("referrals")
+      .select("id, tenant_id, referral_code_id, bonus_status, status, notes")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (reloadErr) throw new Error(reloadErr.message);
+    const [latest] = latestRow
+      ? await scopeReferralRowsToTenant(supabaseAdmin, [latestRow as ReferralBonusRow], tenantId)
+      : [];
+    if (!latest) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+    if (holdsRequestedBonusValues(latest, patch)) {
+      return { ok: true, outcome: "already_applied" as const };
+    }
+    throw new Error(REFERRAL_BONUS_CONFLICT_MESSAGE);
   });
 
 // ---------------------------------------------------------------------------

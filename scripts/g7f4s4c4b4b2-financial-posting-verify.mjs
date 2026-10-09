@@ -8,7 +8,8 @@
  * reversal, correction, reassignment, clawback, settlement and exception resolution are Owner-only;
  * payout status is Owner/Supervisor with immutable transition history; paid is terminal.
  *
- * The real B3, B4a, B4b1 and B4b2 migrations are applied verbatim to an in-process PostgreSQL
+ * The real B3, B4a, B4b1 and B4b2 migrations (B4b2 followed by its F1 payout lock-order
+ * migration, as deployed) are applied verbatim to an in-process PostgreSQL
  * (PGlite, WASM) holding the staging shapes (column order, enums, keys, grants, policies), seeded
  * with the staging pattern. The real server functions (finance, network statements, referrals,
  * sessions) run against it through a fake PostgREST layer on a non-routable host; service-role
@@ -93,10 +94,14 @@ const ATTRIBUTION_REL = "src/lib/introducer-attribution.ts";
 const ADMIN_ACCESS_REL = "src/lib/admin-access.ts";
 const SESSION_ROUTE_REL = "src/routes/_authenticated/sessions.$sessionId.tsx";
 const SELF_REL = "scripts/g7f4s4c4b4b2-financial-posting-verify.mjs";
+const F1_REL = "supabase/migrations/20261008190000_gate_g7f4s4c4b4b2f1_payout_case_lock_order.sql";
+const F1_VERIFIER_REL = "scripts/g7f4s4c4b4b2f1-concurrency-verify.mjs";
 const BASELINE_SHA = "bc5e29e767be96f157d5faf737f48a7f88be0359";
 const AUTHORISED = [
   B4B2_REL,
+  F1_REL,
   SELF_REL,
+  F1_VERIFIER_REL,
   FINANCE_REL,
   REFERRALS_REL,
   SESSIONS_REL,
@@ -109,6 +114,8 @@ const AUTHORISED = [
 ];
 
 const b4b2Sql = read(B4B2_REL);
+/** What staging runs: B4b2, then the F1 forward-only replacement of set_commission_payout_status. */
+const appliedSql = `${b4b2Sql}\n${read(F1_REL)}`;
 const b4b1Sql = read(B4B1_REL);
 const b4aSql = read(B4A_REL);
 const b3Sql = read(B3_REL);
@@ -980,7 +987,7 @@ async function preB4b1Db(mutate = null) {
   return db;
 }
 
-const applyMigration = (db, text = b4b2Sql) => outcome(() => execOn(db, text));
+const applyMigration = (db, text = appliedSql) => outcome(() => execOn(db, text));
 /** A fresh database at the staging post-B4b1 state (the B4b2 baseline). */
 async function preB4b2Db(mutate = null) {
   const db = await preB4b1Db();
@@ -4771,11 +4778,17 @@ async function checkH3Network() {
     .filter((f) => !f.startsWith("brand/") && !f.startsWith("docs/legal/"));
   const all = [...new Set([...changed, ...untracked])];
   const outside = all.filter((f) => !AUTHORISED.includes(f));
-  const historic = all.filter((f) => f.startsWith("scripts/") && f !== SELF_REL);
-  const migrations = all.filter((f) => f.startsWith("supabase/migrations/"));
+  const historic = all.filter(
+    (f) => f.startsWith("scripts/") && f !== SELF_REL && f !== F1_VERIFIER_REL,
+  );
+  const migrations = all.filter((f) => f.startsWith("supabase/migrations/")).sort();
   ok(
-    "B4B2-71 only authorised files changed against the B4b1 baseline: one new migration, no historic verifier, generated types or earlier migration edited",
-    outside.length === 0 && historic.length === 0 && migrations.length === 1 && migrations[0] === B4B2_REL,
+    "B4B2-71 only authorised files changed against the B4b1 baseline: exactly the B4b2 migration and its F1 lock-order migration, no historic verifier, generated types or earlier migration edited",
+    outside.length === 0 &&
+      historic.length === 0 &&
+      migrations.length === 2 &&
+      migrations[0] === B4B2_REL &&
+      migrations[1] === F1_REL,
     JSON.stringify({ outside, historic, migrations }),
   );
 }
@@ -4846,7 +4859,7 @@ async function ncSafe(label, fn) {
     nc(label, { effect: false, caught: false, detail: e instanceof Error ? e.message : String(e) });
   }
 }
-const sqlMutant = (pairs) => mutate(b4b2Sql, pairs);
+const sqlMutant = (pairs) => mutate(appliedSql, pairs);
 /** Fresh post-B4b1 database migrated with the mutant, seeded like the main run, then `check`. */
 async function onMutant(text, check) {
   if (!text) return { migrationFailed: "anchor missing" };
@@ -4906,11 +4919,11 @@ await ncSafe("NC03", async () => {
   });
 });
 await ncSafe("NC04", async () => {
-  const text = b4b2Sql.replace(
+  const text = appliedSql.replace(
     /(resolve_session_advisers_as_of\(p_tenant_id, v_fee\.session_id,\s*)v_fee\.fee_event_at\)/g,
     "$1now())",
   );
-  const r = await onMutant(text === b4b2Sql ? null : text, checkAdviserAsOf);
+  const r = await onMutant(text === appliedSql ? null : text, checkAdviserAsOf);
   nc("NC04 advisers resolved at now() → the adviser assigned after the fee date earns; B4B2-18 rejects", {
     effect: r.acc?.includes(U.advA2),
     caught: r.pass === false,

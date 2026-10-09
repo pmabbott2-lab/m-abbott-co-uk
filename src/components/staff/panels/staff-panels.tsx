@@ -2559,11 +2559,16 @@ export function RafLinksAccessCard() {
   const updateBonus = useMutation({
     mutationFn: (vars: { id: string; bonusStatus: "none" | "eligible" | "paid" }) =>
       updateFn({ data: vars }),
-    onSuccess: () => {
+    onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ["all-referrals"] });
-      toast.success("Bonus status updated");
+      toast.success(
+        r.outcome === "already_applied" ? "Bonus status was already set" : "Bonus status updated",
+      );
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not update bonus"),
+    onError: (e: unknown) => {
+      qc.invalidateQueries({ queryKey: ["all-referrals"] });
+      toast.error(e instanceof Error ? e.message : "Could not update bonus");
+    },
   });
 
   const links = (linksQ.data ?? []) as ReferralLink[];
