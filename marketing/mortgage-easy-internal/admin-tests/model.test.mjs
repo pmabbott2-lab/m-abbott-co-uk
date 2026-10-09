@@ -6,6 +6,7 @@ import {
   computeCase, computeMonth, forecast, sumMonths, threeYear, reverseTarget,
   cleanRates, cleanPlan, cleanScenario, blankScenario, WORKING_WEEKS, WEEKS_PER_MONTH, LEAD_WEEKS_PER_MONTH,
   computeIntroducer, introducerForecast, sumByYear,
+  cleanStart, monthLabel, monthsToYearEnd, calendarSlice, sumAll, adviserForecast, planFigures,
 } from "../../mortgage-hub-website/admin/model.js";
 
 const perWeek = (monthly) => monthly / WEEKS_PER_MONTH;
@@ -161,4 +162,58 @@ test("validation rejects bad numbers and requires a plan name", () => {
   assert.equal(plan.years.base.y2, null);
   assert.throws(() => cleanPlan({ name: "X", years: { base: { y3: { remortgage: { seenOwnWeek: -1 } } } } }));
   assert.throws(() => cleanPlan({ name: "X", scenarios: { base: { remortgage: { seenOwnWeek: 151 } } } }));
+});
+
+test("plans keep a supervisor and a start month", () => {
+  const plan = cleanPlan({ name: "A", adviser: "Ann", supervisor: " Sam ", start: { year: 2027, month: 3 } });
+  assert.equal(plan.supervisor, "Sam");
+  assert.deepEqual(plan.start, { year: 2027, month: 3 });
+  assert.equal(cleanPlan({ name: "B" }).start, null);
+  assert.deepEqual(cleanPlan({ name: "I", kind: "introducer", start: { year: 2027, month: 12 } }).start, { year: 2027, month: 12 });
+  assert.equal(cleanPlan({ name: "I", kind: "introducer", supervisor: "Sam" }).supervisor, undefined);
+  assert.throws(() => cleanStart({ year: 2027, month: 13 }));
+  assert.throws(() => cleanStart({ year: 1999, month: 1 }));
+  assert.throws(() => cleanStart({ year: 2027.5, month: 1 }));
+});
+
+test("calendar years line up with the plan's start month", () => {
+  const start = { year: 2027, month: 3 };
+  assert.equal(monthLabel(start), "Mar 2027");
+  assert.equal(monthLabel(start, 10), "Jan 2028");
+  assert.equal(monthsToYearEnd(start, 2027), 12);
+  assert.equal(monthsToYearEnd(start, 2028), 22);
+  const months = Array.from({ length: 22 }, (_, i) => ({ month: i + 1, adviser: i + 1 }));
+  const y2027 = calendarSlice(months, start, 2027);
+  assert.deepEqual(y2027.map((m) => m.adviser), [0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.equal(y2027[0].planMonth, null);
+  assert.equal(y2027[2].planMonth, 1);
+  assert.deepEqual(calendarSlice(months, start, 2028).map((m) => m.adviser), [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
+  assert.equal(sumAll(calendarSlice(months, start, 2026)).adviser, 0);
+});
+
+test("adviser forecast uses year 2 and 3 appointments, then carries year 3 on", () => {
+  const plan = cleanPlan({ name: "A", scenarios: { base: scenario }, years: { base: { y3: { remortgage: { seenOwnWeek: perWeek(20) } } } }, rates });
+  plan.rates = rates;
+  const months = adviserForecast(plan, 48);
+  const three = threeYear(plan.scenarios.base, plan.years.base, rates);
+  for (let i = 0; i < 36; i++) close(months[i].adviser, three.months[i].adviser, `month ${i + 1}`);
+  close(months[47].adviser, months[40].adviser, "year 4 steady at year 3 level");
+});
+
+test("plan figures: steady month, first 12 months and calendar year", () => {
+  const plan = { ...cleanPlan({ name: "A", scenarios: { base: scenario } }), rates };
+  const start = { year: 2027, month: 7 };
+  const f = planFigures(plan, start, 2027);
+  const steady = computeMonth(plan.scenarios.base, rates).total;
+  close(f.steady.adviser, steady.adviser, "steady adviser");
+  close(f.steady.total, steady.adviser + steady.introducer + steady.me, "total received splits in full");
+  close(f.first12.adviser, sumMonths(forecast(Array(12).fill(plan.scenarios.base), rates)).adviser, "first 12 months");
+  const months = adviserForecast(plan, 6);
+  close(f.calendar.adviser, sumAll(months).adviser, "Jul to Dec 2027 = first 6 plan months");
+  const intro = { ...cleanPlan({ name: "I", kind: "introducer", inputs: introInputs }), rates };
+  const fi = planFigures(intro, { year: 2027, month: 1 }, 2029);
+  const all = introducerForecast(introInputs, rates, 36);
+  close(fi.calendar.introducer, sumAll(all.slice(24, 36)).introducer, "third calendar year");
+  close(fi.calendar.total, fi.calendar.adviser + fi.calendar.introducer + fi.calendar.me, "introducer total received");
+  assert.ok(fi.calendar.renewalTotal > 0, "2-year renewals land in year 3");
 });

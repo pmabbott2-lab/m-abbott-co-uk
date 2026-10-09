@@ -92,6 +92,35 @@ Renewals      = Completions × retained %, split between 2-year and 5-year terms
 The forecast runs 7 years so both renewal waves show. Starting inputs for new introducer plans are
 stored as `introducerTemplate` in the `assumptions` KV record.
 
+## What each page shows
+
+The calculator is built to be shown to the person the plan is for, so each tab shows only that
+person's earnings.
+
+- **Adviser plans** show the adviser's earnings only. The external introducer commission is kept
+  under Assumptions because the owner page needs it, but the introducer's and Mortgage Easy's
+  shares are not shown on this tab.
+- **Introducer plans** show the introducer's commission only. Procuration appears as a single
+  "net procuration fee" (% of the loan Mortgage Easy receives); the lender's rate and HLP's share
+  are not shown. Editing it keeps HLP's share and scales the lender rate.
+- **Owner analytics** at `/admin/owner/` shows total received and the company split (adviser,
+  external introducer, Mortgage Easy margin) across saved plans, with a per-supervisor rollup.
+  There is no tab or link to it from the calculator, so it can't be opened by accident during a
+  demo. It sits under `/admin*`, so the same owner-only Access application and server check
+  protect it; there is no separate password. Introducer plans are only added to its totals when
+  "Add to totals" is ticked (their leads may already be in advisers' introduced appointments),
+  and never while a supervisor filter is chosen.
+
+## Plans, supervisors and calendar years
+
+- Plans are saved under the adviser's or introducer's name. Adviser plans also take an optional
+  supervisor. The finder bar filters saved plans by supervisor and person, and the collapsible
+  summary under the calculator lists the plans shown, with supervisor subtotals.
+- Each plan has a start month and year. "First 12 months" runs from that start; "annualised" is a
+  steady year once payments are flowing; the **Calendar year** panel shows January to December of
+  the chosen year, with nothing before the start month. For adviser plans, years 2 and 3 use the
+  appointments under Three-year growth and year 3 carries on after that.
+
 ## Running locally
 
 ```
@@ -118,5 +147,5 @@ node marketing/mortgage-easy-internal/admin-tests/bundle-check.mjs /tmp/me-fnbui
 3. Seed defaults: `npx wrangler kv key put assumptions --path marketing/mortgage-easy-internal/admin-private.local/defaults.json --namespace-id <id> --remote`
    (remove the illustrative adviser inputs first if they should not be the starting template).
 4. Push. Then test from outside on every host: `/admin`, `/admin/`, `/admin/app.js`,
-   `/api/admin/assumptions`, `/ADMIN/`, `//admin/`, `/%61dmin/`, a forged token, and an email that
+   `/admin/owner/`, `/admin/owner/owner.js`, `/api/admin/assumptions`, `/ADMIN/`, `//admin/`, `/%61dmin/`, a forged token, and an email that
    is allowed on the site but not on admin. Expect refusal or no data in every case.

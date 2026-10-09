@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow, noarchive" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Owner analytics · Mortgage Easy admin</title>
+  <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/admin/admin.css?v=7" />
+  <script type="module" src="/admin/owner/owner.js?v=7"></script>
+</head>
+<body>
+  <header class="adm-header">
+    <div class="adm-wrap adm-header-inner">
+      <img class="adm-logo no-print" src="/assets/logo-on-dark.svg" width="150" height="36" alt="Mortgage Easy" />
+      <img class="adm-logo print-only" src="/assets/logo.svg" width="150" height="36" alt="Mortgage Easy" />
+      <div class="adm-title">
+        <strong>Owner analytics</strong>
+        <span>Owner only · total received and company split</span>
+      </div>
+      <div class="adm-user" id="user"></div>
+    </div>
+  </header>
+
+  <div class="adm-status" id="status" role="status" aria-live="polite"></div>
+
+  <main class="adm-wrap adm-main">
+    <section class="card adm-toolbar adm-finder" aria-label="View">
+      <label>Calendar year<select id="year"></select></label>
+      <label>Figures for<select id="basis">
+        <option value="calendar">Calendar year</option>
+        <option value="first12">First 12 months of each plan</option>
+        <option value="annual">Annualised (steady year)</option>
+      </select></label>
+      <label>Supervisor<select id="supervisor"><option value="">All supervisors</option></select></label>
+      <label class="check"><span>Introducer plans</span><span><input type="checkbox" id="with-intro" /> Add to totals</span></label>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-ghost" id="btn-print">Print / PDF</button>
+      <button type="button" class="btn btn-ghost" id="btn-csv">Export CSV</button>
+      <a class="btn btn-ghost" href="/admin/">Back to calculator</a>
+    </section>
+
+    <div class="kpis" id="kpis"></div>
+
+    <section class="card panel">
+      <h2 class="panel-title">Company split</h2>
+      <p id="split-note"></p>
+      <div class="grid-2">
+        <div class="chart" id="chart-months"></div>
+        <div class="chart chart-donut" id="chart-split"></div>
+      </div>
+    </section>
+
+    <section class="card panel">
+      <h2 class="panel-title">Adviser plans</h2>
+      <p>Each saved adviser plan's Base scenario with its own rates and commission. Untick a plan to leave it out (for example an older version of the same adviser's plan).</p>
+      <div id="advisers"></div>
+    </section>
+
+    <section class="card panel">
+      <h2 class="panel-title">By supervisor</h2>
+      <div id="supervisors"></div>
+    </section>
+
+    <section class="card panel">
+      <h2 class="panel-title">Introducer plans</h2>
+      <p>Introducer leads may already be counted in advisers' introduced appointments, so these are only added to the totals when "Add to totals" is ticked. They have no supervisor, so they are left out of the totals while a supervisor is chosen. The adviser's share uses the adviser commission stored with each introducer plan.</p>
+      <div id="introducers"></div>
+    </section>
+  </main>
+</body>
+</html>

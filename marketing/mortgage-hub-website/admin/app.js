@@ -1,10 +1,16 @@
 import * as M from "./model.js";
 import { lineChart, donut, groupedBars, funnel } from "./charts.js";
 import { icon } from "./icons.js";
-import { h, gbp, gbp0, count, pctTxt, clone, fmtField, numInput, tableEl, download, toCsv, HOLIDAY_NOTE, SPLIT } from "./ui.js";
+import { h, gbp, gbp0, count, pctTxt, clone, fmtField, numInput, tableEl, download, toCsv, HOLIDAY_NOTE, LEADS_NOTE } from "./ui.js";
 import { createIntroducerView } from "./introducer.js";
 
 const $ = (id) => document.getElementById(id);
+
+/** Demo-safe view: adviser earnings only. Introducer shares and Mortgage Easy's margin are on the owner page. */
+const ADVISER = [{ key: "adviser", label: "Adviser", cls: "c-adviser" }];
+
+const today = new Date();
+const thisMonth = () => ({ year: today.getFullYear(), month: today.getMonth() + 1 });
 
 const state = {
   user: null,
@@ -14,14 +20,17 @@ const state = {
   plan: null,
   planId: null,
   plans: [],
+  filter: { supervisor: "", who: "" },
+  calYear: null,
   scenario: "base",
   caseType: "remortgage",
   panel: "overview",
   dirty: false,
-  firmPlans: null,
-  firmOff: new Set(),
-  target: { who: "adviser", amount: 0 },
+  target: { amount: 0 },
 };
+
+const planStart = () => (state.plan && state.plan.start) || thisMonth();
+const viewYear = () => state.calYear || planStart().year;
 
 /* ---------- status and API ---------- */
 
@@ -73,11 +82,14 @@ function introducerStart() {
 
 function newPlan(kind = state.mode) {
   const rates = clone(state.defaultRates);
-  if (kind === "introducer") return { kind, name: "New introducer plan", introducer: "", notes: "", inputs: introducerStart(), rates };
-  const start = state.assumptions && state.assumptions.adviserTemplate ? state.assumptions.adviserTemplate : M.blankScenario();
+  const start = thisMonth();
+  if (kind === "introducer") {
+    return { kind, name: "New introducer plan", introducer: filterName(state.filter.who), start, notes: "", inputs: introducerStart(), rates };
+  }
+  const template = state.assumptions && state.assumptions.adviserTemplate ? state.assumptions.adviserTemplate : M.blankScenario();
   const scenarios = {};
-  for (const s of M.SCENARIOS) scenarios[s.key] = M.cleanScenario(clone(start));
-  return { kind: "adviser", name: "New plan", adviser: "", notes: "", scenarios, years: emptyYears(), rates };
+  for (const s of M.SCENARIOS) scenarios[s.key] = M.cleanScenario(clone(template));
+  return { kind: "adviser", name: "New plan", adviser: filterName(state.filter.who), supervisor: filterName(state.filter.supervisor), start, notes: "", scenarios, years: emptyYears(), rates };
 }
 
 const whoKey = () => (state.mode === "introducer" ? "introducer" : "adviser");
@@ -113,8 +125,10 @@ const COMMISSION_LABELS = {
   adviserMortgagePct: "Adviser: procuration and fees",
   adviserIntroPct: "Adviser: own-customer introductions",
   adviserProtectionPct: "Adviser: protection and GI",
-  introducerPct: "External introducer",
 };
+const ADVISER_COMMISSION = M.COMMISSION_FIELDS.filter((f) => COMMISSION_LABELS[f.key]);
+/** Back-office rates on the Assumptions panel; the external introducer rate only affects the owner page. */
+const PLAN_RATE_FIELDS = [...M.BUSINESS_RATE_FIELDS, ...M.COMMISSION_FIELDS.filter((f) => f.key === "introducerPct")];
 
 const INPUT_GROUPS = [
   { label: "Appointments seen per week", icon: "calendar", keys: { seenOwnWeek: "Own customers", seenIntroducedWeek: "Introduced" } },
@@ -149,7 +163,7 @@ function buildInputs() {
     }
   }
   grid.append(h("div", { class: "in-group" }, icon("user"), h("span", { text: "Commission (this adviser's terms)" })));
-  for (const f of M.COMMISSION_FIELDS) {
+  for (const f of ADVISER_COMMISSION) {
     const c = field(f, () => state.plan.rates[f.key], (v) => { state.plan.rates[f.key] = v; }, f.label);
     inputSyncs.push(c.sync);
     c.wrap.classList.add("in-span");
@@ -184,6 +198,13 @@ function syncInputs() {
 function syncToolbar() {
   $("plan-name").value = state.plan.name;
   $("plan-adviser").value = state.plan[whoKey()] || "";
+  $("plan-supervisor").value = state.plan.supervisor || "";
+  const start = planStart();
+  ensureYear($("start-year"), start.year);
+  ensureYear($("cal-year"), viewYear());
+  $("start-month").value = String(start.month);
+  $("start-year").value = String(start.year);
+  $("cal-year").value = String(viewYear());
   $("plan-select").value = state.planId || "";
 }
 
@@ -231,8 +252,6 @@ const panels = [
         line("on procuration and fees", (x) => x.adviserMortgage, "is-sub"),
         line("on own-customer introductions", (x) => x.adviserIntro, "is-sub"),
         line("on protection and GI", (x) => x.adviserProtection, "is-sub"),
-        line("External introducer", (x) => x.introducer),
-        line("Mortgage Easy margin", (x) => x.me, "is-me"),
       ]));
       const t = month.total;
       donut(this.chart, [
@@ -343,42 +362,39 @@ const panels = [
     },
   },
   {
-    key: "margin",
-    label: "Mortgage Easy margin",
-    intro: "No costs are deducted: what remains after the adviser and introducer is Mortgage Easy's margin.",
-    update({ month, rates, year1 }) {
-      const parts = (x) => ({
-        fees: M.allocate({ feesOwn: x.feesOwn, feesIntro: x.feesIntro }, rates).me,
-        proc: M.allocate({ procOwn: x.procOwn, procIntro: x.procIntro }, rates).me,
-        policies: M.allocate({ protection: x.protection.net, gi: x.gi.net }, rates).me,
-      });
-      const m = (label, fn, fmt = gbp, cls) => byTypeRow(month, label, fn, fmt, cls);
-      this.body.replaceChildren(tableEl(typeCols, [
-        m("From broker fees", (x) => parts(x).fees),
-        m("From procuration", (x) => parts(x).proc),
-        m("From protection and GI", (x) => parts(x).policies),
-        m("Margin per month", (x) => x.me, gbp, "is-me"),
-        m("Margin per year (steady)", (x) => x.me * 12, gbp, "is-me"),
-        m("Per appointment seen", (x) => (x.seen > 0 ? x.me / x.seen : 0)),
-        { cells: ["First 12 months (allowing for lags)", "", "", gbp(year1.me)] },
-      ]));
+    key: "calendar",
+    label: "Calendar year",
+    build(body) {
+      this.note = h("p");
+      this.chart = h("div", { class: "chart" });
+      this.table = h("div");
+      body.append(this.note, this.chart, this.table);
+    },
+    update({ cal, start, year }) {
+      this.note.textContent = `What this adviser earns in ${year}, month by month, with the plan starting in ${M.monthLabel(start)}. ` +
+        "Years 2 and 3 use the appointments under Three-year growth, and year 3 carries on after that. Change the year at the top of the page.";
+      lineChart(this.chart, cal.map((m) => ({ label: m.label, values: m })), ADVISER, { title: `Calendar ${year}` });
+      const total = M.sumAll(cal);
+      const row = (label, m, cls) => ({ cls, cells: [label, count(m.written), count(m.completions), gbp(m.adviser)] });
+      this.table.replaceChildren(tableEl(["Month", "Written", "Completions paid", "Adviser"],
+        [...cal.map((m) => row(`${m.label} ${year}`, m, m.planMonth ? null : "is-sub")), row(`Total ${year}`, total, "is-total")]));
     },
   },
   {
     key: "forecast",
     label: "12-month forecast",
-    intro: "From a standing start in month 1. Earnings from broker fees arrive in the month written; procuration, protection and GI arrive after each case type's lag.",
+    intro: "From a standing start in the plan's first month. Earnings from broker fees arrive in the month written; procuration, protection and GI arrive after each case type's lag.",
     build(body) {
       this.chart = h("div", { class: "chart" });
       this.table = h("div");
       body.append(this.chart, this.table);
     },
-    update({ months12, year1 }) {
-      lineChart(this.chart, months12.map((m) => ({ label: `M${m.month}`, values: m })), SPLIT, { title: "12-month forecast" });
-      const row = (label, m, cls) => ({ cls, cells: [label, count(m.written), count(m.completions), gbp(m.adviser), gbp(m.introducer), gbp(m.me)] });
+    update({ months12, year1, start }) {
+      lineChart(this.chart, months12.map((m) => ({ label: M.monthLabel(start, m.month - 1).slice(0, 3), values: m })), ADVISER, { title: "12-month forecast" });
+      const row = (label, m, cls) => ({ cls, cells: [label, count(m.written), count(m.completions), gbp(m.adviser)] });
       this.table.replaceChildren(tableEl(
-        ["Month", "Written", "Completions paid", "Adviser", "Introducer", "Mortgage Easy"],
-        [...months12.map((m) => row(`Month ${m.month}`, m)), row("Total", year1, "is-total")],
+        ["Month", "Written", "Completions paid", "Adviser"],
+        [...months12.map((m) => row(`Month ${m.month} (${M.monthLabel(start, m.month - 1)})`, m)), row("First 12 months", year1, "is-total")],
       ));
     },
   },
@@ -435,35 +451,31 @@ const panels = [
         for (const i of c.inputs) i.placeholder = count(sc[c.t.key][c.f.key]);
       }
       const res = M.threeYear(sc, currentYears(), rates);
-      lineChart(this.chart, res.months.map((m) => ({ label: `M${m.month}`, values: m })), SPLIT, { labelEvery: 3, title: "Three-year forecast" });
+      const start = planStart();
+      lineChart(this.chart, res.months.map((m) => ({ label: M.monthLabel(start, m.month - 1).slice(0, 3), values: m })), ADVISER, { labelEvery: 3, title: "Three-year forecast" });
       const total = M.sumMonths(res.months);
-      const row = (label, y, cls) => ({ cls, cells: [label, count(y.written), count(y.completions), gbp(y.adviser), gbp(y.introducer), gbp(y.me)] });
-      this.table.replaceChildren(tableEl(["", "Written", "Completions paid", "Adviser", "Introducer", "Mortgage Easy"],
-        [...res.years.map((y) => row(`Year ${y.year}`, y)), row("Three years", total, "is-total")]));
+      const row = (label, y, cls) => ({ cls, cells: [label, count(y.written), count(y.completions), gbp(y.adviser)] });
+      const span = (y) => `${M.monthLabel(start, (y - 1) * 12)} to ${M.monthLabel(start, y * 12 - 1)}`;
+      this.table.replaceChildren(tableEl(["", "Written", "Completions paid", "Adviser"],
+        [...res.years.map((y) => row(`Year ${y.year} (${span(y.year)})`, y)), row("Three years", total, "is-total")]));
     },
   },
   {
     key: "target",
     label: "Reverse target",
-    intro: "Enter an annual target. Everything scales with appointments seen, so the answer keeps this scenario's mix of case types, sources and conversion.",
+    intro: "Enter the adviser's annual earnings target. Everything scales with appointments seen, so the answer keeps this scenario's mix of case types, sources and conversion.",
     build(body) {
-      this.who = h("select", { id: "target-who" },
-        h("option", { value: "adviser", text: "Adviser earnings" }),
-        h("option", { value: "me", text: "Mortgage Easy margin" }));
       this.amount = h("input", { type: "number", id: "target-amount", min: "0", step: "any", inputmode: "decimal" });
-      this.who.addEventListener("change", () => { state.target.who = this.who.value; scheduleRender(); });
       this.amount.addEventListener("input", () => { state.target.amount = Number(this.amount.value) || 0; scheduleRender(); });
       this.result = h("div");
       body.append(
-        h("div", { class: "adm-toolbar" },
-          h("label", null, "Target for", this.who),
-          h("label", null, "Annual target (£)", this.amount)),
+        h("div", { class: "adm-toolbar" }, h("label", null, "Annual adviser earnings target (£)", this.amount)),
         this.result,
       );
     },
     update({ sc, rates }) {
-      const r = M.reverseTarget(sc, rates, state.target.who, state.target.amount);
-      const name = state.target.who === "me" ? "Mortgage Easy margin" : "Adviser earnings";
+      const r = M.reverseTarget(sc, rates, "adviser", state.target.amount);
+      const name = "Adviser earnings";
       if (r.perSeen === null || r.factor === null) {
         this.result.replaceChildren(h("p", { class: "note", text: "Enter some appointments and rates first: this scenario currently earns nothing to scale from." }));
         return;
@@ -511,54 +523,18 @@ const panels = [
         row("Adviser / month", (r) => r.m.adviser, gbp, "is-total"),
         row("Adviser / year (steady)", (r) => r.m.adviser * 12),
         row("Adviser, first 12 months", (r) => r.y1.adviser, gbp, "is-sub"),
-        row("Introducer / year (steady)", (r) => r.m.introducer * 12),
-        row("Mortgage Easy / month", (r) => r.m.me, gbp, "is-me"),
-        row("Mortgage Easy / year (steady)", (r) => r.m.me * 12, gbp, "is-me"),
-        row("Mortgage Easy, first 12 months", (r) => r.y1.me, gbp, "is-sub"),
       ]));
-      groupedBars(this.chart, res.map((r) => ({ label: r.s.label, values: { adviser: r.m.adviser * 12, introducer: r.m.introducer * 12, me: r.m.me * 12 } })), SPLIT);
-    },
-  },
-  {
-    key: "firm",
-    label: "Firm view",
-    intro: "Adds up saved adviser plans (one per adviser) using each plan's Base scenario and its own rates and commission. Introducer plans are left out because their leads are already counted as advisers' introduced appointments.",
-    build(body) {
-      this.load = h("button", { type: "button", class: "btn btn-ghost no-print", text: "Load saved plans", onclick: () => loadFirm() });
-      this.result = h("div");
-      body.append(this.load, this.result);
-    },
-    update() {
-      if (!state.firmPlans) {
-        this.result.replaceChildren(h("p", { class: "note", text: "Save a plan for each adviser, then load them here." }));
-        return;
-      }
-      const rows = [];
-      const sum = { adviser: 0, introducer: 0, me: 0, meY1: 0 };
-      for (const p of state.firmPlans) {
-        const on = !state.firmOff.has(p.id);
-        const m = M.computeMonth(p.scenarios.base, p.rates).total;
-        const y1 = M.sumMonths(M.forecast(Array(12).fill(p.scenarios.base), p.rates));
-        if (on) {
-          sum.adviser += m.adviser * 12; sum.introducer += m.introducer * 12; sum.me += m.me * 12; sum.meY1 += y1.me;
-        }
-        const box = h("input", { type: "checkbox", "aria-label": `Include ${p.name}` });
-        box.checked = on;
-        box.addEventListener("change", () => { if (box.checked) state.firmOff.delete(p.id); else state.firmOff.add(p.id); scheduleRender(); });
-        rows.push({ cls: on ? null : "is-sub", cells: [h("span", null, box, " ", p.name, p.adviser ? ` (${p.adviser})` : ""), gbp(m.adviser * 12), gbp(m.introducer * 12), gbp(m.me * 12), gbp(y1.me)] });
-      }
-      rows.push({ cls: "is-me", cells: ["Firm total (ticked plans)", gbp(sum.adviser), gbp(sum.introducer), gbp(sum.me), gbp(sum.meY1)] });
-      this.result.replaceChildren(tableEl(["Plan", "Advisers / year", "Introducers / year", "Mortgage Easy / year", "Mortgage Easy, first 12 months"], rows));
+      groupedBars(this.chart, res.map((r) => ({ label: r.s.label, values: { adviser: r.m.adviser * 12 } })), ADVISER);
     },
   },
   {
     key: "assumptions",
     label: "Assumptions",
-    intro: "Rates for this adviser's plan, saved with the plan, so each adviser can be on different terms. Commission levels are with the inputs. The stored defaults are only the starting point for new plans.",
+    intro: "Rates for this adviser's plan, saved with the plan, so each adviser can be on different terms. The adviser's commission is with the inputs. The stored defaults are only the starting point for new plans.",
     build(body) {
-      this.controls = M.BUSINESS_RATE_FIELDS.map((f) => field(f, () => state.plan.rates[f.key], (v) => { state.plan.rates[f.key] = v; }, f.label));
+      this.controls = PLAN_RATE_FIELDS.map((f) => field(f, () => state.plan.rates[f.key], (v) => { state.plan.rates[f.key] = v; }, f.label));
       const grid = h("div", { class: "in-grid in-grid-one" });
-      M.BUSINESS_RATE_FIELDS.forEach((f, i) => grid.append(
+      PLAN_RATE_FIELDS.forEach((f, i) => grid.append(
         h("label", { class: "in-label", for: this.controls[i].input.id }, f.label, f.hint ? h("span", { class: "field-hint", text: f.hint }) : null),
         this.controls[i].wrap));
       this.derived = h("p", { class: "note" });
@@ -606,9 +582,6 @@ const panels = [
         f("Protection received", `policies × (monthly premium × 12 × commission) × (1 − cancellations)\n${count(r.protection.onRisk)} × (${gbp(c.protectionMonthlyPremium)} × 12 × ${pctTxt(rates.protectionMultiplePct)}) × (1 − ${pctTxt(rates.cancellationPct)}) = ${gbp(r.protection.net)}`),
         f("GI received", `written × with GI × (1 − NTU rate) × (1 − GI NTU) × (annual premium × commission) × (1 − cancellations)\n${count(r.gi.onRisk)} × (${gbp(c.giAnnualPremium)} × ${pctTxt(rates.giCommissionPct)}) × (1 − ${pctTxt(rates.cancellationPct)}) = ${gbp(r.gi.net)}`),
         f("Adviser", `${pctTxt(rates.adviserMortgagePct)} × (procuration + fees) + ${pctTxt(rates.adviserIntroPct)} × (own customers' procuration + fees) + ${pctTxt(rates.adviserProtectionPct)} × (protection + GI)\n${gbp(r.adviserMortgage)} + ${gbp(r.adviserIntro)} + ${gbp(r.adviserProtection)} = ${gbp(r.adviser)}`),
-        f("External introducer", `${pctTxt(rates.introducerPct)} × (introduced customers' procuration + fees)\n${pctTxt(rates.introducerPct)} × ${gbp(r.procIntro + r.feesIntro)} = ${gbp(r.introducer)}`),
-        f("Mortgage Easy margin", `what remains after the adviser and introducer on each line (no costs: the residual is the margin)\n` +
-          `fees ${gbp(M.allocate({ feesOwn: r.feesOwn, feesIntro: r.feesIntro }, rates).me)} + procuration ${gbp(M.allocate({ procOwn: r.procOwn, procIntro: r.procIntro }, rates).me)} + protection and GI ${gbp(M.allocate({ protection: r.protection.net, gi: r.gi.net }, rates).me)} = ${gbp(r.me)}`),
         f("Timing", `Broker fees arrive in the month written. Procuration, protection and GI arrive ${r.lag} month${r.lag === 1 ? "" : "s"} later.`),
         f("HLP (for information)", `completed × average mortgage × procuration rate × HLP share = ${gbp(r.hlpMemo)}. Already excluded above; HLP takes nothing from fees, protection or GI.`),
       );
@@ -617,8 +590,8 @@ const panels = [
 ];
 
 const PANEL_ICONS = {
-  overview: "chart", activity: "funnel", mortgage: "home", protection: "shield", adviser: "user", margin: "building",
-  forecast: "calendar", threeyear: "trend", target: "target", scenarios: "layers", firm: "users", assumptions: "list", formulas: "doc",
+  overview: "chart", activity: "funnel", mortgage: "home", protection: "shield", adviser: "user", calendar: "calendar",
+  forecast: "clock", threeyear: "trend", target: "target", scenarios: "layers", assumptions: "list", formulas: "doc",
 };
 
 function buildPanels() {
@@ -630,7 +603,7 @@ function buildPanels() {
     p.section = h("section", { class: "card panel", "aria-label": p.label });
     p.body = h("div");
     p.section.append(h("h2", { class: "panel-title" }, h("span", { class: "panel-icon" }, icon(PANEL_ICONS[p.key] || "chart")), p.label),
-      p.intro ? h("p", { text: p.intro }) : null, p.body);
+      ...(p.intro ? [h("p", { text: p.intro })] : []), p.body);
     if (p.build) p.build(p.body);
     box.append(p.section);
   }
@@ -650,26 +623,32 @@ function computeContext() {
   const sc = currentScenario();
   const rates = state.plan.rates;
   const months12 = M.forecast(Array(12).fill(sc), rates);
-  return { sc, rates, month: M.computeMonth(sc, rates), months12, year1: M.sumMonths(months12) };
+  const start = planStart();
+  const year = viewYear();
+  const long = M.adviserForecast(state.plan, M.monthsToYearEnd(start, year), state.scenario);
+  return { sc, rates, start, year, month: M.computeMonth(sc, rates), months12, year1: M.sumMonths(months12), cal: M.calendarSlice(long, start, year) };
 }
 
-function renderKpis({ month, year1 }) {
+function renderKpis({ month, year1, cal, start, year }) {
   const t = month.total;
   const kpi = (iconName, label, value, sub, cls = "") => h("div", { class: `card kpi ${cls}` },
     h("span", { class: "kpi-icon" }, icon(iconName)),
     h("div", null, h("div", { class: "kpi-label", text: label }), h("div", { class: "kpi-value", text: value }), h("div", { class: "kpi-sub", text: sub })));
   $("kpis").replaceChildren(
-    kpi("user", "Adviser / month", gbp0(t.adviser), `${gbp0(t.adviser * 12)} a year · ${gbp0(year1.adviser)} in first 12 months`),
-    kpi("users", "Introducer / month", gbp0(t.introducer), `${gbp0(t.introducer * 12)} a year`, "k-slate"),
+    kpi("user", "Adviser / month", gbp0(t.adviser), `${gbp0(t.adviser * 12)} a year annualised · ${gbp0(year1.adviser)} in first 12 months`),
+    kpi("calendar", `Calendar ${year}`, gbp0(M.sumAll(cal).adviser), `Adviser earnings · plan starts ${M.monthLabel(start)}`, "k-green"),
     kpi("doc", "Cases / month", count(t.written), `${count(t.completions)} complete · ${count(t.seenWeek)} seen a week`, "k-amber"),
   );
 }
 
 function renderAll() {
-  if (state.mode === "introducer") return intro.render();
-  const ctx = computeContext();
-  renderKpis(ctx);
-  for (const p of panels) p.update(ctx);
+  if (state.mode === "introducer") intro.render();
+  else {
+    const ctx = computeContext();
+    renderKpis(ctx);
+    for (const p of panels) p.update(ctx);
+  }
+  renderSummary();
 }
 
 /* ---------- plans and storage ---------- */
@@ -694,31 +673,131 @@ function normalisePlan(record) {
 }
 
 const planKind = (p) => p.kind || "adviser";
+const whoOf = (p) => (planKind(p) === "introducer" ? p.introducer : p.adviser) || "";
+
+/* ---------- finding plans: filters, plan list and summary ---------- */
+
+const NONE = "__none__";
+const matches = (filter, value) => !filter || (filter === NONE ? !value : value === filter);
+const filterName = (v) => (v === NONE ? "" : v);
+const distinct = (values) => [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
+const modePlans = () => state.plans.filter((p) => planKind(p) === state.mode);
+const filteredPlans = () => modePlans().filter((p) =>
+  (state.mode !== "adviser" || matches(state.filter.supervisor, p.supervisor || "")) && matches(state.filter.who, whoOf(p)));
+
+/** Refills a filter list, keeping the current choice if it still exists. Returns the choice in force. */
+function fillFilter(select, allLabel, values, hasBlank, current) {
+  select.replaceChildren(h("option", { value: "", text: allLabel }),
+    ...values.map((v) => h("option", { value: v, text: v })),
+    ...(hasBlank ? [h("option", { value: NONE, text: "(not set)" })] : []));
+  select.value = current;
+  return select.value === current ? current : (select.value = "");
+}
+
+function renderPlanPickers() {
+  const adviserMode = state.mode === "adviser";
+  const mine = modePlans();
+  if (adviserMode) {
+    state.filter.supervisor = fillFilter($("filter-supervisor"), "All supervisors", distinct(mine.map((p) => p.supervisor)),
+      mine.some((p) => !p.supervisor), state.filter.supervisor);
+  }
+  const pool = mine.filter((p) => !adviserMode || matches(state.filter.supervisor, p.supervisor || ""));
+  state.filter.who = fillFilter($("filter-who"), adviserMode ? "All advisers" : "All introducers", distinct(pool.map(whoOf)),
+    pool.some((p) => !whoOf(p)), state.filter.who);
+  const list = filteredPlans();
+  const loaded = state.planId && !list.some((p) => p.id === state.planId) ? state.plans.filter((p) => p.id === state.planId) : [];
+  $("plan-select").replaceChildren(h("option", { value: "", text: adviserMode ? "New plan" : "New introducer plan" }),
+    ...[...loaded, ...list].map((p) => h("option", { value: p.id, text: whoOf(p) ? `${p.name} (${whoOf(p)})` : p.name })));
+  $("plan-select").value = state.planId || "";
+  $("plan-count").textContent = `${list.length} of ${mine.length}`;
+  $("names-who").replaceChildren(...distinct(mine.map(whoOf)).map((v) => h("option", { value: v })));
+  $("names-supervisor").replaceChildren(...distinct(state.plans.filter((p) => planKind(p) === "adviser").map((p) => p.supervisor)).map((v) => h("option", { value: v })));
+}
+
+function renderSummary() {
+  const adviserMode = state.mode === "adviser";
+  const year = viewYear();
+  const list = filteredPlans();
+  const key = adviserMode ? "adviser" : "introducer";
+  $("summary-title").textContent = `${adviserMode ? "Adviser" : "Introducer"} plans summary (${list.length})`;
+  const body = $("summary-body");
+  if (!list.length) {
+    body.replaceChildren(h("p", { class: "note", text: modePlans().length ? "No saved plans match the filters." : "No saved plans yet." }));
+    return;
+  }
+  const items = list.map((p) => ({ p, f: M.planFigures(p, p.start || thisMonth(), year) }));
+  const nums = (x) => [gbp(x.month), gbp(x.first12), gbp(x.annual), ...(adviserMode ? [] : [gbp(x.renewals)]), gbp(x.calendar)];
+  const figs = ({ f }) => ({ month: f.steady[key], first12: f.first12[key] || 0, annual: f.steady[key] * 12, renewals: f.renewal ? f.renewal[key] * 12 : 0, calendar: f.calendar[key] || 0 });
+  const add = (a, b) => { for (const k of Object.keys(b)) a[k] = (a[k] || 0) + b[k]; return a; };
+  const planRow = (it) => ({
+    cells: [h("button", { type: "button", class: "link-btn", text: it.p.name, onclick: () => openPlan(it.p.id) }),
+      whoOf(it.p) || "—", ...(adviserMode ? [it.p.supervisor || "—"] : []), it.p.start ? M.monthLabel(it.p.start) : "Not set", ...nums(figs(it))],
+  });
+  const blank = adviserMode ? ["", "", ""] : ["", ""];
+  const rows = [];
+  const groups = adviserMode && !state.filter.supervisor ? distinct(items.map((it) => it.p.supervisor)) : [];
+  if (groups.length > 1 || (groups.length === 1 && items.some((it) => !it.p.supervisor))) {
+    for (const g of [...groups, ""]) {
+      const inGroup = items.filter((it) => (it.p.supervisor || "") === g);
+      if (!inGroup.length) continue;
+      rows.push(...inGroup.map(planRow));
+      rows.push({ cls: "is-sub", cells: [`Supervisor total: ${g || "(not set)"}`, ...blank, ...nums(inGroup.map(figs).reduce(add, {}))] });
+    }
+  } else {
+    rows.push(...items.map(planRow));
+  }
+  rows.push({ cls: "is-total", cells: ["Total (plans shown)", ...blank, ...nums(items.map(figs).reduce(add, {}))] });
+  const cols = adviserMode
+    ? ["Plan", "Adviser", "Supervisor", "Starts", "Adviser / month", "First 12 months", "Annualised", `Calendar ${year}`]
+    : ["Plan", "Introducer", "Starts", "Introducer / month", "First 12 months", "Annualised", "Renewals / year (once running)", `Calendar ${year}`];
+  body.replaceChildren(tableEl(cols, rows),
+    h("p", { class: "note", text: `Saved plans matching the filters above${adviserMode ? ", Base scenario" : ""}. Per month and annualised are steady figures once payments are flowing; first 12 months runs from each plan's start; calendar ${year} is what lands in that year. Unsaved changes are not included.` }));
+}
 
 async function refreshPlanList() {
-  const data = await api("/api/admin/scenarios");
-  state.plans = data.plans;
-  const select = $("plan-select");
-  const mine = state.plans.filter((p) => planKind(p) === state.mode);
-  select.replaceChildren(h("option", { value: "", text: state.mode === "introducer" ? "New introducer plan" : "New plan" }),
-    ...mine.map((p) => { const who = p.who ?? p.adviser; return h("option", { value: p.id, text: who ? `${p.name} (${who})` : p.name }); }));
-  select.value = state.planId || "";
+  const data = await api("/api/admin/scenarios?all=1");
+  state.plans = data.plans.flatMap((p) => {
+    try { return [{ id: p.id, ...normalisePlan(p) }]; } catch (_err) { return []; }
+  }).sort((a, b) => a.name.localeCompare(b.name));
+  renderPlanPickers();
+  renderSummary();
+}
+
+async function openPlan(id) {
+  if (id === state.planId) return;
+  if (!confirmDiscard()) { $("plan-select").value = state.planId || ""; return; }
+  if (!id) return setPlan(newPlan(), null);
+  try {
+    const data = await api(`/api/admin/scenarios?id=${encodeURIComponent(id)}`);
+    setPlan(normalisePlan(data.plan), id);
+    renderPlanPickers();
+  } catch (err) {
+    $("plan-select").value = state.planId || "";
+    setStatus(err.message, "error");
+  }
 }
 
 function setMode(mode) {
   if (mode === state.mode) return;
   if (!confirmDiscard()) return;
   state.mode = mode;
+  state.filter = { supervisor: "", who: "" };
   for (const b of $("mode-tabs").children) {
     const on = b.dataset.mode === mode;
     b.classList.toggle("is-active", on);
     b.setAttribute("aria-selected", on ? "true" : "false");
   }
-  $("layout-adviser").hidden = mode !== "adviser";
-  $("layout-introducer").hidden = mode !== "introducer";
-  $("who-label").textContent = mode === "introducer" ? "Introducer" : "Adviser";
+  const adviserMode = mode === "adviser";
+  $("layout-adviser").hidden = !adviserMode;
+  $("layout-introducer").hidden = adviserMode;
+  $("supervisor-wrap").hidden = !adviserMode;
+  $("filter-supervisor-wrap").hidden = !adviserMode;
+  $("who-label").textContent = adviserMode ? "Adviser" : "Introducer";
+  $("filter-who-label").textContent = adviserMode ? "Adviser" : "Introducer";
   setPlan(newPlan(mode), null);
-  refreshPlanList().catch((err) => setStatus(err.message, "error"));
+  renderPlanPickers();
+  renderSummary();
 }
 
 const confirmDiscard = () => !state.dirty || window.confirm("Discard unsaved changes to this plan?");
@@ -744,16 +823,6 @@ async function deletePlan() {
     setPlan(newPlan(), null);
     await refreshPlanList();
     setStatus("Plan deleted.", "ok");
-  } catch (err) {
-    setStatus(err.message, "error");
-  }
-}
-
-async function loadFirm() {
-  try {
-    const data = await api("/api/admin/scenarios?all=1");
-    state.firmPlans = data.plans.filter((p) => planKind(p) === "adviser").map((p) => ({ id: p.id, ...normalisePlan(p) }));
-    renderAll();
   } catch (err) {
     setStatus(err.message, "error");
   }
@@ -797,6 +866,8 @@ const intro = createIntroducerView({
   els: { fields: $("intro-fields"), kpis: $("intro-kpis"), nav: $("intro-nav"), panels: $("intro-panels") },
   field,
   getPlan: () => state.plan,
+  getStart: planStart,
+  getYear: viewYear,
   markDirty,
   actions: { saveDefaultRates, saveTemplate, resetRates, defaultsNote },
 });
@@ -808,46 +879,42 @@ const fileStem = () => `mortgage-easy-plan-${(state.plan.name || "plan").toLower
 function exportCsv() {
   if (state.mode === "introducer") {
     const head = [["Mortgage Easy introducer plan (confidential)"], ["Plan", state.plan.name], ["Introducer", state.plan.introducer],
-      ["Exported", new Date().toISOString()], ["Note", HOLIDAY_NOTE], []];
+      ["Starts", M.monthLabel(planStart())], ["Exported", new Date().toISOString()], ["Note", LEADS_NOTE], []];
     download(`${fileStem()}.csv`, "text/csv;charset=utf-8", toCsv([...head, ...intro.csvRows()]));
     return;
   }
   const ctx = computeContext();
-  const { month, months12, year1, sc, rates } = ctx;
+  const { month, months12, year1, sc, rates, cal, start, year } = ctx;
   const T = month.total;
   const R = month.byType.remortgage;
   const P = month.byType.purchase;
   const scenarioLabel = M.SCENARIOS.find((s) => s.key === state.scenario).label;
   const rows = [
     ["Mortgage Easy earnings plan (confidential)"],
-    ["Plan", state.plan.name], ["Adviser", state.plan.adviser], ["Scenario", scenarioLabel], ["Exported", new Date().toISOString()],
-    ["Note", HOLIDAY_NOTE],
+    ["Plan", state.plan.name], ["Adviser", state.plan.adviser], ["Supervisor", state.plan.supervisor || ""], ["Starts", M.monthLabel(start)],
+    ["Scenario", scenarioLabel], ["Exported", new Date().toISOString()], ["Note", HOLIDAY_NOTE],
     [],
-    ["Monthly (steady)", "Remortgage", "Purchase", "Total per month", "Total per year"],
+    ["Adviser earnings (steady)", "Remortgage", "Purchase", "Total per month", "Total per year"],
   ];
   const line = (label, fn) => rows.push([label, fn(R), fn(P), fn(T), fn(T) * 12]);
-  line("Procuration", (x) => x.proc);
-  line("Broker fees", (x) => x.fees);
-  line("Protection", (x) => x.protection.net);
-  line("GI", (x) => x.gi.net);
+  line("On procuration and fees", (x) => x.adviserMortgage);
+  line("On own-customer introductions", (x) => x.adviserIntro);
+  line("On protection and GI", (x) => x.adviserProtection);
   line("Adviser", (x) => x.adviser);
-  line("External introducer", (x) => x.introducer);
-  line("Mortgage Easy margin", (x) => x.me);
-  line("HLP share of procuration (memo)", (x) => x.hlpMemo);
-  rows.push([], ["12-month forecast", "Written", "Completions paid", "Adviser", "Introducer", "Mortgage Easy"]);
-  for (const m of [...months12, { ...year1, month: "Total" }]) rows.push([`Month ${m.month}`, m.written, m.completions, m.adviser, m.introducer, m.me]);
+  rows.push([], [`Calendar ${year}`, "Written", "Completions paid", "Adviser"]);
+  for (const m of cal) rows.push([`${m.label} ${year}`, m.written, m.completions, m.adviser]);
+  rows.push([], ["12-month forecast", "Written", "Completions paid", "Adviser"]);
+  for (const m of months12) rows.push([M.monthLabel(start, m.month - 1), m.written, m.completions, m.adviser]);
+  rows.push(["First 12 months", year1.written, year1.completions, year1.adviser]);
   const three = M.threeYear(sc, currentYears(), rates);
-  rows.push([], ["Three-year forecast", "Written", "Completions paid", "Adviser", "Introducer", "Mortgage Easy"]);
-  for (const y of three.years) rows.push([`Year ${y.year}`, y.written, y.completions, y.adviser, y.introducer, y.me]);
-  rows.push([], ["Scenario comparison (steady year)", "Adviser", "Introducer", "Mortgage Easy"]);
-  for (const s of M.SCENARIOS) {
-    const t = M.computeMonth(state.plan.scenarios[s.key], rates).total;
-    rows.push([s.label, t.adviser * 12, t.introducer * 12, t.me * 12]);
-  }
+  rows.push([], ["Three-year forecast", "Written", "Completions paid", "Adviser"]);
+  for (const y of three.years) rows.push([`Year ${y.year}`, y.written, y.completions, y.adviser]);
+  rows.push([], ["Scenario comparison (steady year)", "Adviser"]);
+  for (const s of M.SCENARIOS) rows.push([s.label, M.computeMonth(state.plan.scenarios[s.key], rates).total.adviser * 12]);
   rows.push([], ["Inputs", "Remortgage", "Purchase"]);
   for (const f of M.CASE_FIELDS) rows.push([f.label, Number(sc.remortgage[f.key]), Number(sc.purchase[f.key])]);
-  rows.push([], ["This adviser's rates and commission", "Value"]);
-  for (const f of M.RATE_FIELDS) rows.push([f.label, Number(rates[f.key])]);
+  rows.push([], ["This adviser's commission", "Value"]);
+  for (const f of ADVISER_COMMISSION) rows.push([f.label, Number(rates[f.key])]);
   download(`${fileStem()}.csv`, "text/csv;charset=utf-8", toCsv(rows));
 }
 
@@ -874,22 +941,33 @@ async function importJson(file) {
 
 /* ---------- start ---------- */
 
+function ensureYear(select, year) {
+  if ([...select.options].some((o) => o.value === String(year))) return;
+  const after = [...select.options].find((o) => Number(o.value) > year);
+  select.insertBefore(h("option", { value: String(year), text: String(year) }), after || null);
+}
+
 function wireToolbar() {
+  const years = Array.from({ length: 13 }, (_, i) => today.getFullYear() - 2 + i);
+  for (const id of ["start-year", "cal-year"]) $(id).replaceChildren(...years.map((y) => h("option", { value: String(y), text: String(y) })));
+  $("start-month").replaceChildren(...M.MONTH_NAMES.map((m, i) => h("option", { value: String(i + 1), text: m })));
+  const setStart = () => {
+    state.plan.start = { year: Number($("start-year").value), month: Number($("start-month").value) };
+    ensureYear($("cal-year"), viewYear());
+    $("cal-year").value = String(viewYear());
+    markDirty();
+    scheduleRender();
+  };
+  $("start-month").addEventListener("change", setStart);
+  $("start-year").addEventListener("change", setStart);
+  $("cal-year").addEventListener("change", (e) => { state.calYear = Number(e.target.value); scheduleRender(); });
   $("plan-name").addEventListener("input", (e) => { state.plan.name = e.target.value; markDirty(); });
   $("plan-adviser").addEventListener("input", (e) => { state.plan[whoKey()] = e.target.value; markDirty(); });
+  $("plan-supervisor").addEventListener("input", (e) => { state.plan.supervisor = e.target.value; markDirty(); });
+  $("filter-supervisor").addEventListener("change", (e) => { state.filter.supervisor = e.target.value; renderPlanPickers(); renderSummary(); });
+  $("filter-who").addEventListener("change", (e) => { state.filter.who = e.target.value; renderPlanPickers(); renderSummary(); });
   for (const b of $("mode-tabs").children) b.addEventListener("click", () => setMode(b.dataset.mode));
-  $("plan-select").addEventListener("change", async (e) => {
-    const id = e.target.value;
-    if (!confirmDiscard()) { e.target.value = state.planId || ""; return; }
-    if (!id) return setPlan(newPlan(), null);
-    try {
-      const data = await api(`/api/admin/scenarios?id=${encodeURIComponent(id)}`);
-      setPlan(normalisePlan(data.plan), id);
-    } catch (err) {
-      e.target.value = state.planId || "";
-      setStatus(err.message, "error");
-    }
-  });
+  $("plan-select").addEventListener("change", (e) => openPlan(e.target.value));
   $("btn-save").addEventListener("click", () => savePlan(false));
   $("btn-save-new").addEventListener("click", () => savePlan(true));
   $("btn-delete").addEventListener("click", deletePlan);

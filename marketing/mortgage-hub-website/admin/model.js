@@ -320,6 +320,16 @@ export function cleanSeenOverride(input, where = "") {
 
 const cleanText = (v, max) => String(v === undefined || v === null ? "" : v).replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max);
 
+/** Calendar month a plan starts: { year, month } with month 1 to 12, or null if not set. */
+export function cleanStart(input) {
+  if (!input || typeof input !== "object") return null;
+  const year = Number(input.year);
+  const month = Number(input.month);
+  if (!Number.isInteger(year) || year < 2020 || year > 2100) throw new Error("Start year must be between 2020 and 2100");
+  if (!Number.isInteger(month) || month < 1 || month > 12) throw new Error("Start month must be between 1 and 12");
+  return { year, month };
+}
+
 /** Plans carry their own rates (each adviser or introducer can be on different terms). */
 export function cleanPlan(input) {
   if (!input || typeof input !== "object") throw new Error("Plan is missing");
@@ -327,8 +337,9 @@ export function cleanPlan(input) {
   if (!name) throw new Error("Plan name is required");
   const rates = input.rates && typeof input.rates === "object" ? cleanRates(input.rates) : null;
   const notes = cleanText(input.notes, 2000);
+  const start = cleanStart(input.start);
   if (input.kind === "introducer") {
-    return { kind: "introducer", name, introducer: cleanText(input.introducer, 80), notes, inputs: cleanIntroInputs(input.inputs), rates };
+    return { kind: "introducer", name, introducer: cleanText(input.introducer, 80), start, notes, inputs: cleanIntroInputs(input.inputs), rates };
   }
   const scenarios = {};
   const years = {};
@@ -340,7 +351,7 @@ export function cleanPlan(input) {
       y3: cleanSeenOverride(y && y.y3, `${s.label} year 3, `),
     };
   }
-  return { kind: "adviser", name, adviser: cleanText(input.adviser, 80), notes, scenarios, years, rates };
+  return { kind: "adviser", name, adviser: cleanText(input.adviser, 80), supervisor: cleanText(input.supervisor, 80), start, notes, scenarios, years, rates };
 }
 
 export function blankScenario() {
@@ -366,8 +377,6 @@ export const INTRO_FIELDS = [
   { key: "renewal2yPct", label: "Retained cases on 2-year terms", hint: "The rest are on 5-year terms", unit: "%", min: 0, max: 100, step: 1 },
   { key: "renewalFee", label: "Renewal fee", hint: "Per renewal", unit: "gbp", min: 0, max: 10000, step: 1 },
 ];
-
-export const INTRO_COMMISSION_FIELDS = RATE_FIELDS.filter((f) => f.key === "introducerPct" || f.key === "adviserMortgagePct");
 
 /** Months after completion that each product term comes up for renewal. */
 export const RENEWAL_TERMS = [{ key: "renewals2y", months: 24, label: "2-year" }, { key: "renewals5y", months: 60, label: "5-year" }];
@@ -418,9 +427,10 @@ export function introducerForecast(inp, rates, months) {
   const r = computeIntroducer(inp, rates);
   const out = Array.from({ length: months }, (_, i) => ({
     month: i + 1, signUps: 0, completions: 0, renewals: 0,
-    adviser: 0, introducer: 0, me: 0, renewalAdviser: 0, renewalIntroducer: 0, renewalMe: 0,
+    total: 0, adviser: 0, introducer: 0, me: 0, renewalTotal: 0, renewalAdviser: 0, renewalIntroducer: 0, renewalMe: 0,
   }));
   const add = (o, alloc, share = 1) => {
+    o.total += alloc.total * share;
     o.adviser += alloc.adviser * share;
     o.introducer += alloc.introducer * share;
     o.me += alloc.me * share;
@@ -438,6 +448,7 @@ export function introducerForecast(inp, rates, months) {
       const share = r[term.key] / r.renewals;
       o.renewals += r[term.key];
       add(o, r.renewal, share);
+      o.renewalTotal += r.renewal.total * share;
       o.renewalAdviser += r.renewal.adviser * share;
       o.renewalIntroducer += r.renewal.introducer * share;
       o.renewalMe += r.renewal.me * share;
@@ -467,4 +478,71 @@ export function blankIntroducer() {
   const out = {};
   for (const f of INTRO_FIELDS) out[f.key] = f.key === "lagMonths" ? 1 : 0;
   return out;
+}
+
+/* ---------- start month, calendar years and plan summaries ---------- */
+
+export const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "Mar 2027" for the month `offset` months after the start (offset 0 = the start month). */
+export function monthLabel(start, offset = 0) {
+  const t = start.year * 12 + start.month - 1 + offset;
+  return `${MONTH_NAMES[t % 12]} ${Math.floor(t / 12)}`;
+}
+
+/** Forecast length needed to reach the end of calendar `year` from `start` (never less than 12). */
+export function monthsToYearEnd(start, year) {
+  return Math.max(12, (year - start.year) * 12 + 13 - start.month);
+}
+
+/** Calendar `year` (Jan to Dec) from a forecast whose first month is `start`. Months outside the forecast are zero. */
+export function calendarSlice(months, start, year) {
+  const keys = months.length ? Object.keys(months[0]).filter((k) => k !== "month") : [];
+  return MONTH_NAMES.map((label, i) => {
+    const idx = (year - start.year) * 12 + i - (start.month - 1);
+    const src = idx >= 0 ? months[idx] : undefined;
+    const out = { label, planMonth: src ? idx + 1 : null };
+    for (const k of keys) out[k] = src ? num(src[k]) : 0;
+    return out;
+  });
+}
+
+/** Adds every numeric field across months. */
+export function sumAll(months) {
+  const out = {};
+  for (const m of months) for (const [k, v] of Object.entries(m)) if (k !== "month" && k !== "planMonth" && typeof v === "number") out[k] = (out[k] || 0) + v;
+  return out;
+}
+
+/** Adviser plan month by month: year 1 as entered, then the year 2 and year 3 appointments, year 3 carrying on after month 36. */
+export function adviserForecast(plan, months, scenarioKey = "base") {
+  const sc = plan.scenarios[scenarioKey];
+  const y = (plan.years && plan.years[scenarioKey]) || {};
+  const byYear = [yearScenario(sc, null), yearScenario(sc, y.y2), yearScenario(sc, y.y3)];
+  return forecast(Array.from({ length: months }, (_, i) => byYear[Math.min(2, Math.floor(i / 12))]), plan.rates);
+}
+
+const SPLIT_KEYS = ["total", "adviser", "introducer", "me"];
+const splitOf = (o) => Object.fromEntries(SPLIT_KEYS.map((k) => [k, num(o && o[k])]));
+
+/**
+ * Headline figures for a saved plan (adviser plans use the Base scenario): one steady month, the first
+ * 12 months from the start, and calendar `year`. Introducer plans also give the steady renewal month.
+ */
+export function planFigures(plan, start, year) {
+  const horizon = monthsToYearEnd(start, year);
+  let months;
+  let steady;
+  let renewal = null;
+  if (plan.kind === "introducer") {
+    const r = computeIntroducer(plan.inputs, plan.rates);
+    months = introducerForecast(plan.inputs, plan.rates, horizon);
+    steady = splitOf(r.newBusiness);
+    renewal = splitOf(r.renewal);
+  } else {
+    months = adviserForecast(plan, horizon);
+    steady = splitOf(computeMonth(plan.scenarios.base, plan.rates).total);
+  }
+  const calendarMonths = calendarSlice(months, start, year);
+  return { steady, renewal, first12: sumAll(months.slice(0, 12)), calendar: sumAll(calendarMonths), calendarMonths };
 }

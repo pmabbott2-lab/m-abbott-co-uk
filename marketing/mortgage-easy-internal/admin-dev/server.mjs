@@ -43,8 +43,7 @@ const handlers = { "/api/admin/assumptions": assumptions, "/api/admin/scenarios"
 
 async function serveStatic(pathname) {
   let rel;
-  if (pathname === "/admin/") rel = "admin/index.html";
-  else if (pathname.startsWith("/admin/") || pathname.startsWith("/assets/")) rel = pathname.slice(1);
+  if (pathname.startsWith("/admin/") || pathname.startsWith("/assets/")) rel = pathname.slice(1) + (pathname.endsWith("/") ? "index.html" : "");
   else return new Response("Not found", { status: 404 });
   const full = normalize(join(site, rel));
   if (!full.startsWith(site) || !existsSync(full)) return new Response("Not found", { status: 404 });
@@ -53,7 +52,7 @@ async function serveStatic(pathname) {
 
 async function handle(req) {
   const url = new URL(req.url);
-  if (url.pathname === "/admin") return Response.redirect(`${url.origin}/admin/`, 308);
+  if (url.pathname === "/admin" || url.pathname === "/admin/owner") return Response.redirect(`${url.origin}${url.pathname}/`, 308);
   const mod = handlers[url.pathname];
   if (mod) {
     const fn = mod[`onRequest${req.method[0]}${req.method.slice(1).toLowerCase()}`];

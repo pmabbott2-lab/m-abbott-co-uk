@@ -7,8 +7,8 @@
   <meta name="referrer" content="no-referrer" />
   <title>Earnings and business planning · Mortgage Easy admin</title>
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/admin/admin.css?v=6" />
-  <script type="module" src="/admin/app.js?v=6"></script>
+  <link rel="stylesheet" href="/admin/admin.css?v=7" />
+  <script type="module" src="/admin/app.js?v=7"></script>
 </head>
 <body>
   <header class="adm-header">
@@ -31,10 +31,22 @@
       <button type="button" role="tab" data-mode="introducer" aria-selected="false">Introducer plans</button>
     </div>
 
+    <section class="card adm-toolbar adm-finder no-print" aria-label="Find a plan">
+      <label id="filter-supervisor-wrap">Supervisor<select id="filter-supervisor"><option value="">All supervisors</option></select></label>
+      <label><span id="filter-who-label">Adviser</span><select id="filter-who"><option value="">All advisers</option></select></label>
+      <label>Saved plans <span class="plan-count" id="plan-count"></span><select id="plan-select"><option value="">New plan</option></select></label>
+      <span class="spacer"></span>
+      <label>Calendar year<select id="cal-year"></select></label>
+    </section>
+
     <section class="card adm-toolbar" aria-label="Plan">
       <label>Plan name<input type="text" id="plan-name" maxlength="80" autocomplete="off" /></label>
-      <label><span id="who-label">Adviser</span><input type="text" id="plan-adviser" maxlength="80" autocomplete="off" /></label>
-      <label>Saved plans<select id="plan-select"><option value="">New plan</option></select></label>
+      <label><span id="who-label">Adviser</span><input type="text" id="plan-adviser" maxlength="80" autocomplete="off" list="names-who" /></label>
+      <label id="supervisor-wrap">Supervisor<input type="text" id="plan-supervisor" maxlength="80" autocomplete="off" list="names-supervisor" /></label>
+      <div class="field-pair" role="group" aria-labelledby="start-label">
+        <span id="start-label">Plan starts</span>
+        <span class="pair"><select id="start-month" aria-label="Start month"></select><select id="start-year" aria-label="Start year"></select></span>
+      </div>
       <button type="button" class="btn btn-green" id="btn-save">Save</button>
       <button type="button" class="btn btn-ghost" id="btn-save-new">Save as new</button>
       <button type="button" class="btn btn-danger" id="btn-delete">Delete</button>
@@ -78,6 +90,13 @@
         <div id="intro-panels"></div>
       </section>
     </div>
+
+    <details class="card adm-summary no-print" id="summary">
+      <summary id="summary-title">Plans summary</summary>
+      <div id="summary-body"></div>
+    </details>
+    <datalist id="names-who"></datalist>
+    <datalist id="names-supervisor"></datalist>
   </main>
 </body>
 </html>

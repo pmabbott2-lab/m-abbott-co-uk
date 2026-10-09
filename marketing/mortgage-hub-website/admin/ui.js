@@ -54,7 +54,8 @@ export function numInput(f, get, set, label) {
     if (!Number.isFinite(v)) return;
     set(Math.min(f.max, Math.max(f.min, f.integer ? Math.round(v) : v)));
   });
-  const shown = () => String(Math.round((Number(get()) || 0) * 100) / 100);
+  const scale = 10 ** (f.decimals ?? 2);
+  const shown = () => String(Math.round((Number(get()) || 0) * scale) / scale);
   input.addEventListener("change", () => { input.value = shown(); });
   const unit = f.unit === "gbp" ? "£" : f.unit === "%" ? "%" : f.unit === "months" ? "mo" : "";
   const wrap = h("span", { class: `num-wrap${f.unit === "gbp" ? " has-prefix" : unit ? " has-suffix" : ""}` },

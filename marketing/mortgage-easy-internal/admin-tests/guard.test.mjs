@@ -118,11 +118,12 @@ test("storage API: 503 without KV, refuses cross-origin writes, validates input"
 test("storage API: plans round trip", async () => {
   const data = { adminEmail: "owner@example.com" };
   const e = { ADMIN_KV: memoryKv() };
-  const saved = await (await scenarios.onRequestPut({ request: put("/api/admin/scenarios", { plan: { name: "Adviser A" } }), env: e, data })).json();
+  const saved = await (await scenarios.onRequestPut({ request: put("/api/admin/scenarios", { plan: { name: "Adviser A", supervisor: "Sam", start: { year: 2027, month: 4 } } }), env: e, data })).json();
   assert.ok(saved.ok);
   await scenarios.onRequestPut({ request: put("/api/admin/scenarios", { plan: { kind: "introducer", name: "Agent B", introducer: "B Estates", rates: { introducerPct: 15 } } }), env: e, data });
   const list = await (await scenarios.onRequestGet({ request: new Request(ORIGIN + "/api/admin/scenarios"), env: e })).json();
-  assert.deepEqual(list.plans.map((p) => [p.name, p.kind, p.who]), [["Adviser A", "adviser", ""], ["Agent B", "introducer", "B Estates"]]);
+  assert.deepEqual(list.plans.map((p) => [p.name, p.kind, p.who, p.supervisor, p.start]),
+    [["Adviser A", "adviser", "", "Sam", { year: 2027, month: 4 }], ["Agent B", "introducer", "B Estates", "", null]]);
   const all = await (await scenarios.onRequestGet({ request: new Request(ORIGIN + "/api/admin/scenarios?all=1"), env: e })).json();
   assert.equal(all.plans.find((p) => p.kind === "introducer").rates.introducerPct, 15, "introducer plan keeps its own rates");
   const delB = all.plans.find((p) => p.kind === "introducer").id;

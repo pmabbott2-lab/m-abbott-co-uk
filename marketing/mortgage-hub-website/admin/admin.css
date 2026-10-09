@@ -51,6 +51,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .adm-toolbar input[type="text"], .adm-toolbar select { min-width: 150px; width: 160px; }
 .adm-toolbar select { max-width: 260px; }
 .adm-toolbar .spacer { flex: 1; }
+.adm-toolbar [hidden] { display: none !important; }
+.adm-finder { margin-bottom: 0.5rem; background: var(--navy-tint); }
+.plan-count { font-weight: 500; color: var(--muted); }
+.field-pair { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.75rem; color: var(--muted); font-weight: 600; }
+.field-pair .pair { display: flex; gap: 0.35rem; }
+.adm-toolbar .field-pair select { min-width: 0; width: auto; }
+.adm-summary { margin-top: 1rem; padding: 0.9rem 1rem; }
+.adm-summary > summary { cursor: pointer; font-weight: 700; color: var(--navy); }
+.adm-summary[open] > summary { margin-bottom: 0.75rem; }
+.link-btn { border: 0; background: none; padding: 0; color: var(--navy); font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; text-align: left; }
 .adm-dirty { font-size: 0.75rem; color: #8a6d12; background: #fff8e6; border: 1px solid var(--amber); border-radius: 999px; padding: 0.15rem 0.6rem; align-self: center; }
 
 input[type="text"], input[type="number"], select, textarea {
