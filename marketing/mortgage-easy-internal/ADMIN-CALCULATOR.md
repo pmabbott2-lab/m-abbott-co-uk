@@ -111,6 +111,28 @@ person's earnings.
   "Add to totals" is ticked (their leads may already be in advisers' introduced appointments),
   and never while a supervisor filter is chosen.
 
+## Scenarios
+
+Figures are entered on **Base** only, and only Base is saved. Team summaries and the owner page
+use Base. The other two tabs are worked out from Base and their boxes are locked:
+
+- **Conservative**: Base with 20% more written cases taking protection (capped at 100%).
+- **Ambitious**: Base with 20% more own-customer appointments, including any year 2 and year 3
+  own-customer appointments set under Three-year growth.
+
+Plans saved before this change keep their Base figures; anything entered separately on the old
+Conservative and Ambitious tabs is dropped the next time the plan is saved.
+
+## Exports for advisers and introducers
+
+Print / PDF and Export CSV leave out the Assumptions and "How it's calculated" sections, the
+procuration rate, the HLP lines and the net procuration fee, so they can be sent to the adviser or
+introducer. Export JSON is a full copy of the plan (including its rates) for backup and import
+only; don't send it.
+
+The logo and icon are served from `/admin/` because files under `/assets/` sit behind the site
+gate's separate Access application and don't load on admin pages.
+
 ## Plans, supervisors and calendar years
 
 - Plans are saved under the adviser's or introducer's name. Adviser plans also take an optional

@@ -92,7 +92,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .seg button { border: 0; background: transparent; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.82rem; font-weight: 600; color: var(--navy); cursor: pointer; }
 .seg button.is-active { background: var(--navy); color: #fff; }
 .seg.seg-green button.is-active { background: var(--green); }
-.adm-inputs .seg { margin-bottom: 0.6rem; }
+.adm-inputs .seg { margin-bottom: 0.4rem; }
+.scenario-note { margin: 0 0 0.6rem; line-height: 1.4; }
+input:disabled { background: var(--bg); color: var(--muted); cursor: not-allowed; }
 .adm-inputs-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.25rem; }
 
 /* Input grid: label | remortgage | purchase */
@@ -149,7 +151,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .panel .adm-toolbar { padding: 0; border: 0; margin-bottom: 0.75rem; }
 .panel > p, .panel .lead { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.75rem; max-width: 70ch; }
 .panel h3 { font-size: 0.9rem; color: var(--navy); margin: 1.1rem 0 0.4rem; }
-.grid-2 { display: grid; gap: 1rem; grid-template-columns: 1fr; }
+.grid-2 { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); }
+.grid-2 > * { min-width: 0; }
+.target-headline { margin-bottom: 0.75rem; font-weight: 600; color: var(--navy); }
 @media (min-width: 900px) { .grid-2 { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); } }
 /* Tables */
 .table-wrap { overflow-x: auto; }

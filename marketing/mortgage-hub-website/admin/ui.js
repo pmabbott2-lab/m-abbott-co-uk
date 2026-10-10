@@ -64,6 +64,15 @@ export function numInput(f, get, set, label) {
   return { wrap, input, sync };
 }
 
+/** Reads a typed amount such as "£60,000", "60 000" or "60k". Empty is 0; anything else unreadable is NaN. */
+export function parseAmount(text) {
+  const s = String(text || "").trim().toLowerCase().replace(/[£,\s]/g, "");
+  if (!s) return 0;
+  const m = /^(\d+(?:\.\d+)?)([km]?)$/.exec(s);
+  if (!m) return NaN;
+  return Number(m[1]) * (m[2] === "k" ? 1e3 : m[2] === "m" ? 1e6 : 1);
+}
+
 export function tableEl(columns, rows) {
   return h("div", { class: "table-wrap" },
     h("table", { class: "adm-table" },

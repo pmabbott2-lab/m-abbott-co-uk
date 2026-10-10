@@ -8,10 +8,12 @@ export const CASE_TYPES = [
   { key: "purchase", label: "Purchase" },
 ];
 
+/** Base is the only scenario entered; the others are fixed uplifts on Base and are never edited or saved. */
+export const SCENARIO_UPLIFT = 1.2;
 export const SCENARIOS = [
   { key: "base", label: "Base" },
-  { key: "conservative", label: "Conservative" },
-  { key: "ambitious", label: "Ambitious" },
+  { key: "conservative", label: "Conservative", field: "protectionConvPct", note: "Base with 20% more written cases taking protection" },
+  { key: "ambitious", label: "Ambitious", field: "seenOwnWeek", note: "Base with 20% more own-customer appointments" },
 ];
 
 export const RATE_FIELDS = [
@@ -341,17 +343,44 @@ export function cleanPlan(input) {
   if (input.kind === "introducer") {
     return { kind: "introducer", name, introducer: cleanText(input.introducer, 80), start, notes, inputs: cleanIntroInputs(input.inputs), rates };
   }
-  const scenarios = {};
-  const years = {};
-  for (const s of SCENARIOS) {
-    scenarios[s.key] = cleanScenario(input.scenarios && input.scenarios[s.key], `${s.label} scenario, `);
-    const y = input.years && input.years[s.key];
-    years[s.key] = {
-      y2: cleanSeenOverride(y && y.y2, `${s.label} year 2, `),
-      y3: cleanSeenOverride(y && y.y3, `${s.label} year 3, `),
-    };
-  }
+  const scenarios = { base: cleanScenario(input.scenarios && input.scenarios.base, "") };
+  const y = input.years && input.years.base;
+  const years = { base: { y2: cleanSeenOverride(y && y.y2, "Year 2, "), y3: cleanSeenOverride(y && y.y3, "Year 3, ") } };
   return { kind: "adviser", name, adviser: cleanText(input.adviser, 80), supervisor: cleanText(input.supervisor, 80), start, notes, scenarios, years, rates };
+}
+
+const scenarioDef = (key) => SCENARIOS.find((s) => s.key === key) || SCENARIOS[0];
+
+function uplift(caseInputs, s) {
+  const out = { ...caseInputs };
+  const v = out[s.field];
+  if (s.field && v !== undefined && v !== null && v !== "") {
+    const f = CASE_FIELDS.find((x) => x.key === s.field);
+    out[s.field] = Math.min(f.max, num(v) * SCENARIO_UPLIFT);
+  }
+  return out;
+}
+
+/** A plan's inputs for a scenario: Base as entered, or Base with that scenario's uplift. */
+export function scenarioOf(plan, key = "base") {
+  const s = scenarioDef(key);
+  const base = (plan.scenarios && plan.scenarios.base) || blankScenario();
+  const out = {};
+  for (const t of CASE_TYPES) out[t.key] = uplift(base[t.key] || {}, s);
+  return out;
+}
+
+/** Year 2 and 3 appointments for a scenario, following Base. */
+export function yearsOf(plan, key = "base") {
+  const s = scenarioDef(key);
+  const base = (plan.years && plan.years.base) || {};
+  const out = {};
+  for (const y of ["y2", "y3"]) {
+    if (!base[y]) { out[y] = null; continue; }
+    out[y] = {};
+    for (const t of CASE_TYPES) out[y][t.key] = uplift(base[y][t.key] || {}, s);
+  }
+  return out;
 }
 
 export function blankScenario() {
@@ -516,8 +545,8 @@ export function sumAll(months) {
 
 /** Adviser plan month by month: year 1 as entered, then the year 2 and year 3 appointments, year 3 carrying on after month 36. */
 export function adviserForecast(plan, months, scenarioKey = "base") {
-  const sc = plan.scenarios[scenarioKey];
-  const y = (plan.years && plan.years[scenarioKey]) || {};
+  const sc = scenarioOf(plan, scenarioKey);
+  const y = yearsOf(plan, scenarioKey);
   const byYear = [yearScenario(sc, null), yearScenario(sc, y.y2), yearScenario(sc, y.y3)];
   return forecast(Array.from({ length: months }, (_, i) => byYear[Math.min(2, Math.floor(i / 12))]), plan.rates);
 }

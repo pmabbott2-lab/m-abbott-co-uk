@@ -7,7 +7,9 @@ import {
   cleanRates, cleanPlan, cleanScenario, blankScenario, WORKING_WEEKS, WEEKS_PER_MONTH, LEAD_WEEKS_PER_MONTH,
   computeIntroducer, introducerForecast, sumByYear,
   cleanStart, monthLabel, monthsToYearEnd, calendarSlice, sumAll, adviserForecast, planFigures,
+  scenarioOf, yearsOf, yearScenario,
 } from "../../mortgage-hub-website/admin/model.js";
+import { parseAmount } from "../../mortgage-hub-website/admin/ui.js";
 
 const perWeek = (monthly) => monthly / WEEKS_PER_MONTH;
 
@@ -153,15 +155,52 @@ test("validation rejects bad numbers and requires a plan name", () => {
   assert.throws(() => cleanPlan({ name: "  " }));
   const plan = cleanPlan({
     name: "Test", extra: "dropped", scenarios: { base: scenario },
-    years: { ambitious: { y2: { purchase: { seenOwnWeek: 12, conversionPct: 99 } } } },
+    years: { base: { y2: { purchase: { seenOwnWeek: 12, conversionPct: 99 } } } },
   });
   assert.equal(plan.extra, undefined);
   close(plan.scenarios.base.remortgage.seenOwnWeek, perWeek(10), "weekly seen kept");
-  assert.equal(plan.scenarios.conservative.purchase.lagMonths, 1);
-  assert.deepEqual(plan.years.ambitious.y2.purchase, { seenOwnWeek: 12 });
-  assert.equal(plan.years.base.y2, null);
+  assert.equal(plan.scenarios.base.purchase.lagMonths, 1);
+  assert.deepEqual(plan.years.base.y2.purchase, { seenOwnWeek: 12 });
+  assert.equal(plan.years.base.y3, null);
   assert.throws(() => cleanPlan({ name: "X", years: { base: { y3: { remortgage: { seenOwnWeek: -1 } } } } }));
   assert.throws(() => cleanPlan({ name: "X", scenarios: { base: { remortgage: { seenOwnWeek: 151 } } } }));
+});
+
+test("only Base is stored; Conservative and Ambitious are fixed 20% uplifts on Base", () => {
+  const base = { remortgage: { ...remortgage, protectionConvPct: 90 }, purchase: blankScenario().purchase };
+  const plan = cleanPlan({
+    name: "A", scenarios: { base, conservative: { remortgage: { seenOwnWeek: 99 } } },
+    years: { base: { y2: { remortgage: { seenOwnWeek: 5, seenIntroducedWeek: 4 } } }, ambitious: { y2: { remortgage: { seenOwnWeek: 99 } } } },
+  });
+  assert.deepEqual(Object.keys(plan.scenarios), ["base"]);
+  assert.deepEqual(Object.keys(plan.years), ["base"]);
+  assert.deepEqual(scenarioOf(plan, "base"), plan.scenarios.base);
+
+  const con = scenarioOf(plan, "conservative");
+  assert.equal(con.remortgage.protectionConvPct, 100, "capped at 100%");
+  assert.equal(con.purchase.protectionConvPct, 0);
+  close(con.remortgage.seenOwnWeek, perWeek(10), "appointments unchanged");
+
+  const amb = scenarioOf(plan, "ambitious");
+  close(amb.remortgage.seenOwnWeek, perWeek(10) * 1.2, "own appointments up 20%");
+  close(amb.remortgage.seenIntroducedWeek, perWeek(10), "introduced unchanged");
+  assert.equal(amb.remortgage.protectionConvPct, 90);
+  close(yearsOf(plan, "ambitious").y2.remortgage.seenOwnWeek, 6, "year 2 own appointments up 20%");
+  assert.equal(yearsOf(plan, "ambitious").y2.remortgage.seenIntroducedWeek, 4);
+  assert.equal(yearsOf(plan, "conservative").y2.remortgage.seenOwnWeek, 5);
+  assert.equal(yearsOf(plan, "ambitious").y3, null);
+
+  const ambMonths = adviserForecast({ ...plan, rates }, 24, "ambitious");
+  close(ambMonths[23].adviser, computeMonth(yearScenario(amb, yearsOf(plan, "ambitious").y2), rates).total.adviser, "ambitious year 2 steady");
+});
+
+test("reverse target reads typed amounts", () => {
+  assert.equal(parseAmount("60000"), 60000);
+  assert.equal(parseAmount(" £60,000 "), 60000);
+  assert.equal(parseAmount("60k"), 60000);
+  assert.equal(parseAmount("1.5M"), 1500000);
+  assert.equal(parseAmount(""), 0);
+  assert.ok(Number.isNaN(parseAmount("sixty")));
 });
 
 test("plans keep a supervisor and a start month", () => {

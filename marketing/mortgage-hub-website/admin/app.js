@@ -1,7 +1,7 @@
 import * as M from "./model.js";
 import { lineChart, donut, groupedBars, funnel } from "./charts.js";
 import { icon } from "./icons.js";
-import { h, gbp, gbp0, count, pctTxt, clone, fmtField, numInput, tableEl, download, toCsv, HOLIDAY_NOTE, LEADS_NOTE } from "./ui.js";
+import { h, gbp, gbp0, count, pctTxt, clone, fmtField, numInput, tableEl, download, toCsv, parseAmount, HOLIDAY_NOTE, LEADS_NOTE } from "./ui.js";
 import { createIntroducerView } from "./introducer.js";
 
 const $ = (id) => document.getElementById(id);
@@ -64,11 +64,7 @@ async function api(path, { method = "GET", body } = {}) {
 
 /* ---------- plan state ---------- */
 
-function emptyYears() {
-  const y = {};
-  for (const s of M.SCENARIOS) y[s.key] = { y2: null, y3: null };
-  return y;
-}
+const emptyYears = () => ({ base: { y2: null, y3: null } });
 
 /** Starting inputs for a new introducer plan: the saved template, else blank with the purchase mortgage, fee and timing. */
 function introducerStart() {
@@ -87,14 +83,15 @@ function newPlan(kind = state.mode) {
     return { kind, name: "New introducer plan", introducer: filterName(state.filter.who), start, notes: "", inputs: introducerStart(), rates };
   }
   const template = state.assumptions && state.assumptions.adviserTemplate ? state.assumptions.adviserTemplate : M.blankScenario();
-  const scenarios = {};
-  for (const s of M.SCENARIOS) scenarios[s.key] = M.cleanScenario(clone(template));
+  const scenarios = { base: M.cleanScenario(clone(template)) };
   return { kind: "adviser", name: "New plan", adviser: filterName(state.filter.who), supervisor: filterName(state.filter.supervisor), start, notes: "", scenarios, years: emptyYears(), rates };
 }
 
 const whoKey = () => (state.mode === "introducer" ? "introducer" : "adviser");
-const currentScenario = () => state.plan.scenarios[state.scenario];
-const currentYears = () => state.plan.years[state.scenario] || (state.plan.years[state.scenario] = { y2: null, y3: null });
+const isBase = () => state.scenario === "base";
+const currentScenario = () => M.scenarioOf(state.plan, state.scenario);
+const currentYears = () => M.yearsOf(state.plan, state.scenario);
+const baseYears = () => state.plan.years.base || (state.plan.years.base = { y2: null, y3: null });
 
 function markDirty() {
   state.dirty = true;
@@ -153,7 +150,7 @@ function buildInputs() {
     for (const [key, short] of Object.entries(g.keys)) {
       const f = fields[key];
       const cells = M.CASE_TYPES.map((t) => {
-        const c = field(f, () => currentScenario()[t.key][key], (v) => { currentScenario()[t.key][key] = v; }, `${t.label}: ${f.label}`);
+        const c = field(f, () => currentScenario()[t.key][key], (v) => { state.plan.scenarios.base[t.key][key] = v; }, `${t.label}: ${f.label}`);
         inputSyncs.push(c.sync);
         return c;
       });
@@ -170,13 +167,6 @@ function buildInputs() {
     grid.append(h("label", { class: "in-label", for: c.input.id }, COMMISSION_LABELS[f.key], h("span", { class: "field-hint", text: f.hint })), c.wrap);
   }
   $("case-fields").append(grid, h("p", { class: "field-hint holiday-note", text: HOLIDAY_NOTE }));
-  $("btn-copy-base").addEventListener("click", () => {
-    state.plan.scenarios[state.scenario] = clone(state.plan.scenarios.base);
-    state.plan.years[state.scenario] = clone(state.plan.years.base);
-    markDirty();
-    syncInputs();
-    renderAll();
-  });
 }
 
 function syncTabs(boxId, active) {
@@ -190,7 +180,11 @@ function syncTabs(boxId, active) {
 function syncInputs() {
   if (state.mode === "introducer") return intro.sync();
   syncTabs("scenario-tabs", state.scenario);
-  $("btn-copy-base").hidden = state.scenario === "base";
+  const s = M.SCENARIOS.find((x) => x.key === state.scenario);
+  $("scenario-note").textContent = isBase()
+    ? "Enter figures on Base. Conservative and Ambitious follow it automatically, and team and owner totals use Base."
+    : `${s.note}. These boxes are fixed: change Base to change them.`;
+  for (const input of $("case-fields").querySelectorAll("input")) input.disabled = !isBase();
   for (const sync of inputSyncs) sync();
   for (const p of panels) if (p.sync) p.sync();
 }
@@ -305,7 +299,7 @@ const panels = [
         tableEl(typeCols, [
           byTypeRow(month, "Completed cases", (x) => x.completions, count),
           byTypeRow(month, "Total lent", (x) => x.lent, gbp0),
-          { cells: ["Procuration rate received", pctTxt(M.computeCase({}, rates).procRate * 100), "", ""], cls: "is-sub" },
+          { cells: ["Procuration rate received", pctTxt(M.computeCase({}, rates).procRate * 100), "", ""], cls: "is-sub no-print" },
           byTypeRow(month, "Procuration: own customers", (x) => x.procOwn),
           byTypeRow(month, "Procuration: introduced", (x) => x.procIntro),
           byTypeRow(month, "Procuration", (x) => x.proc, gbp, "is-total"),
@@ -313,9 +307,9 @@ const panels = [
           byTypeRow(month, "Broker fees: own customers", (x) => x.feesOwn),
           byTypeRow(month, "Broker fees: introduced", (x) => x.feesIntro),
           byTypeRow(month, "Broker fees", (x) => x.fees, gbp, "is-total"),
-          byTypeRow(month, "HLP share of procuration (memo: already deducted)", (x) => x.hlpMemo, gbp, "is-sub"),
+          byTypeRow(month, "HLP share of procuration (memo: already deducted)", (x) => x.hlpMemo, gbp, "is-sub no-print"),
         ]),
-        h("p", { class: "note", text: "HLP takes no share of broker fees, protection or GI." }),
+        h("p", { class: "note no-print", text: "HLP takes no share of broker fees, protection or GI." }),
       );
     },
   },
@@ -401,7 +395,7 @@ const panels = [
   {
     key: "threeyear",
     label: "Three-year growth",
-    intro: "Years 2 and 3 start as copies of year 1. Change the appointments seen for those years here (leave blank to keep year 1's). All other inputs stay as entered. Saved per scenario.",
+    intro: "Years 2 and 3 start as copies of year 1. On Base, change the appointments seen for those years here (leave blank to keep year 1's). All other inputs stay as entered. Conservative and Ambitious follow Base.",
     build(body) {
       this.cells = [];
       const rows = [];
@@ -411,7 +405,8 @@ const panels = [
           const inputs = ["y2", "y3"].map((y) => {
             const input = h("input", { type: "number", min: f.min, max: f.max, step: "any", "aria-label": `${t.label} ${f.label} ${y === "y2" ? "year 2" : "year 3"}` });
             input.addEventListener("input", () => {
-              const years = currentYears();
+              if (!isBase()) return;
+              const years = baseYears();
               const raw = input.value.trim();
               const v = Number(raw);
               if (raw !== "" && !(Number.isFinite(v) && v >= f.min && v <= f.max)) return;
@@ -441,7 +436,8 @@ const panels = [
       for (const c of this.cells) {
         ["y2", "y3"].forEach((y, i) => {
           const v = years[y] && years[y][c.t.key] && years[y][c.t.key][c.f.key];
-          if (document.activeElement !== c.inputs[i]) c.inputs[i].value = v === undefined || v === null ? "" : String(v);
+          c.inputs[i].disabled = !isBase();
+          if (document.activeElement !== c.inputs[i]) c.inputs[i].value = v === undefined || v === null ? "" : String(isBase() ? v : Math.round(v * 100) / 100);
         });
       }
     },
@@ -465,21 +461,33 @@ const panels = [
     label: "Reverse target",
     intro: "Enter the adviser's annual earnings target. Everything scales with appointments seen, so the answer keeps this scenario's mix of case types, sources and conversion.",
     build(body) {
-      this.amount = h("input", { type: "number", id: "target-amount", min: "0", step: "any", inputmode: "decimal" });
-      this.amount.addEventListener("input", () => { state.target.amount = Number(this.amount.value) || 0; scheduleRender(); });
+      this.amount = h("input", { type: "text", id: "target-amount", inputmode: "decimal", autocomplete: "off", placeholder: "e.g. 60,000 or 60k" });
+      this.amount.addEventListener("input", () => { state.target.amount = parseAmount(this.amount.value); scheduleRender(); });
+      this.headline = h("div", { class: "adm-alert target-headline" });
       this.result = h("div");
       body.append(
         h("div", { class: "adm-toolbar" }, h("label", null, "Annual adviser earnings target (£)", this.amount)),
+        this.headline,
         this.result,
       );
     },
     update({ sc, rates }) {
-      const r = M.reverseTarget(sc, rates, "adviser", state.target.amount);
+      const raw = this.amount.value.trim();
+      const r = M.reverseTarget(sc, rates, "adviser", Number.isFinite(state.target.amount) ? state.target.amount : 0);
       const name = "Adviser earnings";
       if (r.perSeen === null || r.factor === null) {
+        this.headline.hidden = true;
         this.result.replaceChildren(h("p", { class: "note", text: "Enter some appointments and rates first: this scenario currently earns nothing to scale from." }));
         return;
       }
+      this.headline.hidden = false;
+      this.headline.classList.toggle("is-error", Boolean(raw) && !(state.target.amount > 0));
+      this.headline.textContent = !raw
+        ? "Type a yearly target above to see the appointments needed each week."
+        : !(state.target.amount > 0)
+          ? "Enter the target as a number of pounds, for example 60000, 60,000 or 60k."
+          : `To earn ${gbp0(r.target)} a year: about ${count(r.steadySeen.totalSeenWeek)} appointments a week once payments are flowing` +
+            (r.firstYearSeen ? `, or ${count(r.firstYearSeen.totalSeenWeek)} a week to reach it in the first 12 months.` : ".");
       const seenRows = [];
       for (const t of M.CASE_TYPES) {
         for (const f of M.SEEN_FIELDS) {
@@ -504,7 +512,7 @@ const panels = [
   {
     key: "scenarios",
     label: "Scenario comparison",
-    intro: "Base, Conservative and Ambitious side by side, using this adviser's rates and commission. Actual-versus-projection tracking is planned for later.",
+    intro: `Base, Conservative and Ambitious side by side, using this adviser's rates and commission. ${M.SCENARIOS.filter((s) => s.note).map((s) => `${s.label}: ${s.note.charAt(0).toLowerCase()}${s.note.slice(1)}.`).join(" ")} Actual-versus-projection tracking is planned for later.`,
     build(body) {
       this.table = h("div");
       this.chart = h("div", { class: "chart" });
@@ -512,7 +520,7 @@ const panels = [
     },
     update({ rates }) {
       const res = M.SCENARIOS.map((s) => {
-        const sc = state.plan.scenarios[s.key];
+        const sc = M.scenarioOf(state.plan, s.key);
         return { s, m: M.computeMonth(sc, rates).total, y1: M.sumMonths(M.forecast(Array(12).fill(sc), rates)) };
       });
       const row = (label, fn, fmt = gbp, cls) => ({ cls, cells: [label, ...res.map((r) => fmt(fn(r)))] });
@@ -530,6 +538,7 @@ const panels = [
   {
     key: "assumptions",
     label: "Assumptions",
+    print: false,
     intro: "Rates for this adviser's plan, saved with the plan, so each adviser can be on different terms. The adviser's commission is with the inputs. The stored defaults are only the starting point for new plans.",
     build(body) {
       this.controls = PLAN_RATE_FIELDS.map((f) => field(f, () => state.plan.rates[f.key], (v) => { state.plan.rates[f.key] = v; }, f.label));
@@ -542,7 +551,7 @@ const panels = [
       body.append(grid, this.derived,
         h("div", { class: "adm-toolbar no-print" },
           h("button", { type: "button", class: "btn btn-green", text: "Save these rates as defaults for new plans", onclick: () => saveDefaultRates() }),
-          h("button", { type: "button", class: "btn btn-ghost", text: "Use this scenario as starting inputs", onclick: () => saveTemplate() }),
+          h("button", { type: "button", class: "btn btn-ghost", text: "Use Base inputs as starting inputs", onclick: () => saveTemplate() }),
           h("button", { type: "button", class: "btn btn-ghost", text: "Reset this plan's rates to defaults", onclick: () => resetRates() })),
         this.saved);
     },
@@ -557,6 +566,7 @@ const panels = [
   {
     key: "formulas",
     label: "How it's calculated",
+    print: false,
     intro: "Each step with this scenario's numbers.",
     build(body) {
       this.toggle = h("div", { class: "seg no-print", role: "tablist", "aria-label": "Case type" },
@@ -600,7 +610,7 @@ function buildPanels() {
   for (const p of panels) {
     p.btn = h("button", { type: "button", text: p.label, onclick: () => { state.panel = p.key; showPanel(); } });
     nav.append(p.btn);
-    p.section = h("section", { class: "card panel", "aria-label": p.label });
+    p.section = h("section", { class: "card panel", "aria-label": p.label, "data-print": p.print === false ? "no" : null });
     p.body = h("div");
     p.section.append(h("h2", { class: "panel-title" }, h("span", { class: "panel-icon" }, icon(PANEL_ICONS[p.key] || "chart")), p.label),
       ...(p.intro ? [h("p", { text: p.intro })] : []), p.body);
@@ -666,9 +676,6 @@ function setPlan(plan, id) {
 function normalisePlan(record) {
   const clean = M.cleanPlan(record);
   if (!clean.rates) clean.rates = clone(state.defaultRates);
-  if (clean.kind === "adviser") {
-    for (const s of M.SCENARIOS) if (!record.scenarios || !record.scenarios[s.key]) clean.scenarios[s.key] = clone(clean.scenarios.base);
-  }
   return clean;
 }
 
@@ -845,7 +852,7 @@ async function putAssumptions(body, message) {
 const saveDefaultRates = () => putAssumptions({ rates: M.cleanRates(state.plan.rates) }, "These rates are now the defaults for new plans. Existing plans keep their own.");
 const saveTemplate = () => (state.mode === "introducer"
   ? putAssumptions({ introducerTemplate: M.cleanIntroInputs(state.plan.inputs) }, "Starting inputs saved for new introducer plans.")
-  : putAssumptions({ adviserTemplate: M.cleanScenario(currentScenario()) }, "Starting inputs saved for new adviser plans."));
+  : putAssumptions({ adviserTemplate: M.cleanScenario(state.plan.scenarios.base) }, "Starting inputs saved for new adviser plans."));
 
 function resetRates() {
   state.plan.rates = clone(state.defaultRates);
@@ -910,7 +917,7 @@ function exportCsv() {
   rows.push([], ["Three-year forecast", "Written", "Completions paid", "Adviser"]);
   for (const y of three.years) rows.push([`Year ${y.year}`, y.written, y.completions, y.adviser]);
   rows.push([], ["Scenario comparison (steady year)", "Adviser"]);
-  for (const s of M.SCENARIOS) rows.push([s.label, M.computeMonth(state.plan.scenarios[s.key], rates).total.adviser * 12]);
+  for (const s of M.SCENARIOS) rows.push([s.label, M.computeMonth(M.scenarioOf(state.plan, s.key), rates).total.adviser * 12]);
   rows.push([], ["Inputs", "Remortgage", "Purchase"]);
   for (const f of M.CASE_FIELDS) rows.push([f.label, Number(sc.remortgage[f.key]), Number(sc.purchase[f.key])]);
   rows.push([], ["This adviser's commission", "Value"]);

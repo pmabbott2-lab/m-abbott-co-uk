@@ -25,7 +25,7 @@ const forged = [
 ].join(".");
 
 const adminPaths = [
-  "/admin", "/admin/", "/admin/index.html", "/admin/app.js", "/admin/model.js", "/admin/admin.css", "/admin/ui.js", "/admin/introducer.js",
+  "/admin", "/admin/", "/admin/index.html", "/admin/app.js", "/admin/model.js", "/admin/admin.css", "/admin/ui.js", "/admin/introducer.js", "/admin/logo-on-dark.svg",
   "/admin/owner", "/admin/owner/", "/admin/owner/index.html", "/admin/owner/owner.js", "/Admin/Owner/",
   "/api/admin/assumptions", "/api/admin/scenarios", "/api/admin/scenarios?all=1", "/api/admin/anything",
 ];

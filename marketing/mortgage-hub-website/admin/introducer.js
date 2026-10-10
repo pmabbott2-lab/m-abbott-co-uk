@@ -111,10 +111,11 @@ export function createIntroducerView({ els, field, getPlan, getStart, getYear, m
           { label: "Completed", value: r.completions, sub: `${pctTxt(plan.inputs.completionPct)} of sign-ups · procuration paid` },
           { label: "Renewals", value: r.renewals, sub: `${count(r.renewals2y)} at 2 years · ${count(r.renewals5y)} at 5 years` },
         ], count);
-        const all = [...M.INTRO_FIELDS.map((f) => [f.label, fmtField(f, plan.inputs[f.key])]),
-          [NET_PROC.label, pctTxt(Math.round(netProc(plan.rates) * 10000) / 10000)],
-          ...COMMISSION.map((f) => [f.label, pctTxt(plan.rates[f.key])])];
-        this.inputs.replaceChildren(tableEl(["Input", "Value"], all.map((cells) => ({ cells }))));
+        this.inputs.replaceChildren(tableEl(["Input", "Value"], [
+          ...M.INTRO_FIELDS.map((f) => ({ cells: [f.label, fmtField(f, plan.inputs[f.key])] })),
+          { cls: "no-print", cells: [NET_PROC.label, pctTxt(Math.round(netProc(plan.rates) * 10000) / 10000)] },
+          ...COMMISSION.map((f) => ({ cells: [f.label, pctTxt(plan.rates[f.key])] })),
+        ]));
       },
     },
     {
@@ -179,6 +180,7 @@ export function createIntroducerView({ els, field, getPlan, getStart, getYear, m
     {
       key: "assumptions",
       label: "Assumptions",
+      print: false,
       icon: "list",
       intro: "The net procuration fee for this plan, saved with it. The introducer's commission is with the inputs.",
       build(body) {
@@ -202,6 +204,7 @@ export function createIntroducerView({ els, field, getPlan, getStart, getYear, m
     {
       key: "formulas",
       label: "How it's calculated",
+      print: false,
       icon: "doc",
       intro: "Each step with this plan's numbers.",
       update({ r, plan }) {
@@ -228,7 +231,7 @@ export function createIntroducerView({ els, field, getPlan, getStart, getYear, m
     for (const p of panels) {
       p.btn = h("button", { type: "button", text: p.label, onclick: () => { panelKey = p.key; showPanel(); } });
       els.nav.append(p.btn);
-      p.section = h("section", { class: "card panel", "aria-label": p.label });
+      p.section = h("section", { class: "card panel", "aria-label": p.label, "data-print": p.print === false ? "no" : null });
       p.body = h("div");
       p.section.append(h("h2", { class: "panel-title" }, h("span", { class: "panel-icon" }, icon(p.icon || "chart")), p.label),
         ...(p.intro ? [h("p", { text: p.intro })] : []), p.body);
@@ -289,7 +292,6 @@ export function createIntroducerView({ els, field, getPlan, getStart, getYear, m
       for (const y of years) rows.push([`Year ${y.year}`, y.signUps, y.completions, y.renewals, y.introducer, y.renewalIntroducer]);
       rows.push([], ["Inputs", "Value"]);
       for (const f of M.INTRO_FIELDS) rows.push([f.label, Number(plan.inputs[f.key])]);
-      rows.push([NET_PROC.label, netProc(plan.rates)]);
       for (const f of COMMISSION) rows.push([f.label, Number(plan.rates[f.key])]);
       return rows;
     },
