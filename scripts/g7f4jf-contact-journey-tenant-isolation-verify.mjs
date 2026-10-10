@@ -9,9 +9,9 @@
  * (Referer = verified /$tenantSlug route) through AsyncLocalStorage, so concurrent calls keep
  * separate tenant contexts. SMS is replaced by an in-process recorder; no message is ever sent.
  *
- * Negative controls load in-memory mutants (the pre-fix handlers from HEAD, and the fixed handlers
- * with one protection removed) and show the unsafe effect happening and the matching test
- * predicate rejecting it.
+ * Negative controls load in-memory mutants (the pre-fix handlers from the vulnerable baseline
+ * commit, and the fixed handlers with one protection removed) and show the unsafe effect happening
+ * and the matching test predicate rejecting it.
  *
  * Synthetic fixtures only (Tenant 001 and Tenant 002): no database, no network, no staging, no
  * production, no phone numbers.
@@ -48,6 +48,24 @@ const TA_REL = "src/lib/tenant-assert.server.ts";
 const read = (rel) => readFileSync(resolve(root, rel), "utf8");
 const atHead = (rel) =>
   execFileSync("git", ["show", `HEAD:${rel}`], { cwd: root, encoding: "utf8", maxBuffer: 1 << 26 });
+// Pre-fix negative controls run the handlers of the last commit before this gate's fix; HEAD
+// carries the fixed handlers from 7731008a on.
+const VULNERABLE_BASELINE = "0e077078f215518c193b87d31ce483146bbd107a";
+function atVulnerableBaseline(rel) {
+  const git = (args) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 1 << 26, stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    if (git(["rev-parse", "--verify", "--quiet", `${VULNERABLE_BASELINE}^{commit}`]).trim() !== VULNERABLE_BASELINE) {
+      throw new Error("revision does not resolve to itself");
+    }
+    git(["merge-base", "--is-ancestor", VULNERABLE_BASELINE, "HEAD"]);
+    return git(["show", `${VULNERABLE_BASELINE}:${rel}`]);
+  } catch (e) {
+    console.error(`FAIL  vulnerable baseline ${VULNERABLE_BASELINE} unavailable for ${rel} (missing, or not an ancestor of HEAD): ${e.message}`);
+    console.log("RESULT=FAIL");
+    process.exit(1);
+  }
+}
 
 const failures = [];
 let total = 0;
@@ -982,14 +1000,25 @@ const EFFECTS = [
 // Negative controls
 // =================================================================================================
 const FOUR = ["getContactTracking", "markContacted", "setNextContact", "getCustomerJourney"];
+const vulnerable = topLevelBlocks(atVulnerableBaseline(SESSIONS_REL));
+for (const name of FOUR) {
+  const b = vulnerable.blocks.get(name);
+  if (!b || !block(name) || b === block(name)) {
+    console.error(
+      `FAIL  vulnerable baseline ${VULNERABLE_BASELINE}: ${name} ${!b ? "is missing" : !block(name) ? "is missing from the working tree" : "is identical to the fixed handler"}`,
+    );
+    console.log("RESULT=FAIL");
+    process.exit(1);
+  }
+}
 const preFix = await loadMutant(
   SESSIONS_MARK,
-  FOUR.reduce((s, name) => s.replace(block(name), head.blocks.get(name)), SESSIONS_SRC),
+  FOUR.reduce((s, name) => s.replace(block(name), vulnerable.blocks.get(name)), SESSIONS_SRC),
 );
 {
   resetDb();
   const r = await ops.tracking(preFix, S.a1, A.advB);
-  nc("NC01 pre-fix getContactTracking (HEAD) → tenant 002's Adviser reads tenant 001's last/next contact (vulnerability confirmed); JF-08 rejects", {
+  nc("NC01 pre-fix getContactTracking (0e077078) → tenant 002's Adviser reads tenant 001's last/next contact (vulnerability confirmed); JF-08 rejects", {
     effect: r.ok && r.value.lastContactedAt === TRACK.a1.last && r.value.nextContactAt === TRACK.a1.next,
     caught: !(r.ok === false && r.message === NOT_FOUND),
     detail: fmt(r),
@@ -999,7 +1028,7 @@ const preFix = await loadMutant(
   resetDb();
   const r = await ops.mark(preFix, S.a1, A.advB);
   const t = touches([S.a1]);
-  nc("NC02 pre-fix markContacted (HEAD) → tenant 002's Adviser stamps tenant 001's case, writes its contact log and clears its attention flag (vulnerability confirmed); JF-08 rejects", {
+  nc("NC02 pre-fix markContacted (0e077078) → tenant 002's Adviser stamps tenant 001's case, writes its contact log and clears its attention flag (vulnerability confirmed); JF-08 rejects", {
     effect: r.ok && t.attention >= 1 && t.log === 1,
     caught: !(r.ok === false && r.message === NOT_FOUND && zero(t)),
     detail: `${fmt(r)} ${JSON.stringify(t)}`,
@@ -1009,7 +1038,7 @@ const preFix = await loadMutant(
   resetDb();
   const r = await ops.next(preFix, S.a1, A.ownerB);
   const t = touches([S.a1]);
-  nc("NC03 pre-fix setNextContact (HEAD) → tenant 002's Owner sets tenant 001's next contact, creates a task on its case and writes its contact log (vulnerability confirmed); JF-06 rejects", {
+  nc("NC03 pre-fix setNextContact (0e077078) → tenant 002's Owner sets tenant 001's next contact, creates a task on its case and writes its contact log (vulnerability confirmed); JF-06 rejects", {
     effect: r.ok && t.tasks === 1 && t.log === 1 && openNext(S.a1).length === 1,
     caught: !(r.ok === false && r.message === NOT_FOUND && zero(t)),
     detail: `${fmt(r)} ${JSON.stringify(t)}`,
@@ -1019,7 +1048,7 @@ const preFix = await loadMutant(
   resetDb();
   const r = await ops.journey(preFix, S.a1, A.ownerB);
   const w = welcomeTasks(S.a1);
-  nc("NC04 pre-fix getCustomerJourney (HEAD) → tenant 002's Owner reads tenant 001's milestones and staff tasks and creates a tenantless welcome task on its case (vulnerability confirmed); JF-06 rejects", {
+  nc("NC04 pre-fix getCustomerJourney (0e077078) → tenant 002's Owner reads tenant 001's milestones and staff tasks and creates a tenantless welcome task on its case (vulnerability confirmed); JF-06 rejects", {
     effect: r.ok && r.value.milestones.some((m) => m.completedAt) && w.length === 1 && w[0].tenant_id == null,
     caught: !(r.ok === false && r.message === NOT_FOUND),
     detail: `${fmt(r)} welcome=${w.length}`,

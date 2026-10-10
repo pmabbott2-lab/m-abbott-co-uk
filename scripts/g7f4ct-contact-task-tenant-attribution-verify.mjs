@@ -9,8 +9,9 @@
  * unchanged from the working tree. The real staff-contact-task, session and tenant-assert server
  * code runs unmodified through a fake PostgREST layer on a non-routable host.
  *
- * Negative controls remove one protection each (the HEAD handler, a handler mutant or a migration
- * mutant) and show the unsafe effect happening and the matching test predicate rejecting it.
+ * Negative controls remove one protection each (the pre-fix handler from the vulnerable baseline
+ * commit, a handler mutant or a migration mutant) and show the unsafe effect happening and the
+ * matching test predicate rejecting it.
  *
  * Synthetic fixtures only: no network, no staging, no production, no real user, phone or token.
  *
@@ -77,6 +78,22 @@ const PAGE_REL = "src/routes/_authenticated/sessions.$sessionId.tsx";
 const B4B2_VERIFIER_REL = "scripts/g7f4s4c4b4b2-financial-posting-verify.mjs";
 const atHead = (rel) =>
   execFileSync("git", ["show", `HEAD:${rel}`], { cwd: root, encoding: "utf8", maxBuffer: 1 << 26 });
+// Pre-fix negative controls run the handler of the last commit before this gate's fix; HEAD
+// carries the fixed handler from 7731008a on.
+const VULNERABLE_BASELINE = "0e077078f215518c193b87d31ce483146bbd107a";
+function atVulnerableBaseline(rel) {
+  const git = (args) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 1 << 26, stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    if (git(["rev-parse", "--verify", "--quiet", `${VULNERABLE_BASELINE}^{commit}`]).trim() !== VULNERABLE_BASELINE) {
+      throw new Error("revision does not resolve to itself");
+    }
+    git(["merge-base", "--is-ancestor", VULNERABLE_BASELINE, "HEAD"]);
+    return git(["show", `${VULNERABLE_BASELINE}:${rel}`]);
+  } catch (e) {
+    throw new Error(`vulnerable baseline ${VULNERABLE_BASELINE} unavailable for ${rel} (missing, or not an ancestor of HEAD): ${e.message}`);
+  }
+}
 const ctSql = read(CT_REL);
 
 const BASE_SCHEMA = (() => {
@@ -1218,12 +1235,18 @@ try {
   // =============================================================================================
   // Negative controls
   // =============================================================================================
-  const headMod = await tasksModule(atHead(TASKS_FN_REL));
+  const vulnerableSrc = atVulnerableBaseline(TASKS_FN_REL);
+  if (!vulnerableSrc.includes("export const completeStaffContactTask") || vulnerableSrc === TASKS_FN_SRC) {
+    throw new Error(
+      `vulnerable baseline ${VULNERABLE_BASELINE}: completeStaffContactTask ${vulnerableSrc === TASKS_FN_SRC ? "is identical to the fixed handler" : "is missing"}`,
+    );
+  }
+  const vulnerableMod = await tasksModule(vulnerableSrc);
   {
     const s = await db.newCase({ tenant: null });
     const t = await db.newTask(s);
-    const r = await tenantlessRefusal(db, headMod, t);
-    nc("NC01 HEAD completeStaffContactTask → a tenantless case's task is completed by another company's staff; CT-02 rejects", {
+    const r = await tenantlessRefusal(db, vulnerableMod, t);
+    nc("NC01 pre-fix completeStaffContactTask (0e077078) → a tenantless case's task is completed by another company's staff; CT-02 rejects", {
       effect: r.task.completed_at !== null,
       caught: !r.pass,
     });
@@ -1231,8 +1254,8 @@ try {
   {
     const s = await db.newCase({ alloc: "advA" });
     const t = await db.newTask(s);
-    const r = await unallocatedRefusal(db, headMod, t);
-    nc("NC02 HEAD completeStaffContactTask → an unallocated Adviser completes the task; CT-04 rejects", {
+    const r = await unallocatedRefusal(db, vulnerableMod, t);
+    nc("NC02 pre-fix completeStaffContactTask (0e077078) → an unallocated Adviser completes the task; CT-04 rejects", {
       effect: r.task.completed_by === U.advA2,
       caught: !r.pass,
     });

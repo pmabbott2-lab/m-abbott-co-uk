@@ -7,9 +7,9 @@
  * /$tenantSlug route) through AsyncLocalStorage, so concurrent calls keep separate tenant contexts.
  * The journey SMS is replaced by an in-process recorder; no message is ever sent.
  *
- * Negative controls load in-memory mutants (the pre-fix handlers from HEAD, and the fixed handlers
- * with one protection removed) and show the unsafe effect happening and the matching test
- * predicate rejecting it.
+ * Negative controls load in-memory mutants (the pre-fix handlers from the vulnerable baseline
+ * commit, and the fixed handlers with one protection removed) and show the unsafe effect happening
+ * and the matching test predicate rejecting it.
  *
  * Synthetic fixtures only: no database, no network, no staging, no production, no phone numbers.
  * Run: npm exec --yes --package=tsx -- tsx scripts/g7f4jm-journey-milestone-tenant-isolation-verify.mjs
@@ -45,6 +45,24 @@ const TA_REL = "src/lib/tenant-assert.server.ts";
 const read = (rel) => readFileSync(resolve(root, rel), "utf8");
 const atHead = (rel) =>
   execFileSync("git", ["show", `HEAD:${rel}`], { cwd: root, encoding: "utf8", maxBuffer: 1 << 26 });
+// Pre-fix negative controls run the handlers of the last commit before this gate's fix; HEAD
+// carries the fixed handlers from 7731008a on.
+const VULNERABLE_BASELINE = "0e077078f215518c193b87d31ce483146bbd107a";
+function atVulnerableBaseline(rel) {
+  const git = (args) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 1 << 26, stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    if (git(["rev-parse", "--verify", "--quiet", `${VULNERABLE_BASELINE}^{commit}`]).trim() !== VULNERABLE_BASELINE) {
+      throw new Error("revision does not resolve to itself");
+    }
+    git(["merge-base", "--is-ancestor", VULNERABLE_BASELINE, "HEAD"]);
+    return git(["show", `${VULNERABLE_BASELINE}:${rel}`]);
+  } catch (e) {
+    console.error(`FAIL  vulnerable baseline ${VULNERABLE_BASELINE} unavailable for ${rel} (missing, or not an ancestor of HEAD): ${e.message}`);
+    console.log("RESULT=FAIL");
+    process.exit(1);
+  }
+}
 
 const failures = [];
 let total = 0;
@@ -839,8 +857,19 @@ for (const [i, [label, actor]] of crossCases.entries()) {
 // Negative controls
 // =================================================================================================
 const preFixSrc = (() => {
+  const vulnerable = topLevelBlocks(atVulnerableBaseline(SESSIONS_REL));
   let s = SESSIONS_SRC;
-  for (const name of ["confirmJourneyMilestone", "reverseJourneyMilestone"]) s = s.replace(block(name), head.blocks.get(name));
+  for (const name of ["confirmJourneyMilestone", "reverseJourneyMilestone"]) {
+    const b = vulnerable.blocks.get(name);
+    if (!b || !block(name) || b === block(name)) {
+      console.error(
+        `FAIL  vulnerable baseline ${VULNERABLE_BASELINE}: ${name} ${!b ? "is missing" : !block(name) ? "is missing from the working tree" : "is identical to the fixed handler"}`,
+      );
+      console.log("RESULT=FAIL");
+      process.exit(1);
+    }
+    s = s.replace(block(name), b);
+  }
   return s;
 })();
 const preFix = await loadMutant(SESSIONS_MARK, preFixSrc);
@@ -850,7 +879,7 @@ const preFix = await loadMutant(SESSIONS_MARK, preFixSrc);
   const t = touches([S.a1]);
   const effect = r.ok && t.milestones === 1 && t.log === 1 && t.attention === 1 && t.sms === 1;
   const caught = !(r.ok === false && r.message === NOT_FOUND && zero(t));
-  nc("NC01 pre-fix confirmJourneyMilestone (HEAD) → tenant B's Owner confirms a milestone on tenant A's case, logs it, clears its attention flag and texts tenant A's customer (vulnerability confirmed); JM-05 rejects", {
+  nc("NC01 pre-fix confirmJourneyMilestone (0e077078) → tenant B's Owner confirms a milestone on tenant A's case, logs it, clears its attention flag and texts tenant A's customer (vulnerability confirmed); JM-05 rejects", {
     effect,
     caught,
     detail: `${fmt(r)} ${JSON.stringify(t)}`,
@@ -861,7 +890,7 @@ const preFix = await loadMutant(SESSIONS_MARK, preFixSrc);
   const r = await reverse(preFix, S.a1, A.ownerB);
   const gone = !db.customer_journey_milestones.some((x) => x.session_id === S.a1 && x.milestone_key === "id_confirmed");
   const effect = r.ok && gone && touches([S.a1]).log === 1;
-  nc("NC02 pre-fix reverseJourneyMilestone (HEAD) → tenant B's Owner deletes tenant A's milestone and writes to its contact log (vulnerability confirmed); JM-05 rejects", {
+  nc("NC02 pre-fix reverseJourneyMilestone (0e077078) → tenant B's Owner deletes tenant A's milestone and writes to its contact log (vulnerability confirmed); JM-05 rejects", {
     effect,
     caught: !(r.ok === false && r.message === NOT_FOUND),
     detail: fmt(r),
@@ -871,7 +900,7 @@ const preFix = await loadMutant(SESSIONS_MARK, preFixSrc);
   resetDb();
   const advB = await confirm(preFix, S.a1, A.advB);
   const effect = advB.ok && touches([S.a1]).milestones === 1;
-  nc("NC03 pre-fix confirm (HEAD) → tenant B's Adviser confirms on tenant A's case; JM-07 rejects", {
+  nc("NC03 pre-fix confirm (0e077078) → tenant B's Adviser confirms on tenant A's case; JM-07 rejects", {
     effect,
     caught: !(advB.ok === false && advB.message === NOT_FOUND),
     detail: fmt(advB),
