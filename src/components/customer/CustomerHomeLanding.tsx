@@ -24,7 +24,8 @@ import {
   listMyReferralActivity,
   sendMyReferralLink,
 } from "@/lib/referrals.functions";
-import { rafLinkForCode, rafShareMessage } from "@/lib/referral";
+import { formatRafBonus, rafLinkForCode, rafShareMessage } from "@/lib/referral";
+import { safeFormatDistanceToNow } from "@/lib/safe-format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -464,6 +465,7 @@ function RafFooter({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
   const code = codeRow?.code;
   const rafTenantSlug = codeRow?.tenantSlug ?? null;
   const referrals = activityQ.data?.referrals ?? [];
+  const bonusPence = activityQ.data?.bonusPence ?? null;
 
   return (
     <div className="rounded-2xl border border-dashed border-amber-300/80 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-800 p-4 sm:p-5">
@@ -472,7 +474,9 @@ function RafFooter({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           <Gift className="w-5 h-5" />
         </span>
         <div className="min-w-0 flex-1">
-          <h3 className="font-semibold">Refer a friend · £75 bonus</h3>
+          <h3 className="font-semibold">
+            {bonusPence != null ? `Refer a friend · ${formatRafBonus(bonusPence)} bonus` : "Refer a friend"}
+          </h3>
           <p className="text-sm text-muted-foreground mt-0.5">
             Separate from your fact-find — share your personal link when a friend needs mortgage advice.
           </p>
@@ -526,8 +530,8 @@ function RafFooter({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
               </p>
               {referrals.slice(0, 5).map((r) => (
                 <div key={r.id} className="text-sm flex justify-between gap-2">
-                  <span className="truncate">{r.referredEmail ?? r.referredPhone ?? "Friend"}</span>
-                  <span className="text-xs text-muted-foreground shrink-0 capitalize">{r.status}</span>
+                  <span className="truncate">Friend · {safeFormatDistanceToNow(r.createdAt, { addSuffix: true })}</span>
+                  <span className="text-xs text-muted-foreground shrink-0">{r.progressLabel}</span>
                 </div>
               ))}
             </div>

@@ -178,6 +178,7 @@ export function SessionDetail() {
   const summary = (session as { summary?: string | null }).summary ?? null;
   const caseRef = (session as { case_ref?: string | null }).case_ref ?? null;
   const isCase = Boolean(caseRef);
+  const isBinned = Boolean((session as { deleted_at?: string | null }).deleted_at);
   const customerId = (session as { customer_id?: string }).customer_id ?? customer?.id;
   const customerDisplayName = customer?.full_name || customer?.email || "Customer";
   const hasAppointment = Boolean(bookingQ.data?.appointment);
@@ -337,7 +338,14 @@ export function SessionDetail() {
                   onBookingChanged={invalidateSession}
                 />
               )}
-              {!platformReadOnly && <ContactTrackingCard sessionId={sessionId} />}
+              {!platformReadOnly &&
+                (isBinned ? (
+                  <BinnedCaseNotice>
+                    Contact tracking is unavailable until the case is restored.
+                  </BinnedCaseNotice>
+                ) : (
+                  <ContactTrackingCard sessionId={sessionId} />
+                ))}
             </TabsContent>
           )}
 
@@ -357,14 +365,21 @@ export function SessionDetail() {
 
           {!platformReadOnly && (isCase || !isStaffViewer) && (
             <TabsContent value="journey" className="space-y-6 mt-4">
-              <CustomerJourneyTab
-                sessionId={sessionId}
-                isAdvisor={
-                  !platformReadOnly &&
-                  (isAdvisor || isOwner || Boolean(roleQ.data?.isMainAdmin))
-                }
-                canReverse={!platformReadOnly && canAmend(adminAccess, "journey")}
-              />
+              {isBinned && isStaffViewer ? (
+                <BinnedCaseNotice>
+                  The customer journey and internal contact tasks are unavailable until the case is
+                  restored.
+                </BinnedCaseNotice>
+              ) : (
+                <CustomerJourneyTab
+                  sessionId={sessionId}
+                  isAdvisor={
+                    !platformReadOnly &&
+                    (isAdvisor || isOwner || Boolean(roleQ.data?.isMainAdmin))
+                  }
+                  canReverse={!platformReadOnly && canAmend(adminAccess, "journey")}
+                />
+              )}
             </TabsContent>
           )}
 
@@ -933,6 +948,14 @@ function AppointmentCallbackCard({
 }
 
 // Advisor-only: "Last contacted" stamp button + editable "Next contact" field.
+function BinnedCaseNotice({ children }: { children: string }) {
+  return (
+    <p className="text-sm text-muted-foreground rounded-2xl border bg-card p-5">
+      This case is in the bin. {children}
+    </p>
+  );
+}
+
 function ContactTrackingCard({ sessionId }: { sessionId: string }) {
   const qc = useQueryClient();
   const getFn = useServerFn(getContactTracking);

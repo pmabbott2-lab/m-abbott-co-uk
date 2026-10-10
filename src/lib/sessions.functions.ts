@@ -1195,8 +1195,8 @@ export const submitSession = createServerFn({ method: "POST" })
       .update({ status: "submitted", submitted_at: new Date().toISOString() })
       .eq("id", data.sessionId);
     if (error) throw new Error(error.message);
-    // RAF: completing (submitting) a fact-find qualifies the customer's referral
-    // so the referrer's bonus becomes reviewable. Best-effort, never blocks.
+    // RAF: submitting a fact-find provisionally qualifies the customer's referral (never earns
+    // a bonus; that needs verified mortgage completion). Best-effort, never blocks.
     // B2b: the authoritative tenant is the submitted session's own tenant_id (the customer's
     // canonical tenant for this fact-find), passed explicitly. If the session is tenantless or
     // its tenant cannot be read, markReferralQualified fails closed and no referral is qualified.
@@ -1205,7 +1205,7 @@ export const submitSession = createServerFn({ method: "POST" })
       .then((m) => m.get(data.sessionId) ?? null)
       .catch(() => null);
     const { markReferralQualified } = await import("@/lib/referrals.functions");
-    await markReferralQualified(context.userId, sessionTenantId);
+    await markReferralQualified(context.userId, sessionTenantId, data.sessionId);
 
     if (!alreadySubmitted) {
       await sendInterviewCompleteSms(existing.customer_id, data.sessionId);
@@ -2741,8 +2741,17 @@ export const getContactTracking = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("advisor")) throw new Error("Forbidden");
+    const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+    await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: {
+        mutate: false,
+        allocation: "adviser_must_be_allocated",
+        allow: (v) => v.isAdvisor,
+      },
+    });
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
@@ -2790,8 +2799,17 @@ export const markContacted = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("advisor")) throw new Error("Forbidden");
+    const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+    await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: {
+        mutate: true,
+        allocation: "adviser_must_be_allocated",
+        allow: (v) => v.isAdvisor,
+      },
+    });
     const now = new Date().toISOString();
     const saved = await upsertContactTracking(data.sessionId, context.userId, {
       last_contacted_at: now,
@@ -2808,12 +2826,17 @@ export const setNextContact = createServerFn({ method: "POST" })
     z.object({ sessionId: z.string().uuid(), nextContactAt: z.string().datetime().nullable() }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
-    const adminAccess = await resolveAdminAccess(context.userId, email);
-    const roles = await getRolesForUser(context.userId);
-    const isStaff = roles.includes("advisor") || adminAccess.isAdmin;
-    if (!isStaff) throw new Error("Forbidden");
+    const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+    await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: {
+        mutate: true,
+        allocation: "adviser_must_be_allocated",
+        allow: (v) => v.isAdvisor || v.adminAccess.isAdmin,
+      },
+    });
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
@@ -3174,20 +3197,35 @@ export const getCustomerJourney = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ sessionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const roles = await getRolesForUser(context.userId);
-    const isStaff = roles.includes("advisor") || roles.includes("admin");
-
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const { data: session, error: sessErr } = await supabaseAdmin
+    // The customer's own live case shows milestones only; anyone else must be staff authorised
+    // for the case in the verified acting tenant (unknown, other-tenant, tenantless and binned
+    // cases all fail alike).
+    const { data: own, error: ownErr } = await supabaseAdmin
       .from("interview_sessions")
-      .select("customer_id")
+      .select("id")
       .eq("id", data.sessionId)
+      .eq("customer_id", context.userId)
+      .is("deleted_at", null)
       .maybeSingle();
-    if (sessErr) throw new Error(sessErr.message);
-    if (!session) throw new Error("Session not found");
-    if (!isStaff && session.customer_id !== context.userId) throw new Error("Forbidden");
+    if (ownErr) throw new Error(ownErr.message);
+    let staffTenantId: string | null = null;
+    if (!own) {
+      const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+      const { tenantId } = await authoriseTenantResource({
+        userId: context.userId,
+        kind: "session",
+        id: data.sessionId,
+        capability: {
+          mutate: false,
+          allocation: "adviser_must_be_allocated",
+          allow: (v) => v.isAdvisor || v.isMainAdmin,
+        },
+      });
+      staffTenantId = tenantId;
+    }
 
     const milestones: Array<{
       key: JourneyMilestoneKey;
@@ -3220,7 +3258,7 @@ export const getCustomerJourney = createServerFn({ method: "POST" })
       completedAt: string | null;
       overdue: boolean;
     }> = [];
-    if (isStaff) {
+    if (staffTenantId) {
       const {
         listStaffContactTasksForSession,
         ensureWelcomeCallTask,
@@ -3242,7 +3280,10 @@ export const getCustomerJourney = createServerFn({ method: "POST" })
           const dueAt = new Date(
             new Date(appt.created_at).getTime() + WELCOME_CALL_DUE_MS,
           ).toISOString();
-          await ensureWelcomeCallTask(supabaseAdmin, data.sessionId, null, { dueAt });
+          await ensureWelcomeCallTask(supabaseAdmin, data.sessionId, null, {
+            dueAt,
+            tenantId: staffTenantId,
+          });
         }
       } catch (e) {
         console.error("ensure welcome on journey load failed", e);
@@ -3273,20 +3314,22 @@ export const confirmJourneyMilestone = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const roles = await getRolesForUser(context.userId);
-    if (!roles.includes("advisor") && !roles.includes("admin")) throw new Error("Forbidden");
+    // Unknown, other-tenant, tenantless and binned sessions all fail with the same "Not found.".
+    const { authoriseTenantResource } = await import("@/lib/tenant-assert.server");
+    const { row: session } = await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: {
+        mutate: true,
+        allocation: "adviser_must_be_allocated",
+        allow: (v) => v.isAdvisor || v.isMainAdmin,
+      },
+    });
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const { data: session, error: sessErr } = await supabaseAdmin
-      .from("interview_sessions")
-      .select("customer_id")
-      .eq("id", data.sessionId)
-      .maybeSingle();
-    if (sessErr) throw new Error(sessErr.message);
-    if (!session) throw new Error("Session not found");
-
     const label = JOURNEY_MILESTONE_LABELS[data.milestoneKey];
     const now = new Date().toISOString();
 
@@ -3313,7 +3356,9 @@ export const confirmJourneyMilestone = createServerFn({ method: "POST" })
       `Journey milestone confirmed: ${label}`,
     );
     await clearSessionAttention(data.sessionId, context.userId, `journey_${data.milestoneKey}`);
-    void sendJourneyMilestoneSms(session.customer_id, data.sessionId, data.milestoneKey);
+    if (session.customer_id) {
+      void sendJourneyMilestoneSms(session.customer_id, data.sessionId, data.milestoneKey);
+    }
 
     return { ok: true, completedAt: now };
   });
@@ -3330,13 +3375,25 @@ export const reverseJourneyMilestone = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const email = (context.claims as { email?: string }).email;
-    const { resolveAdminAccess } = await import("@/lib/admin.functions");
+    const { authoriseTenantResource, RESOURCE_FORBIDDEN_MESSAGE } = await import(
+      "@/lib/tenant-assert.server"
+    );
     const { canReverseJourney } = await import("@/lib/admin-access");
-    const access = await resolveAdminAccess(context.userId, email);
-    if (!canReverseJourney(access)) {
-      throw new Error("Only an admin can reverse journey milestones.");
-    }
+    await authoriseTenantResource({
+      userId: context.userId,
+      kind: "session",
+      id: data.sessionId,
+      capability: {
+        mutate: true,
+        allocation: "none",
+        allow: (v) => canReverseJourney(v.adminAccess),
+      },
+    }).catch((e: unknown) => {
+      if (e instanceof Error && e.message === RESOURCE_FORBIDDEN_MESSAGE) {
+        throw new Error("Only an admin can reverse journey milestones.");
+      }
+      throw e;
+    });
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"

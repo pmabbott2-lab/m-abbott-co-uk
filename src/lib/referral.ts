@@ -145,6 +145,11 @@ export function rafLinkForCode(
   return tryBuildCanonicalRafUrl(tenantSlug, code, publicOrigin(origin));
 }
 
+/** A configured RAF bonus in pence as pounds, e.g. 7500 → "£75", 7550 → "£75.50". */
+export function formatRafBonus(pence: number): string {
+  return `£${(pence / 100).toFixed(pence % 100 === 0 ? 0 : 2)}`;
+}
+
 /** Short OG / meta description for a RAF landing page. */
 export function rafShareDescription(referrerName: string | null): string {
   if (referrerName?.trim()) {

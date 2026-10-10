@@ -4,7 +4,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { listMySessions, createSession, getMyRole, listMyCases } from "@/lib/sessions.functions";
 import { claimReferral, listMyReferralActivity, ensureMyReferralLink, sendMyReferralLink, getPublicShareBaseUrl } from "@/lib/referrals.functions";
-import { getRafCode, clearRafCookie, rafLinkForCode, rafShareMessage } from "@/lib/referral";
+import { getRafCode, clearRafCookie, formatRafBonus, rafLinkForCode, rafShareMessage } from "@/lib/referral";
+import { safeFormatDistanceToNow } from "@/lib/safe-format";
 import { useTenantUi } from "@/lib/tenant-ui";
 import { clearPostAuthStart, resolvePostAuthStart } from "@/lib/post-auth-journey";
 import { resolveAuthenticatedHomeRedirect } from "@/lib/post-auth-destination";
@@ -496,13 +497,18 @@ function CustomerRafSelfServeCard({
   const code = codeRow?.code;
   const rafTenantSlug = codeRow?.tenantSlug ?? null;
   const referrals = activityQ.data?.referrals ?? [];
+  const bonusPence = activityQ.data?.bonusPence ?? null;
 
   return (
     <>
       <OptionTile
         icon={<Gift className="w-4 h-4" />}
         title="Refer a friend"
-        subtitle="Share your link · £75 bonus"
+        subtitle={
+          bonusPence != null
+            ? `Share your link · ${formatRafBonus(bonusPence)} bonus`
+            : "Share your link"
+        }
         onClick={onToggle}
         active={expanded}
       />
@@ -547,8 +553,8 @@ function CustomerRafSelfServeCard({
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Your referrals</p>
               {referrals.slice(0, 5).map((r) => (
                 <div key={r.id} className="text-sm flex justify-between gap-2">
-                  <span className="truncate">{r.referredEmail ?? r.referredPhone ?? "Friend"}</span>
-                  <span className="text-xs text-muted-foreground shrink-0 capitalize">{r.status}</span>
+                  <span className="truncate">Friend · {safeFormatDistanceToNow(r.createdAt, { addSuffix: true })}</span>
+                  <span className="text-xs text-muted-foreground shrink-0">{r.progressLabel}</span>
                 </div>
               ))}
             </div>
@@ -631,9 +637,11 @@ export function Home() {
   const brokerJourneyStarted = useRef(false);
 
   // RAF attribution: if a friend arrived via /raf/<code> a 'raf_ref' cookie is
-  // set. On their first authenticated load we record the referral crediting the
-  // referrer, then clear the cookie so it only fires once. Self-referral and
-  // duplicate guards live server-side; failures are silent for the customer.
+  // set. On an authenticated load we record the referral crediting the referrer.
+  // The cookie is cleared once the claim is settled (recorded, already recorded,
+  // invalid or self-referral); a claim that could not be judged yet (no resolved
+  // tenant, RAF not ready, network or server error) keeps it for a later load.
+  // Self-referral and duplicate guards live server-side; failures are silent.
   const claimReferralFn = useServerFn(claimReferral);
   useEffect(() => {
     const code = getRafCode();
@@ -641,11 +649,12 @@ export function Home() {
     let cancelled = false;
     (async () => {
       try {
-        await claimReferralFn({ data: { code } });
+        const result = await claimReferralFn({ data: { code } });
+        if (!cancelled && (result.ok || result.reason === "invalid" || result.reason === "self")) {
+          clearRafCookie();
+        }
       } catch {
         // Non-fatal — never block the customer's dashboard on attribution.
-      } finally {
-        if (!cancelled) clearRafCookie();
       }
     })();
     return () => {

@@ -6,6 +6,7 @@ import { rafShareMessage } from "@/lib/referral";
 import { normalisePublicTenantSlug } from "@/lib/tenant-presentation";
 import { canAmend, canView } from "@/lib/admin-access";
 import type { ResourceCapability } from "@/lib/tenant-assert.server";
+import type { TenantRoleView } from "@/lib/tenant-role";
 
 // ============================================================================
 // Refer a friend (RAF) — ADMIN-DRIVEN.
@@ -15,8 +16,17 @@ import type { ResourceCapability } from "@/lib/tenant-assert.server";
 // referrer shares /raf/<code> with their friends. A friend landing via that
 // link gets a 'raf_ref' cookie (kept SEPARATE from introducer attribution);
 // on the friend's first authenticated /home load the referral is recorded
-// crediting the referrer (claimReferral). The bonus is TRACKED ONLY — the admin
-// advances bonus_status from the dashboard. There is NO customer self-serve.
+// crediting the referrer (claimReferral). The bonus is TRACKED ONLY — no RAF
+// ledger accrual exists.
+//
+// B4c-1 lifecycle (referrals.bonus_status): none (referral recorded) → provisional
+// (the friend submitted a fact-find while the programme is enabled and a bonus is
+// configured) → completion_verified → earned → payment_approved → paid, or
+// rejected / cancelled. A bonus is earned only upon verified completion of the
+// referred customer's mortgage; until the completion record exists (B4c-2) no
+// referral can reach completion_verified or later. eligible is a legacy value,
+// kept as recorded. Every change goes through a database RPC that records an
+// append-only transition and an audit row.
 // ============================================================================
 
 // RAF codes: 8-char, URL-safe, unambiguous alphabet (no I/O/0/1) so they read
@@ -129,16 +139,55 @@ function rafAmendCapability(): ResourceCapability {
   };
 }
 
-function rafBonusAmendCapability(): ResourceCapability {
-  return {
-    mutate: true,
-    allocation: "none",
-    allow: (v) =>
-      canAmend(v.adminAccess, "finance_raf") ||
-      v.adminAccess.isOwner ||
-      v.adminAccess.isSupervisor ||
-      v.isMainAdmin,
-  };
+const RAF_DECISION_FORBIDDEN_MESSAGE =
+  "Only an Owner or Supervisor of this company can make Refer a Friend bonus decisions.";
+const RAF_PLATFORM_DECISION_MESSAGE =
+  "Refer a Friend bonus decisions are made by the company's own Owner or Supervisor. Platform access cannot make them.";
+
+/** Bonus decisions: an Owner or Supervisor by active membership of the acting tenant. */
+function assertRafDecisionMaker(view: TenantRoleView): void {
+  if (view.accessContext === "platform_access") throw new Error(RAF_PLATFORM_DECISION_MESSAGE);
+  if (!view.member || !(view.isOwner || view.isSupervisor)) {
+    throw new Error(RAF_DECISION_FORBIDDEN_MESSAGE);
+  }
+}
+
+/** Customer-facing progress for a referral's bonus status. */
+function referralProgressLabel(bonusStatus: string | null | undefined): string {
+  switch (bonusStatus) {
+    case "provisional":
+    case "eligible":
+      return "Fact-find submitted";
+    case "completion_verified":
+    case "earned":
+      return "Bonus earned";
+    case "payment_approved":
+      return "Bonus approved";
+    case "paid":
+      return "Bonus paid";
+    case "rejected":
+      return "Not eligible";
+    case "cancelled":
+      return "Cancelled";
+    default:
+      return "Signed up";
+  }
+}
+
+/** The tenant's Refer a Friend programme: feature enabled and the configured bonus (if any). */
+async function rafProgrammeForTenant(
+  tenantId: string,
+): Promise<{ enabled: boolean; bonusPence: number | null }> {
+  const { supabaseAdminUntyped: supabaseAdmin } = await import(
+    "@/integrations/supabase/client.server"
+  );
+  const { isTenantFeatureEnabled } = await import("@/lib/tenant-features.server");
+  const { getRafBonusPence } = await import("@/lib/finance.functions");
+  const [enabled, configured] = await Promise.all([
+    isTenantFeatureEnabled(tenantId, "refer_a_friend"),
+    getRafBonusPence(supabaseAdmin, tenantId),
+  ]);
+  return { enabled, bonusPence: configured != null && configured > 0 ? configured : null };
 }
 
 /** People related to a tenant: active members (any role) and customers of its sessions. */
@@ -389,9 +438,10 @@ export const claimReferral = createServerFn({ method: "POST" })
     try {
       ({ tenantId } = await resolveActingTenant(context.userId));
     } catch {
-      // No verified single acting tenant (0 / 2+ memberships, no verified slug): discard the
-      // referral context and let the customer's legitimate journey continue.
-      return { ok: false, reason: "invalid" as const };
+      // No verified single acting tenant (0 / 2+ memberships, no verified slug): record nothing
+      // and let the customer's legitimate journey continue. The code itself was not judged, so
+      // the caller keeps it for a later attempt.
+      return { ok: false, reason: "tenant_unresolved" as const };
     }
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
@@ -446,18 +496,22 @@ export const claimReferral = createServerFn({ method: "POST" })
     if (insErr) {
       // 23505 = the unique guard fired in a race → treat as already recorded.
       if (insErr.code === "23505") return { ok: true, reason: "already" as const };
+      // The database refuses a claim whose code is no longer active or no longer matches.
+      if ((insErr.message ?? "").includes("raf_referral_invalid")) {
+        return { ok: false, reason: "invalid" as const };
+      }
       if (isMissingTableError(insErr)) return { ok: false, reason: "not_ready" as const };
       throw new Error(insErr.message);
     }
     return { ok: true, reason: "recorded" as const };
   });
 
-// Advance the referral for a friend to 'qualified' once they complete a
-// fact-find or book. Called from submitSession. Best-effort: swallows missing
-// table errors and never throws into the caller's happy path.
+// A friend's submitted fact-find provisionally qualifies their referral. Called from
+// submitSession. Best-effort: never throws into the caller's happy path.
 export async function markReferralQualified(
   referredUserId: string,
   tenantId: string | null,
+  sessionId: string,
 ): Promise<void> {
   // B2b: RAF qualification is tenant-scoped. The authoritative tenant is the submitted interview
   // session's tenant (passed by submitSession) — never derived from the referral, cookie, email,
@@ -468,26 +522,17 @@ export async function markReferralQualified(
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-    const { error } = await supabaseAdmin
-      .from("referrals")
-      .update({
-        status: "qualified",
-        bonus_status: "eligible",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("referred_user_id", referredUserId)
-      .eq("tenant_id", tenantId)
-      .in("status", ["pending", "signed_up"]);
+    // B4c-1: provisional only, and only from this customer's own submitted session in that tenant
+    // while Refer a Friend is enabled and a bonus is configured. A fact-find never earns a bonus
+    // and creates no financial record (RAF ledger accrual stays deferred).
+    const { error } = await supabaseAdmin.rpc("record_referral_provisional_qualification", {
+      p_tenant_id: tenantId,
+      p_customer_user_id: referredUserId,
+      p_session_id: sessionId,
+    });
     if (error && !isMissingTableError(error)) {
       console.error("markReferralQualified failed", error);
-      return;
     }
-    // B2b TEMPORARY FINANCIAL GUARD — RAF financial posting is deliberately DEFERRED to
-    // G7F-4S4C4-B4. B2a made new referrals tenant-stamped, which would otherwise make this
-    // qualification path create finance_ledger commission rows (ensureRafCommissionLedgerEntry
-    // only skips tenantless referrals). Until B4 designs RAF commission semantics, qualification
-    // changes lifecycle/status ONLY and must create no financial record. Do NOT re-introduce the
-    // ensureRafCommissionLedgerEntry call here.
   } catch (e) {
     console.error("markReferralQualified threw", e);
   }
@@ -517,6 +562,12 @@ export const createReferralLink = createServerFn({ method: "POST" })
       context.userId,
       rafAmendCapability(),
     );
+    // Referral codes attribute future bonuses, so they are minted by the company's own staff.
+    if (!view.member) {
+      throw new Error(
+        "Referral links are created by the company's own staff. Platform access cannot create them.",
+      );
+    }
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
@@ -557,6 +608,9 @@ export const createReferralLink = createServerFn({ method: "POST" })
       .select("id, code, referrer_user_id, referrer_name, referrer_phone, active, created_at, tenant_id")
       .single();
     if (error) {
+      if (/raf_referral_code_(forbidden|invalid)/.test(error.message ?? "")) {
+        throw new Error("You cannot create a referral link for this referrer in this company.");
+      }
       if (isMissingTableError(error)) {
         throw new Error("Run the Refer-a-friend migration (APPLY_NEW_FEATURES.sql) first.");
       }
@@ -833,11 +887,62 @@ export const listAllReferrals = createServerFn({ method: "GET" })
       }
     }
 
+    // Several referrers may have claimed the same customer: every claim stays recorded, and only
+    // one of them may progress to a financial state.
+    const claimsByCustomer = new Map<string, number>();
+    for (const r of refs) {
+      if (r.referred_user_id) {
+        claimsByCustomer.set(r.referred_user_id, (claimsByCustomer.get(r.referred_user_id) ?? 0) + 1);
+      }
+    }
+
+    const lastTransition = new Map<
+      string,
+      { toStatus: string; reason: string | null; actorRole: string; recordedAt: string }
+    >();
+    if (refs.length > 0) {
+      const { selectInChunks } = await import("@/lib/tenant-assert.server");
+      const transitions = await selectInChunks(
+        refs.map((r) => r.id),
+        async (chunk) => {
+          const { data: part, error: tErr } = await supabaseAdmin
+            .from("referral_bonus_transitions")
+            .select("referral_id, to_status, reason, actor_role, recorded_at")
+            .eq("tenant_id", tenantId)
+            .in("referral_id", chunk);
+          if (tErr) {
+            if (isMissingTableError(tErr)) return [];
+            throw new Error(tErr.message);
+          }
+          return (part ?? []) as Array<{
+            referral_id: string;
+            to_status: string;
+            reason: string | null;
+            actor_role: string;
+            recorded_at: string;
+          }>;
+        },
+      );
+      for (const t of transitions) {
+        const seen = lastTransition.get(t.referral_id);
+        if (!seen || seen.recordedAt < t.recorded_at) {
+          lastTransition.set(t.referral_id, {
+            toStatus: t.to_status,
+            reason: t.reason,
+            actorRole: t.actor_role,
+            recordedAt: t.recorded_at,
+          });
+        }
+      }
+    }
+
     return (refs ?? []).map((r) => {
       const refProfile = r.referrer_user_id ? profileMap.get(r.referrer_user_id) : null;
       const friendProfile = r.referred_user_id ? profileMap.get(r.referred_user_id) : null;
       return {
         ...r,
+        competingClaims: r.referred_user_id ? (claimsByCustomer.get(r.referred_user_id) ?? 1) - 1 : 0,
+        lastTransition: lastTransition.get(r.id) ?? null,
         referrerName:
           refProfile?.full_name ||
           refProfile?.email ||
@@ -852,32 +957,61 @@ export const listAllReferrals = createServerFn({ method: "GET" })
   });
 
 // ---------------------------------------------------------------------------
-// ADMIN: update a referral's bonus_status (and optionally its status / notes).
-// Outcomes: "applied" (this request changed the row), "already_applied" (every requested value
-// was already stored; nothing written); a stale request or a refused change throws.
+// ADMIN: Refer a Friend programme settings for the acting tenant (display only).
 // ---------------------------------------------------------------------------
-type ReferralBonusRow = {
-  id: string;
-  tenant_id: string | null;
-  referral_code_id: string | null;
-  bonus_status: string | null;
-  status: string | null;
-  notes: string | null;
-};
+export const getRafProgrammeSettings = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { resolveActingTenantForList } = await import("@/lib/tenant-assert.server");
+    const { tenantId } = await resolveActingTenantForList(context.userId, rafViewCapability());
+    return rafProgrammeForTenant(tenantId);
+  });
 
+// ---------------------------------------------------------------------------
+// ADMIN: Owner/Supervisor bonus decision on one referral. The database RPC is the authority: it
+// re-checks the actor's membership role, compares-and-sets on expectedStatus, records the
+// append-only transition and the audit row atomically, and replays a repeated requestId.
+// Outcomes: "applied" (this request changed the bonus status) or "already_applied" (a replay of
+// this request, or the status already holds the requested value); anything else throws.
+// ---------------------------------------------------------------------------
 const REFERRAL_BONUS_CONFLICT_MESSAGE =
   "This referral bonus was changed by someone else. Refresh and try again.";
 
-function holdsRequestedBonusValues(
-  row: ReferralBonusRow,
-  patch: { bonus_status?: string; status?: string; notes?: string | null },
-): boolean {
-  return (
-    (patch.bonus_status === undefined || row.bonus_status === patch.bonus_status) &&
-    (patch.status === undefined || row.status === patch.status) &&
-    (patch.notes === undefined || (row.notes ?? null) === patch.notes)
-  );
-}
+const RAF_BONUS_STATUSES = [
+  "none",
+  "provisional",
+  "eligible",
+  "completion_verified",
+  "earned",
+  "payment_approved",
+  "paid",
+  "rejected",
+  "cancelled",
+] as const;
+
+const RAF_DECISION_ERRORS: Array<[string, string]> = [
+  ["finance_forbidden", RAF_DECISION_FORBIDDEN_MESSAGE],
+  ["raf_status_conflict", REFERRAL_BONUS_CONFLICT_MESSAGE],
+  [
+    "raf_request_conflict",
+    "This request was already used for a different change. Refresh and try again.",
+  ],
+  ["raf_bonus_terminal", "A paid or cancelled referral bonus cannot be changed."],
+  [
+    "raf_completion_record_required",
+    "A Refer a Friend bonus is earned only when the referred customer's mortgage completion has been verified. Completion verification is not available yet.",
+  ],
+  ["raf_reason_required", "A reason is required for this change."],
+  [
+    "raf_programme_not_configured",
+    "Refer a Friend is not enabled or no bonus is configured, so this referral cannot return to provisionally qualified.",
+  ],
+  [
+    "raf_competing_referral",
+    "Another referral for this customer is already progressing to a bonus.",
+  ],
+  ["raf_transition_invalid", "That bonus status change is not allowed."],
+];
 
 export const updateReferralBonusStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -885,9 +1019,10 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
     z
       .object({
         id: z.string().uuid(),
-        bonusStatus: z.enum(["none", "eligible", "paid", "rejected"]).optional(),
-        status: z.enum(["pending", "signed_up", "qualified", "rewarded"]).optional(),
-        notes: z.string().max(500).optional(),
+        bonusStatus: z.enum(RAF_BONUS_STATUSES),
+        expectedStatus: z.enum(RAF_BONUS_STATUSES),
+        reason: z.string().max(500).optional(),
+        requestId: z.string().uuid(),
       })
       .parse(d),
   )
@@ -896,113 +1031,40 @@ export const updateReferralBonusStatus = createServerFn({ method: "POST" })
       await import("@/lib/tenant-assert.server");
     const { tenantId, view } = await resolveActingTenantForList(
       context.userId,
-      rafBonusAmendCapability(),
+      rafViewCapability(),
     );
+    assertRafDecisionMaker(view);
 
     const { supabaseAdminUntyped: supabaseAdmin } = await import(
       "@/integrations/supabase/client.server"
     );
-
-    const { data: referralRow, error: loadErr } = await supabaseAdmin
-      .from("referrals")
-      .select("id, tenant_id, referral_code_id, bonus_status, status, notes")
-      .eq("id", data.id)
-      .maybeSingle();
-    if (loadErr) {
-      if (isMissingTableError(loadErr)) throw new Error("Run the Refer-a-friend migration first.");
-      throw new Error(loadErr.message);
-    }
-    const [owned] = referralRow
-      ? await scopeReferralRowsToTenant(
-          supabaseAdmin,
-          [
-            referralRow as {
-              id: string;
-              tenant_id: string | null;
-              referral_code_id: string | null;
-              bonus_status: string | null;
-              status: string | null;
-              notes: string | null;
-            },
-          ],
-          tenantId,
-        )
-      : [];
-    if (!owned) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
-
-    // RAF has no authoritative economic date until B4c, so no ledger commission is created: the
-    // referral's bonus status is the RAF record. Paid and rejected are Owner/Supervisor decisions,
-    // paid is final, and reopening a rejected bonus needs an Owner/Supervisor and a reason.
-    const current = owned.bonus_status ?? null;
-    const changing = data.bonusStatus !== undefined && data.bonusStatus !== current;
-    const payoutActor = view.adminAccess.isOwner || view.adminAccess.isSupervisor;
-    if (changing && current === "paid") {
-      throw new Error("A paid referral bonus cannot be changed.");
-    }
-    if (changing && (data.bonusStatus === "paid" || data.bonusStatus === "rejected") && !payoutActor) {
-      throw new Error("Only an Owner or Supervisor can mark a referral bonus paid or rejected.");
-    }
-    if (changing && current === "rejected") {
-      if (!payoutActor) throw new Error("Only an Owner or Supervisor can reopen a referral bonus.");
-      if (!data.notes?.trim()) {
-        throw new Error("A reason is required to reopen a rejected referral bonus.");
-      }
-    }
-    if (changing && data.bonusStatus === "eligible" && owned.tenant_id) {
-      const { getRafBonusPence, RAF_BONUS_NOT_CONFIGURED_MESSAGE } =
-        await import("@/lib/finance.functions");
-      if ((await getRafBonusPence(supabaseAdmin, tenantId)) == null) {
-        throw new Error(RAF_BONUS_NOT_CONFIGURED_MESSAGE);
-      }
-    }
-
-    const patch: {
-      updated_at: string;
-      bonus_status?: string;
-      status?: string;
-      notes?: string | null;
-    } = { updated_at: new Date().toISOString() };
-    if (data.bonusStatus) patch.bonus_status = data.bonusStatus;
-    if (data.status) patch.status = data.status;
-    if (data.notes !== undefined) patch.notes = data.notes || null;
-
-    // Only an explicit replay (every requested value already stored) succeeds without a write.
-    if (holdsRequestedBonusValues(owned, patch)) {
-      return { ok: true, outcome: "already_applied" as const };
-    }
-
-    // Legacy tenantless referrals stay tenantless; they are matched through their owned code.
-    // The update applies only while the bonus status is still the one checked above, so a bonus
-    // paid in the meantime is never overwritten.
-    const unchanged = supabaseAdmin.from("referrals").update(patch).eq("id", data.id);
-    const scopedUpdate =
-      current === null ? unchanged.is("bonus_status", null) : unchanged.eq("bonus_status", current);
-    const ownedUpdate = owned.tenant_id
-      ? scopedUpdate.eq("tenant_id", tenantId)
-      : scopedUpdate.is("tenant_id", null).eq("referral_code_id", owned.referral_code_id);
-    const { data: updated, error } = await ownedUpdate.select("id");
+    const { data: result, error } = await supabaseAdmin.rpc("set_referral_bonus_status", {
+      p_tenant_id: tenantId,
+      p_actor_user_id: context.userId,
+      p_referral_id: data.id,
+      p_expected_status: data.expectedStatus,
+      p_to_status: data.bonusStatus,
+      p_reason: data.reason?.trim() || null,
+      p_request_id: data.requestId,
+    });
     if (error) {
+      const message = error.message ?? "";
+      if (message.includes("raf_resource_not_found")) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
+      for (const [code, friendly] of RAF_DECISION_ERRORS) {
+        if (message.includes(code)) throw new Error(friendly);
+      }
       if (isMissingTableError(error)) throw new Error("Run the Refer-a-friend migration first.");
-      throw new Error(error.message);
+      throw new Error(message);
     }
-    if ((updated ?? []).length === 1) return { ok: true, outcome: "applied" as const };
-
-    // Nothing matched: the bonus changed after it was read. Success only if the concurrent change
-    // already stored exactly what was requested; otherwise this request is stale.
-    const { data: latestRow, error: reloadErr } = await supabaseAdmin
-      .from("referrals")
-      .select("id, tenant_id, referral_code_id, bonus_status, status, notes")
-      .eq("id", data.id)
-      .maybeSingle();
-    if (reloadErr) throw new Error(reloadErr.message);
-    const [latest] = latestRow
-      ? await scopeReferralRowsToTenant(supabaseAdmin, [latestRow as ReferralBonusRow], tenantId)
-      : [];
-    if (!latest) throw new Error(RESOURCE_NOT_FOUND_MESSAGE);
-    if (holdsRequestedBonusValues(latest, patch)) {
-      return { ok: true, outcome: "already_applied" as const };
+    const outcome = (result as { outcome?: string } | null)?.outcome;
+    if (outcome !== "applied" && outcome !== "already_applied") {
+      throw new Error(REFERRAL_BONUS_CONFLICT_MESSAGE);
     }
-    throw new Error(REFERRAL_BONUS_CONFLICT_MESSAGE);
+    return {
+      ok: true,
+      outcome,
+      bonusStatus: (result as { bonus_status?: string }).bonus_status ?? data.bonusStatus,
+    };
   });
 
 // ---------------------------------------------------------------------------
@@ -1024,30 +1086,29 @@ export const listMyReferralActivity = createServerFn({ method: "GET" })
       throw new Error(codeErr.message);
     }
 
+    // The referrer sees each friend's progress, never the friend's contact details.
     const codeList = (codes ?? []).map((c) => c.code);
     let referrals: Array<{
       id: string;
       code: string;
-      referredEmail: string | null;
-      referredPhone: string | null;
       status: string;
       bonusStatus: string;
+      progressLabel: string;
       createdAt: string;
     }> = [];
     if (codeList.length > 0) {
       const { data: refs, error: refErr } = await supabaseAdmin
         .from("referrals")
-        .select("id, code, referred_email, referred_phone, status, bonus_status, created_at")
+        .select("id, code, status, bonus_status, created_at")
         .in("code", codeList)
         .order("created_at", { ascending: false });
-      if (refErr && !isMissingTableError(refErr)) throw new Error(refErr.message);
+      if (refErr) throw new Error(refErr.message);
       referrals = (refs ?? []).map((r) => ({
         id: r.id,
         code: r.code,
-        referredEmail: r.referred_email ?? null,
-        referredPhone: r.referred_phone ?? null,
         status: r.status,
         bonusStatus: r.bonus_status,
+        progressLabel: referralProgressLabel(r.bonus_status),
         createdAt: r.created_at,
       }));
     }
@@ -1057,7 +1118,20 @@ export const listMyReferralActivity = createServerFn({ method: "GET" })
       (codes ?? []).map((c: { tenant_id?: string | null }) => c.tenant_id),
     );
 
+    // The bonus on offer is the acting tenant's configured amount, shown only while the programme
+    // is enabled; no default amount is ever assumed.
+    let bonusPence: number | null = null;
+    try {
+      const { resolveActingTenant } = await import("@/lib/tenant-assert.server");
+      const { tenantId } = await resolveActingTenant(context.userId);
+      const programme = await rafProgrammeForTenant(tenantId);
+      bonusPence = programme.enabled ? programme.bonusPence : null;
+    } catch {
+      bonusPence = null;
+    }
+
     return {
+      bonusPence,
       codes: (codes ?? []).map((c: { tenant_id?: string | null; id: string; code: string; active: boolean; created_at: string }) => ({
         ...c,
         tenantSlug: (c as { tenant_id?: string | null }).tenant_id

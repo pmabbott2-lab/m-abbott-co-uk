@@ -68,9 +68,10 @@ import {
   listReferralLinks,
   listAllReferrals,
   updateReferralBonusStatus,
+  getRafProgrammeSettings,
   searchCustomers,
 } from "@/lib/referrals.functions";
-import { rafLinkForCode, rafShareMessage } from "@/lib/referral";
+import { formatRafBonus, rafLinkForCode, rafShareMessage } from "@/lib/referral";
 import { ManageListControls, ManageListScroll, type ManageListSort } from "@/components/ManageListControls";
 import { ReportExportBox } from "@/components/ReportExportBox";
 import { ReportTableScroll } from "@/components/ReportTableScroll";
@@ -1237,8 +1238,9 @@ export function OwnerFinanceReport({ canSetRates = false }: { canSetRates?: bool
     <div className="rounded-2xl border bg-card p-6 space-y-2">
       <h3 className="font-semibold text-lg">Refer a Friend bonus</h3>
       <p className="text-sm text-muted-foreground">
-        Standard reward paid to referrers when a friend completes their fact-find and the bonus is
-        marked eligible or paid.
+        Reward for referrers. A friend&apos;s submitted fact-find makes a referral provisionally
+        qualified only; the bonus is earned only upon verified completion of the friend&apos;s
+        mortgage.
       </p>
       {rafBonusPounds != null ? (
         <p className="text-2xl font-semibold">£{rafBonusPounds.toFixed(0)}</p>
@@ -2191,7 +2193,9 @@ export function InviteStaffCard({
 // Refer a friend (RAF) — ADMIN panel.
 // The admin mints a referral link tied to a REFERRER (existing user or
 // name+phone), can text/copy it to the referrer, and monitors all referrals +
-// bonus statuses. Bonus is tracked-only (no payouts).
+// bonus statuses. Bonus is tracked-only (no ledger payouts). Owners and
+// Supervisors record bonus decisions; a bonus is earned only upon verified
+// completion of the referred customer's mortgage.
 // ============================================================================
 
 type ReferralLink = {
@@ -2214,10 +2218,61 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const BONUS_LABEL: Record<string, string> = {
-  none: "No bonus",
-  eligible: "Eligible",
+  none: "Referral recorded",
+  provisional: "Provisionally qualified",
+  eligible: "Eligible (legacy)",
+  completion_verified: "Completion verified",
+  earned: "Bonus earned",
+  payment_approved: "Payment approved",
   paid: "Paid",
+  rejected: "Rejected",
+  cancelled: "Cancelled",
 };
+
+type RafBonusStatus =
+  | "none"
+  | "provisional"
+  | "eligible"
+  | "completion_verified"
+  | "earned"
+  | "payment_approved"
+  | "paid"
+  | "rejected"
+  | "cancelled";
+
+type RafDecision = { to: RafBonusStatus; label: string; needsReason: boolean };
+
+/** Owner/Supervisor decisions offered from a bonus status (the database enforces the same set). */
+function rafDecisionsFor(bonusStatus: string, referralStatus: string): RafDecision[] {
+  const reject: RafDecision = { to: "rejected", label: "Reject", needsReason: true };
+  const cancel: RafDecision = { to: "cancelled", label: "Cancel", needsReason: true };
+  switch (bonusStatus) {
+    case "none":
+    case "provisional":
+    case "eligible":
+    case "completion_verified":
+      return [reject, cancel];
+    case "earned":
+      return [{ to: "payment_approved", label: "Approve payment", needsReason: false }, reject, cancel];
+    case "payment_approved":
+      return [
+        { to: "paid", label: "Mark paid", needsReason: false },
+        { to: "earned", label: "Withdraw approval", needsReason: true },
+        reject,
+        cancel,
+      ];
+    case "rejected":
+      return [
+        {
+          to: referralStatus === "qualified" || referralStatus === "rewarded" ? "provisional" : "none",
+          label: "Reopen",
+          needsReason: true,
+        },
+      ];
+    default:
+      return [];
+  }
+}
 
 type CustomerResult = {
   id: string;
@@ -2544,9 +2599,18 @@ export function RafLinksAccessCard() {
   const textFn = useServerFn(textReferralLink);
   const publicUrlFn = useServerFn(getPublicShareBaseUrl);
   const updateFn = useServerFn(updateReferralBonusStatus);
+  const programmeFn = useServerFn(getRafProgrammeSettings);
 
   const linksQ = useQuery({ queryKey: ["referral-links"], queryFn: () => linksFn() });
   const referralsQ = useQuery({ queryKey: ["all-referrals"], queryFn: () => referralsFn() });
+  const programmeQ = useQuery({ queryKey: ["raf-programme"], queryFn: () => programmeFn() });
+  const bonusPence = programmeQ.data?.bonusPence ?? null;
+  const [decisionDraft, setDecisionDraft] = useState<{
+    id: string;
+    decision: RafDecision;
+    reason: string;
+    requestId: string;
+  } | null>(null);
   const publicUrlQ = useQuery({ queryKey: ["public-share-url"], queryFn: () => publicUrlFn() });
   const shareBase = publicUrlQ.data?.baseUrl;
 
@@ -2557,9 +2621,15 @@ export function RafLinksAccessCard() {
   });
 
   const updateBonus = useMutation({
-    mutationFn: (vars: { id: string; bonusStatus: "none" | "eligible" | "paid" }) =>
-      updateFn({ data: vars }),
+    mutationFn: (vars: {
+      id: string;
+      bonusStatus: RafBonusStatus;
+      expectedStatus: RafBonusStatus;
+      reason?: string;
+      requestId: string;
+    }) => updateFn({ data: vars }),
     onSuccess: (r) => {
+      setDecisionDraft(null);
       qc.invalidateQueries({ queryKey: ["all-referrals"] });
       toast.success(
         r.outcome === "already_applied" ? "Bonus status was already set" : "Bonus status updated",
@@ -2589,7 +2659,7 @@ export function RafLinksAccessCard() {
       <div className="rounded-2xl border bg-card divide-y">
         <div className="p-4 text-xs text-muted-foreground">
           Create personal links for referrers (existing customers or external contacts). Friends
-          sign up via the link; qualified referrals appear on the Commission tab for payout.
+          sign up via the link; their referrals and bonus decisions are listed below.
         </div>
         {linksQ.isLoading && <div className="p-4 text-sm text-muted-foreground">Loading links…</div>}
         {!linksQ.isLoading && links.length === 0 && (
@@ -2625,7 +2695,7 @@ export function RafLinksAccessCard() {
               </div>
               {linkReferrals.length > 0 && (
                 <p className="text-[10px] text-muted-foreground">
-                  {linkReferrals.length} referred friend{linkReferrals.length === 1 ? "" : "s"} — see Commission tab
+                  {linkReferrals.length} referred friend{linkReferrals.length === 1 ? "" : "s"} — see All referrals below
                 </p>
               )}
             </div>
@@ -2640,8 +2710,10 @@ export function RafLinksAccessCard() {
       </h3>
       <div className="rounded-2xl border bg-card divide-y">
         <div className="p-4 text-xs text-muted-foreground">
-          Every friend credited to a referrer. Status advances automatically (signed up → qualified
-          when they complete a fact-find). Update the bonus status as you process rewards.
+          Every friend credited to a referrer. A submitted fact-find makes a referral provisionally
+          qualified only: a bonus is earned only upon verified completion of the friend's mortgage.
+          Owners and Supervisors record bonus decisions; rejecting, cancelling and reopening need a
+          reason, and a paid bonus is final.
         </div>
         {referralsQ.isLoading && (
           <div className="p-4 text-sm text-muted-foreground">Loading referrals…</div>
@@ -2674,34 +2746,104 @@ export function RafLinksAccessCard() {
                   <dd className="font-mono">{r.code}</dd>
                   <dt className="text-muted-foreground">Signed up</dt>
                   <dd>{safeFormatDistanceToNow(r.created_at, { addSuffix: true })}</dd>
-                  <dt className="text-muted-foreground">Bonus amount</dt>
-                  <dd className="font-medium">£75</dd>
+                  <dt className="text-muted-foreground">Programme bonus</dt>
+                  <dd className="font-medium">
+                    {bonusPence != null
+                      ? formatRafBonus(bonusPence)
+                      : programmeQ.isLoading
+                        ? "Loading…"
+                        : "Not configured"}
+                  </dd>
+                  {r.lastTransition?.reason && (
+                    <>
+                      <dt className="text-muted-foreground">Last decision</dt>
+                      <dd className="break-words">
+                        {BONUS_LABEL[r.lastTransition.toStatus] ?? r.lastTransition.toStatus} —{" "}
+                        {r.lastTransition.reason}
+                      </dd>
+                    </>
+                  )}
                 </dl>
+                {r.competingClaims > 0 && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400 mt-2">
+                    {r.competingClaims} other referrer{r.competingClaims === 1 ? "" : "s"} also
+                    claimed this customer. Only one referral can progress to a bonus.
+                  </p>
+                )}
               </div>
-              <div className="flex flex-col gap-2 shrink-0 min-w-[140px]">
+              <div className="flex flex-col gap-2 shrink-0 min-w-[160px]">
                 <span className="text-xs px-2 py-1 rounded-full bg-muted text-center">
                   {STATUS_LABEL[r.status] ?? r.status}
                 </span>
                 <span
-                  className={`text-xs px-2 py-1 rounded-full text-center ${r.bonus_status === "paid" ? "bg-accent/30" : r.bonus_status === "eligible" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400" : "bg-muted"}`}
+                  className={`text-xs px-2 py-1 rounded-full text-center ${r.bonus_status === "paid" ? "bg-accent/30" : r.bonus_status === "provisional" || r.bonus_status === "eligible" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400" : "bg-muted"}`}
                 >
                   {BONUS_LABEL[r.bonus_status] ?? r.bonus_status}
                 </span>
-                <select
-                  className="rounded-md border bg-background px-2 py-1.5 text-sm"
-                  value={r.bonus_status}
-                  disabled={updateBonus.isPending && updateBonus.variables?.id === r.id}
-                  onChange={(e) =>
-                    updateBonus.mutate({
-                      id: r.id,
-                      bonusStatus: e.target.value as "none" | "eligible" | "paid",
-                    })
-                  }
-                >
-                  <option value="none">No bonus</option>
-                  <option value="eligible">Eligible (£75)</option>
-                  <option value="paid">Paid (£75)</option>
-                </select>
+                {decisionDraft?.id === r.id ? (
+                  <div className="space-y-2">
+                    {decisionDraft.decision.needsReason && (
+                      <Input
+                        value={decisionDraft.reason}
+                        maxLength={500}
+                        placeholder="Reason (required)"
+                        onChange={(e) =>
+                          setDecisionDraft({ ...decisionDraft, reason: e.target.value })
+                        }
+                      />
+                    )}
+                    <div className="flex gap-1.5">
+                      <Button
+                        size="sm"
+                        className="h-8"
+                        disabled={
+                          updateBonus.isPending ||
+                          (decisionDraft.decision.needsReason && !decisionDraft.reason.trim())
+                        }
+                        onClick={() =>
+                          updateBonus.mutate({
+                            id: r.id,
+                            bonusStatus: decisionDraft.decision.to,
+                            expectedStatus: r.bonus_status as RafBonusStatus,
+                            reason: decisionDraft.reason.trim() || undefined,
+                            requestId: decisionDraft.requestId,
+                          })
+                        }
+                      >
+                        {decisionDraft.decision.label}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        disabled={updateBonus.isPending}
+                        onClick={() => setDecisionDraft(null)}
+                      >
+                        Back
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  rafDecisionsFor(r.bonus_status, r.status).map((d) => (
+                    <Button
+                      key={d.to}
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      disabled={updateBonus.isPending}
+                      onClick={() =>
+                        setDecisionDraft({
+                          id: r.id,
+                          decision: d,
+                          reason: "",
+                          requestId: crypto.randomUUID(),
+                        })
+                      }
+                    >
+                      {d.label}
+                    </Button>
+                  ))
+                )}
               </div>
             </div>
           </div>
